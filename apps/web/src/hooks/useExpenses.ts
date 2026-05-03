@@ -1,0 +1,118 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+
+export interface Expense {
+  id: string;
+  category_id?: string;
+  category_name: string;
+  description: string;
+  vendor_name?: string;
+  amount_paise: number;
+  purchase_date: string;
+  expense_date: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  approval_status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  payment_mode?: string;
+  bill_photo_s3_key?: string;
+  bill_photo_url?: string;
+  submitted_by_name?: string;
+}
+
+export interface ExpenseSummaryItem {
+  category_id?: string;
+  category_name: string;
+  total_paise: number;
+  count: number;
+  percentage: number;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  icon_name?: string;
+  is_default: boolean;
+  sort_order: number;
+}
+
+export function useExpenses(params?: {
+  property_id?: string;
+  month?: number;
+  year?: number;
+  approval_status?: 'PENDING' | 'APPROVED' | 'REJECTED';
+}) {
+  return useQuery<{ items: Expense[]; total: number }>({
+    queryKey: ['expenses', params],
+    queryFn: () => api.get('/expenses', { params }).then((r) => r.data),
+  });
+}
+
+export function useExpenseSummary(params?: {
+  property_id?: string;
+  month?: number;
+  year?: number;
+}) {
+  return useQuery<{ items: ExpenseSummaryItem[]; total_paise: number }>({
+    queryKey: ['expense-summary', params],
+    queryFn: () => api.get('/expenses/summary', { params }).then((r) => r.data),
+  });
+}
+
+/**
+ * Backend requires property_id; the hook is gated on it being present.
+ */
+export function useExpenseCategories(propertyId: string | undefined) {
+  return useQuery<{ items: ExpenseCategory[] }>({
+    queryKey: ['expense-categories', propertyId],
+    queryFn: () =>
+      api
+        .get('/expense-categories', { params: { property_id: propertyId } })
+        .then((r) => r.data),
+    enabled: !!propertyId,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useCreateExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      category_id: string;
+      description?: string;
+      vendor_name?: string;
+      amount_paise: number;
+      purchase_date: string;
+      property_id: string;
+      payment_mode?: string;
+      reference_number?: string;
+      bill_photo_s3_key?: string;
+    }) => api.post('/expenses', data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses'] });
+      qc.invalidateQueries({ queryKey: ['expense-summary'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useApproveExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      approved,
+      rejection_reason,
+    }: {
+      id: string;
+      approved: boolean;
+      rejection_reason?: string;
+    }) =>
+      api
+        .patch(`/expenses/${id}/approve`, { approved, rejection_reason })
+        .then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses'] });
+      qc.invalidateQueries({ queryKey: ['expense-summary'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}

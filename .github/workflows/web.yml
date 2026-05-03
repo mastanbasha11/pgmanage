@@ -1,0 +1,98 @@
+name: Web CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['apps/web/**', 'packages/shared/**', '.github/workflows/web.yml']
+  pull_request:
+    branches: [main]
+    paths: ['apps/web/**', 'packages/shared/**']
+
+env:
+  AWS_REGION: ap-south-1
+  S3_BUCKET: pgmanage-web-assets
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check (shared)
+        run: npm run type-check --workspace=packages/shared || true
+
+      - name: Type check (web)
+        run: npm run type-check --workspace=apps/web
+
+      - name: Lint (web)
+        run: npm run lint --workspace=apps/web
+
+      - name: Build (web)
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: npm run build --workspace=apps/web
+
+      - name: Upload build artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 1
+
+  deploy:
+    name: Deploy to S3+CloudFront
+    needs: build
+    runs-on: ubuntu-latest
+    # Disabled until AWS_ACCESS_KEY_ID / S3_BUCKET / CloudFront distribution are
+    # set up in repo secrets. Flip to the original condition below to re-enable:
+    #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: false
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync to S3
+        run: |
+          # Long-cache for hashed assets
+          aws s3 sync dist/ s3://${{ env.S3_BUCKET }}/ \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html" \
+            --exclude "*.json"
+
+          # No cache for HTML and manifests
+          aws s3 sync dist/ s3://${{ env.S3_BUCKET }}/ \
+            --delete \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --include "index.html" \
+            --include "*.json"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"

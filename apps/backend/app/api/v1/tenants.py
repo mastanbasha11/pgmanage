@@ -1,0 +1,620 @@
+"""Tenant management: check-in, list, detail, checkout, documents."""
+from __future__ import annotations
+
+import csv
+import io
+import json
+import re
+from datetime import date, datetime, timezone
+from typing import Any
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel, field_validator
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.dependencies import OrgContext, get_org_context
+from app.core.exceptions import ConflictError, NotFoundError
+from app.services.s3_service import generate_presigned_upload_url
+
+
+_PHONE_RE = re.compile(r"[^\d]")
+
+
+def _normalise_phone(raw: str) -> str | None:
+    digits = _PHONE_RE.sub("", raw or "")
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    elif digits.startswith("0") and len(digits) == 11:
+        digits = digits[1:]
+    if re.match(r"^[6-9]\d{9}$", digits):
+        return f"+91{digits}"
+    return None
+
+router = APIRouter()
+
+
+# ── Schemas ────────────────────────────────────────────────────────────────────
+
+class OtherCharge(BaseModel):
+    label: str
+    amount_paise: int
+
+
+class RentPlanCreate(BaseModel):
+    monthly_rent_paise: int
+    security_deposit_paise: int = 0
+    advance_paid_paise: int = 0
+    discount_amount_paise: int = 0
+    discount_reason: str | None = None
+    food_included: bool = False
+    food_charges_paise: int = 0
+    other_charges: list[OtherCharge] = []
+    billing_day: int = 1
+    effective_from: date
+
+
+class TenantCreate(BaseModel):
+    name: str
+    phone: str
+    email: str | None = None
+    id_type: str = "AADHAR"
+    id_number: str
+    emergency_contact_name: str
+    emergency_contact_phone: str
+    emergency_contact_relation: str
+    occupation: str | None = None
+    employer_name: str | None = None
+    hometown: str | None = None
+    permanent_address: str | None = None
+    bed_id: UUID
+    move_in_date: date
+    expected_move_out_date: date | None = None
+    notes: str | None = None
+    rent_plan: RentPlanCreate
+
+
+class CheckoutRequest(BaseModel):
+    actual_move_out_date: date
+    final_payment_amount_paise: int = 0
+    refund_amount_paise: int = 0
+    notes: str | None = None
+
+
+# ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@router.post("/tenants", status_code=status.HTTP_201_CREATED, summary="Check in tenant")
+async def checkin_tenant(
+    body: TenantCreate,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    # Verify bed is vacant
+    bed_result = await db.execute(
+        text("SELECT id, room_id, property_id, status FROM beds WHERE id = :id"),
+        {"id": str(body.bed_id)},
+    )
+    bed = bed_result.mappings().fetchone()
+    if not bed:
+        raise NotFoundError("Bed", body.bed_id)
+    if bed["status"] != "VACANT":
+        raise ConflictError(f"Bed is {bed['status']}, not available for check-in")
+
+    property_id = bed["property_id"]
+
+    # Check phone uniqueness per property
+    existing = await db.execute(
+        text("SELECT id FROM tenants WHERE phone = :phone AND property_id = :pid AND is_deleted = false"),
+        {"phone": body.phone, "pid": str(property_id)},
+    )
+    if existing.scalar_one_or_none():
+        raise ConflictError("A tenant with this phone number already exists in this property")
+
+    # Create tenant
+    tenant_result = await db.execute(
+        text("""
+            INSERT INTO tenants (
+                org_id, property_id, bed_id, name, phone, email,
+                id_type, id_number, emergency_contact_name, emergency_contact_phone,
+                emergency_contact_relation, occupation, employer_name, hometown,
+                permanent_address, move_in_date, expected_move_out_date, status,
+                notes, created_by
+            )
+            VALUES (
+                :org_id, :pid, :bed_id, :name, :phone, :email,
+                CAST(:id_type AS id_type_enum), :id_number, :ec_name, :ec_phone, :ec_rel,
+                :occupation, :employer, :hometown, :address,
+                :move_in, :move_out, 'ACTIVE'::tenant_status_enum, :notes, :creator
+            )
+            RETURNING id
+        """),
+        {
+            "org_id": str(ctx.org_id), "pid": str(property_id), "bed_id": str(body.bed_id),
+            "name": body.name, "phone": body.phone, "email": body.email,
+            "id_type": body.id_type, "id_number": body.id_number,
+            "ec_name": body.emergency_contact_name, "ec_phone": body.emergency_contact_phone,
+            "ec_rel": body.emergency_contact_relation, "occupation": body.occupation,
+            "employer": body.employer_name, "hometown": body.hometown,
+            "address": body.permanent_address, "move_in": body.move_in_date,
+            "move_out": body.expected_move_out_date, "notes": body.notes,
+            "creator": str(ctx.user_id),
+        },
+    )
+    tenant_id = tenant_result.scalar_one()
+
+    # Create rent plan
+    rp = body.rent_plan
+    other_charges_json = json.dumps([c.model_dump() for c in rp.other_charges])
+    await db.execute(
+        text("""
+            INSERT INTO rent_plans (
+                tenant_id, property_id, monthly_rent_paise, security_deposit_paise,
+                advance_paid_paise, discount_amount_paise, discount_reason,
+                food_included, food_charges_paise, other_charges_json,
+                billing_day, effective_from, is_active, created_by
+            )
+            VALUES (
+                :tenant_id, :pid, :monthly_rent, :deposit, :advance,
+                :discount, :discount_reason, :food_included, :food_charges,
+                CAST(:other_charges AS jsonb), :billing_day, :effective_from, true, :creator
+            )
+        """),
+        {
+            "tenant_id": str(tenant_id), "pid": str(property_id),
+            "monthly_rent": rp.monthly_rent_paise, "deposit": rp.security_deposit_paise,
+            "advance": rp.advance_paid_paise, "discount": rp.discount_amount_paise,
+            "discount_reason": rp.discount_reason, "food_included": rp.food_included,
+            "food_charges": rp.food_charges_paise, "other_charges": other_charges_json,
+            "billing_day": rp.billing_day, "effective_from": rp.effective_from,
+            "creator": str(ctx.user_id),
+        },
+    )
+
+    # Mark bed as occupied
+    await db.execute(
+        text("UPDATE beds SET status = 'OCCUPIED'::bed_status_enum, updated_at = NOW() WHERE id = :id"),
+        {"id": str(body.bed_id)},
+    )
+
+    # Audit log
+    await db.execute(
+        text("""
+            INSERT INTO audit_log (org_id, property_id, actor_id, actor_role, action, table_name, record_id, new_values)
+            VALUES (:org_id, :pid, :actor, :role, 'INSERT'::audit_action_enum, 'tenants', :record_id, CAST(:new_vals AS jsonb))
+        """),
+        {
+            "org_id": str(ctx.org_id), "pid": str(property_id),
+            "actor": str(ctx.user_id), "role": ctx.role,
+            "record_id": str(tenant_id),
+            "new_vals": json.dumps({"name": body.name, "phone": body.phone, "bed_id": str(body.bed_id)}),
+        },
+    )
+
+    await db.commit()
+    return {"tenant_id": str(tenant_id), "message": "Tenant checked in successfully"}
+
+
+@router.get("/tenants", summary="List tenants")
+async def list_tenants(
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+    property_id: UUID | None = Query(None),
+    status: str | None = Query(None),
+    search: str | None = Query(None),
+    upcoming_moveout: bool = Query(False),
+    limit: int = Query(50, le=200),
+    cursor: str | None = Query(None),
+):
+    conditions = ["t.org_id = :org_id", "t.is_deleted = false"]
+    params: dict[str, Any] = {"org_id": str(ctx.org_id)}
+
+    if property_id:
+        conditions.append("t.property_id = :property_id")
+        params["property_id"] = str(property_id)
+    elif ctx.role not in ("OWNER", "PARTNER") and ctx.property_ids:
+        pids = [str(p) for p in ctx.property_ids]
+        conditions.append(f"t.property_id = ANY(ARRAY{pids}::uuid[])")
+
+    if status:
+        conditions.append("t.status = CAST(:status AS tenant_status_enum)")
+        params["status"] = status
+    else:
+        conditions.append("t.status = 'ACTIVE'::tenant_status_enum")
+
+    if search:
+        conditions.append("(t.name ILIKE :search OR t.phone ILIKE :search)")
+        params["search"] = f"%{search}%"
+
+    if upcoming_moveout:
+        conditions.append("t.expected_move_out_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'")
+
+    where_clause = " AND ".join(conditions)
+    result = await db.execute(
+        text(f"""
+            SELECT t.id, t.name, t.phone, t.status, t.move_in_date, t.expected_move_out_date,
+                   b.bed_label, r.room_number, r.display_name as room_name,
+                   p.name as property_name,
+                   COALESCE(rle.amount_due_paise - rle.amount_paid_paise, 0) as outstanding_paise,
+                   COALESCE(rle.status, 'UNPAID') as rent_status
+            FROM tenants t
+            LEFT JOIN beds b ON b.id = t.bed_id
+            LEFT JOIN rooms r ON r.id = b.room_id
+            LEFT JOIN properties p ON p.id = t.property_id
+            LEFT JOIN rent_ledger_entries rle ON rle.tenant_id = t.id
+                AND rle.month = EXTRACT(MONTH FROM CURRENT_DATE)
+                AND rle.year = EXTRACT(YEAR FROM CURRENT_DATE)
+            WHERE {where_clause}
+            ORDER BY t.name
+            LIMIT :limit
+        """),
+        {**params, "limit": limit},
+    )
+    rows = result.mappings().fetchall()
+    return {"items": [dict(r) for r in rows], "total": len(rows), "next_cursor": None}
+
+
+@router.get("/tenants/{tenant_id}", summary="Tenant full profile")
+async def get_tenant(
+    tenant_id: UUID,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        text("""
+            SELECT t.*, b.bed_label, r.room_number, r.display_name as room_name,
+                   f.display_name as floor_name, p.name as property_name
+            FROM tenants t
+            LEFT JOIN beds b ON b.id = t.bed_id
+            LEFT JOIN rooms r ON r.id = b.room_id
+            LEFT JOIN floors f ON f.id = r.floor_id
+            LEFT JOIN properties p ON p.id = t.property_id
+            WHERE t.id = :id AND t.org_id = :org_id
+        """),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )
+    tenant = result.mappings().fetchone()
+    if not tenant:
+        raise NotFoundError("Tenant", tenant_id)
+
+    # Active rent plan
+    rp_result = await db.execute(
+        text("SELECT * FROM rent_plans WHERE tenant_id = :id AND is_active = true ORDER BY effective_from DESC LIMIT 1"),
+        {"id": str(tenant_id)},
+    )
+    rent_plan = rp_result.mappings().fetchone()
+
+    return {**dict(tenant), "active_rent_plan": dict(rent_plan) if rent_plan else None}
+
+
+@router.post("/tenants/{tenant_id}/checkout", summary="Check out tenant")
+async def checkout_tenant(
+    tenant_id: UUID,
+    body: CheckoutRequest,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    tenant_result = await db.execute(
+        text("SELECT id, bed_id, property_id, name, status FROM tenants WHERE id = :id AND org_id = :org_id"),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )
+    tenant = tenant_result.mappings().fetchone()
+    if not tenant:
+        raise NotFoundError("Tenant", tenant_id)
+    if tenant["status"] != "ACTIVE":
+        raise ConflictError("Tenant is not active")
+
+    # Calculate total outstanding
+    outstanding_result = await db.execute(
+        text("""
+            SELECT COALESCE(SUM(amount_due_paise - amount_paid_paise), 0) as total_outstanding
+            FROM rent_ledger_entries
+            WHERE tenant_id = :id AND status IN ('UNPAID', 'PARTIAL')
+        """),
+        {"id": str(tenant_id)},
+    )
+    total_outstanding = outstanding_result.scalar_one() or 0
+
+    # Mark tenant as checked out
+    await db.execute(
+        text("""
+            UPDATE tenants SET status = 'CHECKED_OUT'::tenant_status_enum, actual_move_out_date = :move_out, updated_at = NOW()
+            WHERE id = :id
+        """),
+        {"id": str(tenant_id), "move_out": body.actual_move_out_date},
+    )
+
+    # Free the bed
+    if tenant["bed_id"]:
+        await db.execute(
+            text("UPDATE beds SET status = 'VACANT'::bed_status_enum, updated_at = NOW() WHERE id = :id"),
+            {"id": str(tenant["bed_id"])},
+        )
+
+    # Deactivate rent plan
+    await db.execute(
+        text("UPDATE rent_plans SET is_active = false, effective_to = :date WHERE tenant_id = :tid AND is_active = true"),
+        {"date": body.actual_move_out_date, "tid": str(tenant_id)},
+    )
+
+    # Audit log
+    await db.execute(
+        text("""
+            INSERT INTO audit_log (org_id, property_id, actor_id, actor_role, action, table_name, record_id, new_values)
+            VALUES (:org_id, :pid, :actor, :role, 'UPDATE'::audit_action_enum, 'tenants', :record_id, CAST(:new_vals AS jsonb))
+        """),
+        {
+            "org_id": str(ctx.org_id), "pid": str(tenant["property_id"]),
+            "actor": str(ctx.user_id), "role": ctx.role,
+            "record_id": str(tenant_id),
+            "new_vals": json.dumps({"status": "CHECKED_OUT", "move_out_date": str(body.actual_move_out_date)}),
+        },
+    )
+
+    await db.commit()
+
+    return {
+        "message": "Tenant checked out successfully",
+        "total_outstanding_paise": total_outstanding,
+        "refund_amount_paise": body.refund_amount_paise,
+        "actual_move_out_date": str(body.actual_move_out_date),
+    }
+
+
+@router.get("/tenants/{tenant_id}/ledger", summary="Tenant rent ledger")
+async def tenant_ledger(
+    tenant_id: UUID,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        text("""
+            SELECT id, month, year, amount_due_paise, amount_paid_paise,
+                   (amount_due_paise - amount_paid_paise) as outstanding_paise,
+                   status, due_date, notes, created_at
+            FROM rent_ledger_entries
+            WHERE tenant_id = :id
+            ORDER BY year DESC, month DESC
+        """),
+        {"id": str(tenant_id)},
+    )
+    entries = [dict(r) for r in result.mappings().fetchall()]
+
+    totals_result = await db.execute(
+        text("""
+            SELECT SUM(amount_due_paise) as total_due, SUM(amount_paid_paise) as total_paid
+            FROM rent_ledger_entries WHERE tenant_id = :id
+        """),
+        {"id": str(tenant_id)},
+    )
+    totals = totals_result.mappings().fetchone()
+
+    return {
+        "tenant_id": str(tenant_id),
+        "entries": entries,
+        "total_due_paise": totals["total_due"] or 0,
+        "total_paid_paise": totals["total_paid"] or 0,
+        "total_outstanding_paise": (totals["total_due"] or 0) - (totals["total_paid"] or 0),
+    }
+
+
+SAMPLE_CSV = (
+    "name,phone,email,id_type,id_number,emergency_contact_name,emergency_contact_phone,"
+    "emergency_contact_relation,bed_label,room_number,floor_name,move_in_date,monthly_rent,"
+    "security_deposit,advance_paid,billing_day\n"
+    "Rahul Sharma,9876543210,rahul@example.com,AADHAR,1234 5678 9012,Suresh Sharma,9876500000,"
+    "Father,A,101,Ground,2026-05-01,7000,7000,0,1\n"
+    "Priya Verma,+91 9876512345,priya@example.com,AADHAR,2222 3333 4444,Anita Verma,9876511111,"
+    "Mother,B,102,1st,2026-05-05,8500,8500,0,1\n"
+)
+
+
+@router.get(
+    "/tenants/import/sample.csv",
+    summary="Download sample CSV for tenant bulk import",
+    response_class=PlainTextResponse,
+)
+async def tenants_import_sample(
+    ctx: OrgContext = Depends(get_org_context),
+):
+    return PlainTextResponse(
+        SAMPLE_CSV,
+        headers={
+            "Content-Disposition": 'attachment; filename="pgmanage_tenants_sample.csv"',
+            "Content-Type": "text/csv",
+        },
+    )
+
+
+@router.post("/tenants/bulk-import", summary="Bulk import tenants from a CSV file")
+async def bulk_import_tenants(
+    property_id: UUID = Query(..., description="Property the tenants will be imported into"),
+    file: UploadFile = File(...),
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Each row creates a tenant + an active rent plan and assigns the named bed.
+    Required columns: name, phone, id_type, id_number, emergency_contact_name,
+                     emergency_contact_phone, emergency_contact_relation,
+                     bed_label, room_number, floor_name, move_in_date, monthly_rent.
+    Optional: email, security_deposit, advance_paid, billing_day.
+    """
+    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER"):
+        from fastapi import HTTPException
+        raise HTTPException(403, "Only owners or property managers can bulk-import tenants")
+
+    raw = (await file.read()).decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(raw))
+    required = {
+        "name", "phone", "id_type", "id_number",
+        "emergency_contact_name", "emergency_contact_phone", "emergency_contact_relation",
+        "bed_label", "room_number", "floor_name", "move_in_date", "monthly_rent",
+    }
+    missing = required - {c.strip() for c in (reader.fieldnames or [])}
+    if missing:
+        from fastapi import HTTPException
+        raise HTTPException(400, f"CSV is missing required columns: {sorted(missing)}")
+
+    created = 0
+    errors: list[dict[str, Any]] = []
+
+    for idx, row in enumerate(reader, start=2):  # row 1 = header
+        try:
+            row = {k.strip(): (v or "").strip() for k, v in row.items() if k}
+
+            # Resolve bed by floor_name + room_number + bed_label
+            bed_q = await db.execute(
+                text("""
+                    SELECT b.id, b.status
+                    FROM beds b
+                    JOIN rooms r ON r.id = b.room_id
+                    JOIN floors f ON f.id = r.floor_id
+                    WHERE b.property_id = :pid
+                      AND lower(f.display_name) = lower(:floor_name)
+                      AND r.room_number = :room_number
+                      AND b.bed_label = :bed_label
+                """),
+                {
+                    "pid": str(property_id),
+                    "floor_name": row["floor_name"],
+                    "room_number": row["room_number"],
+                    "bed_label": row["bed_label"],
+                },
+            )
+            bed = bed_q.mappings().fetchone()
+            if not bed:
+                errors.append({"row": idx, "name": row.get("name"), "error": "Bed not found"})
+                continue
+            if bed["status"] != "VACANT":
+                errors.append({"row": idx, "name": row.get("name"), "error": f"Bed is {bed['status']}"})
+                continue
+
+            phone = _normalise_phone(row["phone"])
+            if not phone:
+                errors.append({"row": idx, "name": row.get("name"), "error": "Invalid phone"})
+                continue
+
+            ec_phone = _normalise_phone(row["emergency_contact_phone"])
+            if not ec_phone:
+                errors.append({"row": idx, "name": row.get("name"), "error": "Invalid emergency phone"})
+                continue
+
+            id_type = (row.get("id_type") or "AADHAR").upper()
+            if id_type not in {"AADHAR", "PASSPORT", "DRIVING_LICENSE", "OTHER"}:
+                id_type = "OTHER"
+
+            try:
+                move_in = date.fromisoformat(row["move_in_date"])
+            except ValueError:
+                errors.append({"row": idx, "name": row.get("name"), "error": "move_in_date must be YYYY-MM-DD"})
+                continue
+
+            try:
+                monthly_paise = int(round(float(row["monthly_rent"]) * 100))
+            except ValueError:
+                errors.append({"row": idx, "name": row.get("name"), "error": "monthly_rent must be a number"})
+                continue
+
+            deposit_paise = int(round(float(row.get("security_deposit") or 0) * 100))
+            advance_paise = int(round(float(row.get("advance_paid") or 0) * 100))
+            billing_day = int(row.get("billing_day") or 1)
+            if billing_day < 1 or billing_day > 28:
+                billing_day = 1
+
+            # Phone uniqueness per property
+            existing = await db.execute(
+                text("SELECT 1 FROM tenants WHERE phone = :phone AND property_id = :pid AND is_deleted = false"),
+                {"phone": phone, "pid": str(property_id)},
+            )
+            if existing.scalar_one_or_none():
+                errors.append({"row": idx, "name": row.get("name"), "error": "Phone already in use"})
+                continue
+
+            tenant_q = await db.execute(
+                text("""
+                    INSERT INTO tenants (
+                        org_id, property_id, bed_id, name, phone, email,
+                        id_type, id_number, emergency_contact_name, emergency_contact_phone,
+                        emergency_contact_relation, move_in_date, status, created_by
+                    )
+                    VALUES (
+                        :org_id, :pid, :bed_id, :name, :phone, :email,
+                        CAST(:id_type AS id_type_enum), :id_number, :ec_name, :ec_phone, :ec_rel,
+                        :move_in, 'ACTIVE'::tenant_status_enum, :creator
+                    )
+                    RETURNING id
+                """),
+                {
+                    "org_id": str(ctx.org_id), "pid": str(property_id),
+                    "bed_id": str(bed["id"]), "name": row["name"], "phone": phone,
+                    "email": row.get("email") or None,
+                    "id_type": id_type, "id_number": row["id_number"],
+                    "ec_name": row["emergency_contact_name"], "ec_phone": ec_phone,
+                    "ec_rel": row["emergency_contact_relation"], "move_in": move_in,
+                    "creator": str(ctx.user_id),
+                },
+            )
+            tenant_id = tenant_q.scalar_one()
+
+            await db.execute(
+                text("""
+                    INSERT INTO rent_plans (
+                        tenant_id, property_id, monthly_rent_paise, security_deposit_paise,
+                        advance_paid_paise, food_included, food_charges_paise,
+                        billing_day, effective_from, is_active, created_by
+                    )
+                    VALUES (
+                        :tenant_id, :pid, :monthly, :deposit, :advance,
+                        false, 0, :billing_day, :effective, true, :creator
+                    )
+                """),
+                {
+                    "tenant_id": str(tenant_id), "pid": str(property_id),
+                    "monthly": monthly_paise, "deposit": deposit_paise,
+                    "advance": advance_paise, "billing_day": billing_day,
+                    "effective": move_in, "creator": str(ctx.user_id),
+                },
+            )
+
+            await db.execute(
+                text("UPDATE beds SET status = 'OCCUPIED'::bed_status_enum, updated_at = NOW() WHERE id = :id"),
+                {"id": str(bed["id"])},
+            )
+            created += 1
+        except Exception as e:  # noqa: BLE001
+            errors.append({"row": idx, "name": row.get("name"), "error": str(e)})
+
+    await db.commit()
+    return {
+        "created": created,
+        "errors": errors,
+        "total_rows": created + len(errors),
+    }
+
+
+@router.post("/tenants/{tenant_id}/documents", summary="Get presigned URL for document upload")
+async def upload_document(
+    tenant_id: UUID,
+    doc_type: str = Query(default="id_document"),
+    filename: str = Query(default="document.jpg"),
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    tenant_result = await db.execute(
+        text("SELECT property_id FROM tenants WHERE id = :id AND org_id = :org_id"),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )
+    tenant = tenant_result.mappings().fetchone()
+    if not tenant:
+        raise NotFoundError("Tenant", tenant_id)
+
+    upload_info = await generate_presigned_upload_url(
+        org_id=ctx.org_id,
+        property_id=tenant["property_id"],
+        resource_type=f"tenants/{doc_type}",
+        filename=filename,
+    )
+    return upload_info

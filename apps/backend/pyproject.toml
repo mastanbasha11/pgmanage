@@ -1,0 +1,81 @@
+[tool.poetry]
+name = "pgmanage-backend"
+version = "0.1.0"
+description = "PGManage - Multi-tenant SaaS for PG accommodation management"
+authors = ["PGManage Team <dev@pgmanage.in>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12,<3.15"
+fastapi = "^0.111.0"
+uvicorn = {extras = ["standard"], version = "^0.30.0"}
+sqlalchemy = {extras = ["asyncio"], version = "^2.0.30"}
+asyncpg = "^0.31.0"
+greenlet = "^3.0.0"
+alembic = "^1.13.1"
+pydantic = {extras = ["email"], version = "^2.7.0"}
+pydantic-settings = "^2.3.0"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+python-multipart = "^0.0.9"
+redis = {extras = ["hiredis"], version = "^5.0.4"}
+boto3 = "^1.34.0"
+httpx = "^0.27.0"
+python-dateutil = "^2.9.0"
+pytz = "^2024.1"
+stripe = "^9.12.0"
+reportlab = "^4.2.0"
+phonenumbers = "^8.13.37"
+pillow = "^10.3.0"
+pyotp = "^2.9.0"
+slowapi = "^0.1.9"
+structlog = "^24.2.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+pytest-asyncio = "^0.24.0"
+pytest-cov = "^5.0.0"
+factory-boy = "^3.3.0"
+httpx = "^0.27.0"
+black = "^24.4.0"
+ruff = "^0.4.0"
+mypy = "^1.10.0"
+faker = "^25.0.0"
+aiosqlite = "^0.20.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "DTZ", "T10", "RET", "SIM"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+strict = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests"]
+env = [
+    "ENVIRONMENT=test",
+    "DATABASE_URL=postgresql+asyncpg://pgmanage:pgmanage_dev_password@localhost:5432/pgmanage_test",
+    "REDIS_URL=redis://localhost:6379/1",
+    "SECRET_KEY=test-secret-key",
+    "ALGORITHM=HS256",
+    "S3_BUCKET_NAME=pgmanage-test",
+    "AWS_ENDPOINT_URL=http://localhost:4566",
+    "AWS_ACCESS_KEY_ID=test",
+    "AWS_SECRET_ACCESS_KEY=test",
+]
