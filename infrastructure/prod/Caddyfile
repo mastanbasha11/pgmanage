@@ -1,0 +1,66 @@
+# Caddy configuration for production.
+# Domain comes from $DOMAIN env, e.g. pgmanage.in (root) and www.pgmanage.in.
+# Caddy auto-fetches Let's Encrypt certs at startup and renews them
+# silently every ~60 days.
+
+{
+	email {$LETSENCRYPT_EMAIL}
+	# servers { protocols h1 h2 h3 }      # uncomment to enable HTTP/3
+}
+
+# Redirect www → apex
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
+# Main site: react SPA + reverse-proxied backend
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Defense-in-depth CSP — relax if recharts / shadcn break.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+		-Server
+	}
+
+	# Backend API
+	@api path /api/* /health /docs /openapi.json
+	handle @api {
+		reverse_proxy backend:8000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			transport http {
+				keepalive 30s
+				keepalive_idle_conns 8
+			}
+		}
+	}
+
+	# Static React build — fall through to index.html for SPA routes
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Long-cache hashed assets
+	@hashed path /assets/* /icon-*.png /manifest.webmanifest
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	# Don't cache the SPA shell
+	@shell path /index.html /sw.js /registerSW.js
+	header @shell Cache-Control "public, max-age=0, must-revalidate"
+
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}

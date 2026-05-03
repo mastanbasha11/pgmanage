@@ -64,8 +64,10 @@ class Settings(BaseSettings):
     STRIPE_PRICE_STARTER: str = ""
     STRIPE_PRICE_GROWTH: str = ""
 
-    # ── CORS ──────────────────────────────────────────────────────────────────
+    # ── CORS / Trusted hosts ─────────────────────────────────────────────────
+    # Accepts either a JSON array string or a comma-separated list.
     CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:3001"]'
+    ALLOWED_HOSTS: str = "localhost,127.0.0.1"
 
     # ── Rate Limiting ─────────────────────────────────────────────────────────
     RATE_LIMIT_PER_MINUTE: int = 60
@@ -83,10 +85,22 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        try:
-            return json.loads(self.CORS_ORIGINS)
-        except Exception:
-            return [self.CORS_ORIGINS]
+        v = (self.CORS_ORIGINS or "").strip()
+        if not v:
+            return []
+        if v.startswith("["):
+            try:
+                return json.loads(v)
+            except Exception:
+                pass
+        return [s.strip() for s in v.split(",") if s.strip()]
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        v = (self.ALLOWED_HOSTS or "").strip()
+        if not v:
+            return ["*"]
+        return [s.strip() for s in v.split(",") if s.strip()]
 
     @property
     def is_production(self) -> bool:
@@ -109,8 +123,10 @@ class Settings(BaseSettings):
         if self.is_production:
             if not self.RS256_PRIVATE_KEY:
                 raise ValueError("RS256_PRIVATE_KEY must be set in production")
-            if not self.STRIPE_SECRET_KEY:
-                raise ValueError("STRIPE_SECRET_KEY must be set in production")
+            if self.SECRET_KEY.startswith("dev-secret-key"):
+                raise ValueError("SECRET_KEY must be rotated in production")
+            # Stripe / Meta / SES are checked lazily at the call site so the
+            # backend can boot without them — features that need them will 503.
         return self
 
 

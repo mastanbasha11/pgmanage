@@ -83,7 +83,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 if settings.is_production:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["api.pgmanage.in", "*.pgmanage.in"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
 
 # ── Exception handlers ─────────────────────────────────────────────────────────
 app.add_exception_handler(PGManageException, pgmanage_exception_handler)

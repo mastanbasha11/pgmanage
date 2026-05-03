@@ -1,0 +1,55 @@
+name: Deploy to Production (EC2)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/backend/**'
+      - 'apps/web/**'
+      - 'packages/shared/**'
+      - 'docker-compose.prod.yml'
+      - 'infrastructure/prod/**'
+      - '.github/workflows/deploy-prod.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Disabled until SSH_HOST + SSH_USER + SSH_KEY repo secrets are populated.
+    # Re-enable by removing this `if: false` line once secrets are in place.
+    if: false
+
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Pull latest, rebuild, run migrations, restart
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" bash -se <<'EOF'
+            set -euo pipefail
+            cd /opt/pgmanage
+            git pull --ff-only
+            export ENV_FILE=/etc/pgmanage/.env
+            sudo docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml build
+            sudo docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml --profile migrate run --rm migrate
+            sudo docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml up -d
+            sudo docker image prune -f
+          EOF
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 12); do
+            sleep 5
+            if curl -fsS "https://${{ secrets.PROD_DOMAIN }}/health" >/dev/null; then
+              echo "deploy healthy"; exit 0
+            fi
+          done
+          echo "health check failed"; exit 1

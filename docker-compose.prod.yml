@@ -1,0 +1,132 @@
+# Production stack — runs on a single EC2 host behind Caddy.
+# Bring up:    docker compose -f docker-compose.prod.yml --env-file /etc/pgmanage/.env up -d
+# Tear down:   docker compose -f docker-compose.prod.yml down
+# Tail logs:   docker compose -f docker-compose.prod.yml logs -f --tail=200
+#
+# Secrets live in /etc/pgmanage/.env on the host (mode 600, not in git).
+# See infrastructure/prod/env.example for the keys it should contain.
+
+name: pgmanage
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    # Postgres is *not* exposed to the host or internet — only the backend
+    # service can reach it via the internal Docker network.
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./apps/backend
+      target: production
+    restart: always
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      RS256_PRIVATE_KEY: ${RS256_PRIVATE_KEY}
+      RS256_PUBLIC_KEY: ${RS256_PUBLIC_KEY}
+      ALGORITHM: RS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+      REFRESH_TOKEN_EXPIRE_DAYS: 30
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+      AWS_DEFAULT_REGION: ap-south-1
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-}
+      USE_LOCALSTACK: "false"
+      RATE_LIMIT_PER_MINUTE: 120
+      RATE_LIMIT_OTP_PER_MIN: 5
+      RATE_LIMIT_LOGIN_PER_MIN: 5
+      # External integrations — wire up later
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      SES_FROM_EMAIL: ${SES_FROM_EMAIL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://localhost:8000/health\").status==200 else 1)'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # One-shot: builds the SPA into a named volume that Caddy serves from.
+  # Re-runs on every `up -d` so a `git pull && docker compose up -d --build` refreshes the UI.
+  web-build:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+    command: sh -c "rm -rf /srv/web/* && cp -r /dist/. /srv/web/ && ls /srv/web | head"
+    volumes:
+      - webdist:/srv/web
+    restart: "no"
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: always
+    depends_on:
+      backend: { condition: service_healthy }
+      web-build: { condition: service_completed_successfully }
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"           # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+    volumes:
+      - ./infrastructure/prod/Caddyfile:/etc/caddy/Caddyfile:ro
+      - webdist:/srv/web:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+  # Migrations runner: one-shot, exits 0 on success.
+  migrate:
+    build:
+      context: ./apps/backend
+      target: production
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: ["sh", "-c", "alembic upgrade head"]
+    restart: "no"
+    profiles: ["migrate"]   # only runs when explicitly invoked
+
+volumes:
+  pgdata:
+  redisdata:
+  webdist:
+  caddydata:
+  caddyconfig:
