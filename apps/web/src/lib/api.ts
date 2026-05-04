@@ -68,8 +68,17 @@ export interface ApiError {
 
 export function getApiError(error: unknown): string {
   if (axios.isAxiosError(error)) {
-    const data = error.response?.data as ApiError | undefined;
-    return data?.error?.message ?? error.message;
+    const data = error.response?.data as
+      | { error?: { message?: string }; detail?: { error?: { message?: string } | string } | string }
+      | undefined;
+    // FastAPI's HTTPException(detail={"error": {...}}) ends up nested under `detail`
+    const nested =
+      typeof data?.detail === 'object' && data.detail !== null && 'error' in data.detail
+        ? (data.detail as { error: { message?: string } }).error?.message
+        : typeof data?.detail === 'string'
+        ? data.detail
+        : undefined;
+    return data?.error?.message ?? nested ?? error.message;
   }
   return 'An unexpected error occurred';
 }

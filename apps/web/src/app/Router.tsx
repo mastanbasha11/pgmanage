@@ -14,6 +14,7 @@ import TenantDetailPage from '@/pages/tenants/TenantDetailPage';
 import RentDashboardPage from '@/pages/rent/RentDashboardPage';
 import ExpensesPage from '@/pages/expenses/ExpensesPage';
 import LeadsPage from '@/pages/leads/LeadsPage';
+import TeamPage from '@/pages/settings/TeamPage';
 import TenantPortalApp from '@/pages/tenant-portal/TenantPortalApp';
 
 function PrivateRoute({ children }: { children: ReactNode }) {
@@ -129,6 +130,7 @@ export default function App() {
                     <Route path="rent" element={<RentDashboardPage />} />
                     <Route path="expenses" element={<ExpensesPage />} />
                     <Route path="leads" element={<LeadsPage />} />
+                    <Route path="settings/team" element={<TeamPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Layout>

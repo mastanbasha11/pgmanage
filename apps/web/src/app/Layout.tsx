@@ -12,6 +12,7 @@ import {
   Menu,
   X,
   ChevronDown,
+  UserCog,
 } from 'lucide-react';
 import { cn, initials } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
@@ -41,6 +42,7 @@ const NAV_ITEMS = [
   { to: '/rent', icon: IndianRupee, label: 'Rent & Payments' },
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/leads', icon: UserCircle, label: 'Leads' },
+  { to: '/settings/team', icon: UserCog, label: 'Team', ownerOnly: true },
 ];
 
 interface Props {

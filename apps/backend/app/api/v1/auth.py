@@ -103,12 +103,16 @@ class StaffInviteRequest(BaseModel):
 @router.post("/signup", status_code=status.HTTP_201_CREATED, summary="Register new organisation")
 async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     """
-    Sign up a new PG owner. Creates:
-    1. Organisation row in public schema
+    Sign up a new PG owner.
+
+    Creates:
+    1. Organisation row in public schema (is_active=False, approved_at=NULL — pending approval)
     2. Org-specific PostgreSQL schema with all tables
     3. Owner user in the org schema
-    4. Default expense categories for first property
-    5. 30-day Growth trial
+    4. 30-day Growth trial
+
+    The user must be approved by the platform admin before they can log in.
+    A signed-link email is sent to ADMIN_NOTIFICATION_EMAIL.
     """
     # Check slug uniqueness
     slug = slugify(body.org_name)
@@ -140,12 +144,13 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     from datetime import timedelta
     trial_end = datetime.now(timezone.utc) + timedelta(days=settings.TRIAL_DAYS)
 
+    # Pending approval until platform admin approves: is_active=false, approved_at=NULL
     org_id_result = await db.execute(
         text("""
             INSERT INTO public.organisations
                 (name, slug, owner_email, owner_phone, plan_id, trial_ends_at, plan_expires_at, schema_name, is_active)
             VALUES
-                (:name, :slug, :email, :phone, :plan_id, :trial_end, :plan_expires_at, :schema_name, true)
+                (:name, :slug, :email, :phone, :plan_id, :trial_end, :plan_expires_at, :schema_name, false)
             RETURNING id, schema_name
         """),
         {
@@ -200,51 +205,113 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     user_id = user_result.scalar_one()
     await db.commit()
 
-    # Issue tokens
-    token_data = {
-        "sub": str(user_id),
-        "user_id": str(user_id),
+    # Build signed approval/reject links and email the platform admin.
+    # The token is a JWT signed with SECRET_KEY (HS256, 7-day expiry) — no DB lookup needed at click time.
+    from datetime import timedelta
+    from jose import jwt as _jwt
+
+    approval_payload = {
         "org_id": str(org_id),
-        "role": "OWNER",
-        "name": body.owner_name,
-        "email": body.owner_email,
-        "property_ids": None,
+        "type": "org_approval",
+        "exp": datetime.now(timezone.utc) + timedelta(days=7),
+        "iat": datetime.now(timezone.utc),
     }
-    access_token = create_access_token(token_data)
-    refresh_token = create_refresh_token({"sub": str(user_id), "org_id": str(org_id)})
+    approval_token = _jwt.encode(approval_payload, settings.SECRET_KEY, algorithm="HS256")
+
+    base = settings.APP_BASE_URL.rstrip("/")
+    approve_url = f"{base}/api/v1/auth/approve?token={approval_token}&action=approve"
+    reject_url = f"{base}/api/v1/auth/approve?token={approval_token}&action=reject"
+
+    try:
+        from app.services.email_service import send_signup_approval_email
+        send_signup_approval_email(
+            org_id=str(org_id),
+            org_name=body.org_name,
+            owner_name=body.owner_name,
+            owner_email=body.owner_email,
+            owner_phone=body.owner_phone,
+            city=body.city,
+            approve_url=approve_url,
+            reject_url=reject_url,
+        )
+    except Exception:  # noqa: BLE001 — never fail signup on email failure
+        import logging
+        logging.exception("Failed to send signup approval email")
 
     return {
+        "status": "pending_approval",
         "org_id": str(org_id),
         "org_slug": slug,
         "user_id": str(user_id),
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "user": {
-            "user_id": str(user_id),
-            "org_id": str(org_id),
-            "name": body.owner_name,
-            "email": body.owner_email,
-            "role": "OWNER",
-            "property_ids": None,
-        },
+        "message": (
+            "Account created. The platform admin has been notified and will review your "
+            "signup shortly. You'll get an email when your account is approved."
+        ),
     }
 
 
 @router.post("/login", summary="Login with email and password")
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    # Find org by owner email
+    # Step 1 — fast path: org owner whose `owner_email` matches.
     org_result = await db.execute(
-        text("SELECT id, schema_name, is_active FROM public.organisations WHERE owner_email = :email LIMIT 1"),
+        text("""
+            SELECT id, schema_name, is_active, approved_at
+            FROM public.organisations
+            WHERE owner_email = :email LIMIT 1
+        """),
         {"email": body.email},
     )
     org_row = org_result.fetchone()
+
+    # Step 2 — staff fallback: scan each active org's users table for this email.
+    # Cheap while we have few orgs; replace with a public email-index table when we scale.
+    if not org_row:
+        all_orgs = await db.execute(
+            text("""
+                SELECT id, schema_name, is_active, approved_at
+                FROM public.organisations
+                WHERE schema_name != ''
+                ORDER BY created_at DESC
+            """)
+        )
+        for cand in all_orgs.fetchall():
+            _, schema, _, _ = cand
+            await set_schema(db, schema)
+            hit = await db.execute(
+                text("SELECT id FROM users WHERE email = :email AND is_active = true LIMIT 1"),
+                {"email": body.email},
+            )
+            if hit.scalar_one_or_none():
+                org_row = cand
+                break
+
     if not org_row:
         raise AuthenticationError("Invalid email or password")
 
-    org_id, schema_name, is_active = org_row
+    org_id, schema_name, is_active, approved_at = org_row
+    # Pending approval case: signup happened but admin hasn't approved yet.
+    if approved_at is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "PENDING_APPROVAL",
+                    "message": "Your account is pending admin approval. You'll receive an email when it's ready.",
+                    "details": {},
+                }
+            },
+        )
     if not is_active:
-        raise AuthenticationError("Organisation account is inactive")
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "ACCOUNT_INACTIVE",
+                    "message": "Your organisation account has been deactivated. Contact support.",
+                    "details": {},
+                }
+            },
+        )
 
     await set_schema(db, schema_name)
 
@@ -483,3 +550,218 @@ async def invite_staff(
 
     # TODO: Send WhatsApp invite message with setup link
     return {"message": "Invite sent", "invite_token": invite_token}
+
+
+# ── Manager / staff CRUD (OWNER only) ─────────────────────────────────────────
+
+class StaffCreate(BaseModel):
+    name: str
+    email: EmailStr
+    phone: str
+    password: str
+    role: str = "PROPERTY_MANAGER"
+    property_ids: list[UUID] | None = None
+
+    @field_validator("password")
+    @classmethod
+    def _pw(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str) -> str:
+        digits = re.sub(r"[^\d]", "", v or "")
+        if digits.startswith("91") and len(digits) == 12:
+            digits = digits[2:]
+        elif digits.startswith("0") and len(digits) == 11:
+            digits = digits[1:]
+        if not re.match(r"^[6-9]\d{9}$", digits):
+            raise ValueError("Enter a valid 10-digit Indian mobile number")
+        return f"+91{digits}"
+
+    @field_validator("role")
+    @classmethod
+    def _role(cls, v: str) -> str:
+        v = (v or "").upper()
+        if v not in {"PROPERTY_MANAGER", "SUPERVISOR", "PARTNER"}:
+            raise ValueError("Role must be PROPERTY_MANAGER, SUPERVISOR, or PARTNER")
+        return v
+
+
+@router.post("/staff", status_code=status.HTTP_201_CREATED, summary="Create a manager/staff account (owner only)")
+async def create_staff(
+    body: StaffCreate,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner creates a manager with an initial password set by the owner.
+    Manager logs in via email + password just like the owner does.
+    """
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only owners can create staff accounts")
+
+    # Email + phone uniqueness within this org
+    existing = await db.execute(
+        text("SELECT id FROM users WHERE email = :email OR phone = :phone LIMIT 1"),
+        {"email": body.email, "phone": body.phone},
+    )
+    if existing.scalar_one_or_none():
+        raise ConflictError("A staff member with this email or phone already exists")
+
+    pw_hash = get_password_hash(body.password)
+    property_ids = [str(p) for p in body.property_ids] if body.property_ids else None
+
+    result = await db.execute(
+        text("""
+            INSERT INTO users (org_id, name, email, phone, password_hash, role, property_access, is_active)
+            VALUES (:org_id, :name, :email, :phone, :pw, CAST(:role AS user_role_enum), :pa, true)
+            RETURNING id, name, email, phone, role
+        """),
+        {
+            "org_id": str(ctx.org_id),
+            "name": body.name,
+            "email": body.email,
+            "phone": body.phone,
+            "pw": pw_hash,
+            "role": body.role,
+            "pa": property_ids,
+        },
+    )
+    row = result.mappings().fetchone()
+    await db.commit()
+    return dict(row) | {"property_ids": property_ids}
+
+
+@router.get("/staff", summary="List staff in this organisation")
+async def list_staff(
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(403, "Only owners can list staff")
+    result = await db.execute(
+        text("""
+            SELECT id, name, email, phone, role, property_access, is_active,
+                   last_login_at, created_at
+            FROM users
+            ORDER BY role, name
+        """),
+    )
+    rows = result.mappings().fetchall()
+    return {"items": [dict(r) for r in rows], "total": len(rows)}
+
+
+@router.patch("/staff/{user_id}/deactivate", summary="Deactivate a staff member")
+async def deactivate_staff(
+    user_id: UUID,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(403, "Only owners can deactivate staff")
+    if str(user_id) == str(ctx.user_id):
+        raise HTTPException(400, "You cannot deactivate yourself")
+    await db.execute(
+        text("UPDATE users SET is_active = false WHERE id = :id"),
+        {"id": str(user_id)},
+    )
+    await db.commit()
+    return {"message": "Staff deactivated"}
+
+
+# ── Org approval (signup gate) ────────────────────────────────────────────────
+
+@router.get("/approve", summary="Platform-admin one-click signup approval/rejection")
+async def approve_org(token: str, action: str = "approve", db: AsyncSession = Depends(get_db)):
+    """
+    One-click endpoint linked from the email sent at signup. Verifies the signed
+    JWT (HS256, 7-day expiry) and either:
+      - action=approve → marks org is_active=true, approved_at=NOW
+      - action=reject  → drops the org schema and removes the org row
+    Returns a tiny inline HTML page so it works straight from email clients.
+    """
+    from fastapi.responses import HTMLResponse
+    from jose import jwt as _jwt, JWTError
+
+    try:
+        payload = _jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    except JWTError:
+        return HTMLResponse(_approval_page("Invalid or expired link", success=False), status_code=400)
+
+    if payload.get("type") != "org_approval":
+        return HTMLResponse(_approval_page("Invalid link", success=False), status_code=400)
+
+    org_id = payload.get("org_id")
+    if not org_id:
+        return HTMLResponse(_approval_page("Malformed token", success=False), status_code=400)
+
+    org_q = await db.execute(
+        text("""
+            SELECT id, name, owner_email, owner_phone, schema_name, approved_at
+            FROM public.organisations WHERE id = :id
+        """),
+        {"id": org_id},
+    )
+    org = org_q.mappings().fetchone()
+    if not org:
+        return HTMLResponse(_approval_page("Organisation not found (may have been rejected already).", success=False), status_code=404)
+
+    if action == "reject":
+        # Drop the org schema + remove the row.
+        if org["schema_name"]:
+            await db.execute(text(f'DROP SCHEMA IF EXISTS "{org["schema_name"]}" CASCADE'))
+        await db.execute(text("DELETE FROM public.organisations WHERE id = :id"), {"id": org_id})
+        await db.commit()
+        return HTMLResponse(_approval_page(f"Rejected {org['name']}.", success=True))
+
+    # approve
+    if org["approved_at"] is not None:
+        return HTMLResponse(_approval_page(f"{org['name']} was already approved.", success=True))
+
+    await db.execute(
+        text("""
+            UPDATE public.organisations
+            SET is_active = true, approved_at = NOW(), approved_by_email = :admin
+            WHERE id = :id
+        """),
+        {"id": org_id, "admin": settings.ADMIN_NOTIFICATION_EMAIL or "platform-admin"},
+    )
+    await db.commit()
+
+    # Best-effort welcome email to the owner
+    try:
+        from app.services.email_service import send_signup_approved_email
+        send_signup_approved_email(
+            owner_email=org["owner_email"],
+            owner_name=org["name"],
+            login_url=f"{settings.APP_BASE_URL.rstrip('/')}/auth/login",
+        )
+    except Exception:
+        import logging
+        logging.exception("Failed to send approved email")
+
+    return HTMLResponse(_approval_page(f"Approved {org['name']}.", success=True))
+
+
+def _approval_page(message: str, success: bool = True) -> str:
+    color = "#0D9488" if success else "#dc2626"
+    icon = "✓" if success else "✗"
+    return f"""
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>PGManage Approval</title></head>
+<body style="font-family:-apple-system,sans-serif;background:#f8fafc;
+             display:flex;align-items:center;justify-content:center;
+             min-height:100vh;margin:0;color:#0F172A;">
+  <div style="max-width:420px;background:white;border-radius:12px;
+              padding:48px 40px;border:1px solid #e2e8f0;text-align:center;">
+    <div style="width:56px;height:56px;border-radius:50%;background:{color}1a;
+                color:{color};font-size:32px;line-height:56px;margin:0 auto 16px;">{icon}</div>
+    <h2 style="margin:0 0 8px;">{message}</h2>
+    <p style="color:#64748b;font-size:14px;margin:0;">
+      You can close this tab.
+    </p>
+  </div>
+</body></html>
+"""

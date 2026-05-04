@@ -3,12 +3,14 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { api, getApiError } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
+import PendingApprovalPage from './PendingApprovalPage';
 
 const schema = z.object({
   email: z.string().email('Enter a valid email'),
@@ -21,10 +23,13 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const { setAuth } = useAuthStore();
   const [error, setError] = useState('');
+  const [pendingApproval, setPendingApproval] = useState(false);
 
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
+
+  if (pendingApproval) return <PendingApprovalPage />;
 
   async function onSubmit(data: FormData) {
     setError('');
@@ -36,6 +41,18 @@ export default function LoginPage() {
       setAuth(res.data.user, res.data.access_token, res.data.refresh_token);
       navigate('/');
     } catch (err) {
+      // FastAPI HTTPException(detail=...) ends up under err.response.data.detail.error
+      let code: string | undefined;
+      if (axios.isAxiosError(err)) {
+        const data = err.response?.data as
+          | { detail?: { error?: { code?: string } }; error?: { code?: string } }
+          | undefined;
+        code = data?.detail?.error?.code ?? data?.error?.code;
+      }
+      if (code === 'PENDING_APPROVAL') {
+        setPendingApproval(true);
+        return;
+      }
       setError(getApiError(err));
     }
   }

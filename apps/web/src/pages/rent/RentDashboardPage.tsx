@@ -235,7 +235,8 @@ function StatCard({
 }
 
 export default function RentDashboardPage() {
-  const { selectedPropertyId } = useAuthStore();
+  const { selectedPropertyId, canAccessFinancials } = useAuthStore();
+  const showMoneyTotals = canAccessFinancials();
   const { month: cm, year: cy } = currentMonthYear();
   const [month, setMonth] = useState(cm);
   const [year, setYear] = useState(cy);
@@ -332,23 +333,35 @@ export default function RentDashboardPage() {
           </div>
         </div>
 
-        {/* Summary */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Expected" value={formatPaise(totalDue)} icon={TrendingUp} />
-          <StatCard
-            label="Collected"
-            value={formatPaise(totalPaid)}
-            icon={Wallet}
-            tone="success"
-          />
-          <StatCard
-            label="Outstanding"
-            value={formatPaise(totalOutstanding)}
-            icon={Receipt}
-            tone={totalOutstanding > 0 ? 'destructive' : 'success'}
-          />
-          <StatCard label="Collection rate" value={`${collectionPct}%`} icon={TrendingUp} />
-        </div>
+        {/* Summary — totals hidden for managers, only progress shown */}
+        {showMoneyTotals ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label="Expected" value={formatPaise(totalDue)} icon={TrendingUp} />
+            <StatCard
+              label="Collected"
+              value={formatPaise(totalPaid)}
+              icon={Wallet}
+              tone="success"
+            />
+            <StatCard
+              label="Outstanding"
+              value={formatPaise(totalOutstanding)}
+              icon={Receipt}
+              tone={totalOutstanding > 0 ? 'destructive' : 'success'}
+            />
+            <StatCard label="Collection rate" value={`${collectionPct}%`} icon={TrendingUp} />
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <StatCard label="Collection rate" value={`${collectionPct}%`} icon={TrendingUp} />
+            <StatCard
+              label="Tenants"
+              value={`${entries.filter((e) => e.status === 'PAID').length}/${entries.length} paid`}
+              icon={Wallet}
+              tone="success"
+            />
+          </div>
+        )}
 
         {/* Progress bar */}
         {totalDue > 0 && (
@@ -402,14 +415,18 @@ export default function RentDashboardPage() {
                     <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground sm:table-cell">
                       Room
                     </th>
-                    <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground md:table-cell">
-                      Due
-                    </th>
-                    <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
-                      Paid
-                    </th>
+                    {showMoneyTotals && (
+                      <>
+                        <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground md:table-cell">
+                          Due
+                        </th>
+                        <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
+                          Paid
+                        </th>
+                      </>
+                    )}
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                      Outstanding
+                      {showMoneyTotals ? 'Outstanding' : 'Amount'}
                     </th>
                     <th className="px-4 py-3 text-center font-medium text-muted-foreground">
                       Status
@@ -436,12 +453,16 @@ export default function RentDashboardPage() {
                           <span className="text-muted-foreground/40">—</span>
                         )}
                       </td>
-                      <td className="hidden px-4 py-3 text-right text-muted-foreground md:table-cell tabular-nums">
-                        {formatPaise(e.amount_due_paise)}
-                      </td>
-                      <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
-                        {formatPaise(e.amount_paid_paise)}
-                      </td>
+                      {showMoneyTotals && (
+                        <>
+                          <td className="hidden px-4 py-3 text-right text-muted-foreground md:table-cell tabular-nums">
+                            {formatPaise(e.amount_due_paise)}
+                          </td>
+                          <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
+                            {formatPaise(e.amount_paid_paise)}
+                          </td>
+                        </>
+                      )}
                       <td className="px-4 py-3 text-right tabular-nums">
                         {e.outstanding_paise > 0 ? (
                           <span className="text-destructive font-medium">

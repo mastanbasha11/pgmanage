@@ -116,6 +116,11 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         429: "RATE_LIMIT_EXCEEDED",
         500: "INTERNAL_SERVER_ERROR",
     }
+    # If caller passed a structured envelope HTTPException(detail={"error": {...}})
+    # pass it through unchanged so structured codes like PENDING_APPROVAL survive.
+    if isinstance(exc.detail, dict) and isinstance(exc.detail.get("error"), dict):
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+
     code = code_map.get(exc.status_code, "HTTP_ERROR")
     detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
     return _error_response(code, detail, {}, exc.status_code)

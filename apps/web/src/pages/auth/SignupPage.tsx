@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -9,8 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { api, getApiError } from '@/lib/api';
-import { useAuthStore } from '@/store/auth';
 import { cn, normaliseIndianPhone, PHONE_HELP } from '@/lib/utils';
+import PendingApprovalPage from './PendingApprovalPage';
 
 const STEPS = ['PG Details', 'Your Info', 'Security', 'Done'];
 
@@ -32,14 +32,17 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export default function SignupPage() {
-  const navigate = useNavigate();
-  const { setAuth } = useAuthStore();
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
+  const [pending, setPending] = useState<{ ownerName: string; ownerEmail: string } | null>(null);
 
   const { register, handleSubmit, trigger, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
+
+  if (pending) {
+    return <PendingApprovalPage ownerName={pending.ownerName} ownerEmail={pending.ownerEmail} />;
+  }
 
   async function nextStep() {
     const fieldsPerStep: Array<Array<keyof FormData>> = [
@@ -55,11 +58,7 @@ export default function SignupPage() {
     setError('');
     try {
       const phone = normaliseIndianPhone(data.owner_phone) ?? data.owner_phone;
-      const res = await api.post<{
-        access_token: string;
-        refresh_token: string;
-        user: Parameters<typeof setAuth>[0];
-      }>('/auth/signup', {
+      await api.post('/auth/signup', {
         org_name: data.org_name,
         city: data.city,
         owner_name: data.owner_name,
@@ -67,8 +66,7 @@ export default function SignupPage() {
         owner_phone: phone,
         password: data.password,
       });
-      setAuth(res.data.user, res.data.access_token, res.data.refresh_token);
-      navigate('/');
+      setPending({ ownerName: data.owner_name, ownerEmail: data.owner_email });
     } catch (err) {
       setError(getApiError(err));
       setStep(0);

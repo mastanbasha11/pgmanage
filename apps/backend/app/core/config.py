@@ -75,6 +75,17 @@ class Settings(BaseSettings):
     # ── Subscription ─────────────────────────────────────────────────────────
     TRIAL_DAYS: int = 30
 
+    # ── Email (SMTP) ─────────────────────────────────────────────────────────
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    ADMIN_NOTIFICATION_EMAIL: str = ""
+
+    # Public origin used to build absolute URLs in emails (e.g. approval links)
+    APP_BASE_URL: str = "https://pgmanage.in"
+
     # ── Timezone ─────────────────────────────────────────────────────────────
     TIMEZONE: str = "Asia/Kolkata"
 
