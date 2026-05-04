@@ -27,6 +27,7 @@ import {
   statusBadgeVariant,
   currentMonthYear,
   rupeesToPaise,
+  shortRoomType,
 } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import {
@@ -54,6 +55,11 @@ interface LedgerEntry {
   amount_paid_paise: number;
   outstanding_paise: number;
   status: string;
+  bed_label?: string;
+  room_number?: string;
+  floor_name?: string;
+  floor_number?: number;
+  room_type?: string;
 }
 
 const paymentSchema = z.object({
@@ -393,10 +399,13 @@ export default function RentDashboardPage() {
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                       Tenant
                     </th>
-                    <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground sm:table-cell">
-                      Due
+                    <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground sm:table-cell">
+                      Room
                     </th>
                     <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground md:table-cell">
+                      Due
+                    </th>
+                    <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
                       Paid
                     </th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">
@@ -412,10 +421,25 @@ export default function RentDashboardPage() {
                   {entries.map((e) => (
                     <tr key={e.id} className="hover:bg-muted/30">
                       <td className="px-4 py-3 font-medium">{e.tenant_name}</td>
-                      <td className="hidden px-4 py-3 text-right text-muted-foreground sm:table-cell tabular-nums">
+                      <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell text-xs">
+                        {e.room_number ? (
+                          <span>
+                            {e.room_number}
+                            {e.bed_label ? `·${e.bed_label}` : ''}
+                            {e.room_type ? (
+                              <span className="ml-1 text-[10px] uppercase">
+                                {shortRoomType(e.room_type)}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/40">—</span>
+                        )}
+                      </td>
+                      <td className="hidden px-4 py-3 text-right text-muted-foreground md:table-cell tabular-nums">
                         {formatPaise(e.amount_due_paise)}
                       </td>
-                      <td className="hidden px-4 py-3 text-right md:table-cell tabular-nums">
+                      <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
                         {formatPaise(e.amount_paid_paise)}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">
@@ -447,7 +471,7 @@ export default function RentDashboardPage() {
                   ))}
                   {entries.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                         No ledger entries for {monthName(month)} {year}.{' '}
                         <button
                           type="button"

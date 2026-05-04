@@ -95,6 +95,26 @@ export function truncate(str: string, len = 30): string {
 }
 
 /**
+ * Compress a room-type label to ~3-5 chars for use in narrow table cells.
+ *  "Single AC"      → "1·AC"
+ *  "Double Sharing" → "2-SH"
+ *  "Triple Sharing" → "3-SH"
+ *  "Suite"          → "SUI"
+ *  "Dormitory"      → "DORM"
+ */
+export function shortRoomType(label: string | undefined | null): string {
+  if (!label) return '';
+  const s = label.toUpperCase();
+  if (/^SINGLE/.test(s)) return s.includes('AC') ? '1·AC' : '1B';
+  if (/^DOUBLE/.test(s)) return s.includes('AC') ? '2·AC' : '2-SH';
+  if (/^TRIPLE/.test(s)) return s.includes('AC') ? '3·AC' : '3-SH';
+  if (/^QUAD/.test(s)) return '4-SH';
+  if (/^SUITE/.test(s)) return 'SUI';
+  if (/^DORM/.test(s)) return 'DORM';
+  return label.slice(0, 6).toUpperCase();
+}
+
+/**
  * Phone validation: accepts an Indian mobile in any common form —
  * 10 digits starting 6-9, with optional +91, 91, or 0 prefix and optional spaces/dashes.
  * Returns the canonical +91XXXXXXXXXX form, or null if invalid.

@@ -198,19 +198,26 @@ async def rent_ledger(
     year: int = Query(...),
 ):
     result = await db.execute(
-        text("""
+        text(r"""
             SELECT rle.id, rle.tenant_id, rle.month, rle.year,
                    rle.amount_due_paise, rle.amount_paid_paise,
                    (rle.amount_due_paise - rle.amount_paid_paise) as outstanding_paise,
                    rle.status, rle.due_date,
                    t.name as tenant_name, t.phone,
-                   b.bed_label, r.room_number
+                   b.bed_label,
+                   r.room_number,
+                   f.floor_number, f.display_name as floor_name,
+                   rt.name as room_type
             FROM rent_ledger_entries rle
             JOIN tenants t ON t.id = rle.tenant_id
             LEFT JOIN beds b ON b.id = t.bed_id
             LEFT JOIN rooms r ON r.id = b.room_id
+            LEFT JOIN floors f ON f.id = r.floor_id
+            LEFT JOIN room_types rt ON rt.id = r.room_type_id
             WHERE rle.property_id = :pid AND rle.month = :month AND rle.year = :year
-            ORDER BY r.room_number, b.bed_label
+            ORDER BY f.floor_number NULLS LAST,
+                     NULLIF(regexp_replace(r.room_number, '\D', '', 'g'), '')::int NULLS LAST,
+                     r.room_number, b.bed_label
         """),
         {"pid": str(property_id), "month": month, "year": year},
     )

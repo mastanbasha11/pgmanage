@@ -1,28 +1,21 @@
 import { useState } from 'react';
-import { Building2, Plus, BedDouble, Users, Settings, Map } from 'lucide-react';
+import { Building2, Plus, BedDouble, Users, Settings, ChevronRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { OccupancyGrid } from '@/components/occupancy-grid/OccupancyGrid';
-import { useProperties, usePropertyOccupancy, type Property } from '@/hooks/useProperties';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { useProperties, type Property } from '@/hooks/useProperties';
 import CreatePropertyDialog from './CreatePropertyDialog';
 import PropertySetupDialog from './PropertySetupDialog';
 
 function PropertyCard({
   property,
   onConfigure,
-  onView,
 }: {
   property: Property;
   onConfigure: (id: string) => void;
-  onView: (id: string) => void;
 }) {
+  const navigate = useNavigate();
   const occupancyPct = property.total_beds
     ? Math.round((property.occupied_beds / property.total_beds) * 100)
     : 0;
@@ -90,9 +83,13 @@ function PropertyCard({
             <Settings className="h-4 w-4 mr-1" />
             Configure
           </Button>
-          <Button size="sm" className="w-full" onClick={() => onView(property.id)}>
-            <Map className="h-4 w-4 mr-1" />
-            Occupancy
+          <Button
+            size="sm"
+            className="w-full"
+            onClick={() => navigate(`/properties/${property.id}`)}
+          >
+            Open
+            <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
         </div>
       </CardContent>
@@ -100,41 +97,10 @@ function PropertyCard({
   );
 }
 
-function OccupancyModal({
-  propertyId,
-  open,
-  onClose,
-}: {
-  propertyId: string | null;
-  open: boolean;
-  onClose: () => void;
-}) {
-  const { data: occupancy, isLoading } = usePropertyOccupancy(propertyId ?? '');
-  const propertyName = occupancy?.property_name ?? 'Property';
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Occupancy Grid · {propertyName}</DialogTitle>
-        </DialogHeader>
-        {isLoading ? (
-          <div className="flex h-32 items-center justify-center text-muted-foreground text-sm">
-            Loading...
-          </div>
-        ) : (
-          <OccupancyGrid floors={occupancy?.floors ?? []} />
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export default function PropertiesPage() {
   const { data, isLoading } = useProperties();
   const [showCreate, setShowCreate] = useState(false);
   const [setupId, setSetupId] = useState<string | null>(null);
-  const [viewId, setViewId] = useState<string | null>(null);
 
   return (
     <div className="space-y-6">
@@ -174,12 +140,7 @@ export default function PropertiesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data?.items.map((p) => (
-            <PropertyCard
-              key={p.id}
-              property={p}
-              onConfigure={setSetupId}
-              onView={setViewId}
-            />
+            <PropertyCard key={p.id} property={p} onConfigure={setSetupId} />
           ))}
         </div>
       )}
@@ -197,12 +158,6 @@ export default function PropertiesPage() {
           propertyId={setupId}
         />
       )}
-
-      <OccupancyModal
-        propertyId={viewId}
-        open={!!viewId}
-        onClose={() => setViewId(null)}
-      />
     </div>
   );
 }

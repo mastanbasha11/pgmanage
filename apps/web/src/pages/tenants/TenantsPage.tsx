@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Plus, Search, Phone, UserPlus, Users, Upload } from 'lucide-react';
+import { Plus, Search, Phone, UserPlus, Users, Upload, Pencil } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useTenants } from '@/hooks/useTenants';
 import { useAuthStore } from '@/store/auth';
-import { formatPaise, formatDate } from '@/lib/utils';
+import { formatPaise, formatDate, shortRoomType } from '@/lib/utils';
 import CheckinWizard from './CheckinWizard';
 import ImportTenantsDialog from './ImportTenantsDialog';
 
@@ -20,6 +20,8 @@ export default function TenantsPage() {
     property_id: selectedPropertyId ?? undefined,
     search: search || undefined,
     status: 'ACTIVE',
+    sort_by: 'room',
+    limit: 200,
   });
 
   return (
@@ -30,6 +32,7 @@ export default function TenantsPage() {
             <h1 className="text-2xl font-bold tracking-tight">Tenants</h1>
             <p className="text-sm text-muted-foreground">
               {data?.total ?? 0} active {(data?.total ?? 0) === 1 ? 'tenant' : 'tenants'}
+              {(data?.total ?? 0) === 200 && ' (showing first 200)'}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -84,21 +87,19 @@ export default function TenantsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    Tenant
-                  </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground sm:table-cell">
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tenant</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Room</th>
+                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground md:table-cell">
                     Phone
                   </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground md:table-cell">
+                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground lg:table-cell">
                     Move In
                   </th>
-                  <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
+                  <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground xl:table-cell">
                     Rent
                   </th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                    Status
-                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">Status</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground" />
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -112,25 +113,56 @@ export default function TenantsPage() {
                         {t.name}
                       </Link>
                     </td>
-                    <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                    <td className="px-4 py-3 text-sm">
+                      {t.room_number ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium tabular-nums">{t.room_number}</span>
+                          {t.bed_label && (
+                            <span className="text-muted-foreground">·{t.bed_label}</span>
+                          )}
+                          {t.room_type && (
+                            <Badge variant="outline" className="text-[9px] px-1 h-4 ml-1">
+                              {shortRoomType(t.room_type)}
+                            </Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
+                      {t.floor_name && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5">{t.floor_name}</p>
+                      )}
+                    </td>
+                    <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
                       <span className="flex items-center gap-1">
                         <Phone className="h-3 w-3" />
                         {t.phone}
                       </span>
                     </td>
-                    <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
+                    <td className="hidden px-4 py-3 text-muted-foreground lg:table-cell">
                       {formatDate(t.move_in_date)}
                     </td>
-                    <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
-                      {t.monthly_rent_paise ? formatPaise(t.monthly_rent_paise) : '—'}
+                    <td className="hidden px-4 py-3 text-right xl:table-cell tabular-nums">
                       {t.monthly_rent_paise ? (
-                        <span className="text-muted-foreground">/mo</span>
-                      ) : null}
+                        <>
+                          {formatPaise(t.monthly_rent_paise)}
+                          <span className="text-muted-foreground">/mo</span>
+                        </>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Badge variant={t.is_active ? 'default' : 'secondary'}>
                         {t.is_active ? 'Active' : t.status ?? 'Inactive'}
                       </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link to={`/tenants/${t.id}`}>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      </Link>
                     </td>
                   </tr>
                 ))}

@@ -205,9 +205,14 @@ async def list_tenants(
     status: str | None = Query(None),
     search: str | None = Query(None),
     upcoming_moveout: bool = Query(False),
-    limit: int = Query(50, le=200),
+    limit: int = Query(200, le=500),
     cursor: str | None = Query(None),
+    sort_by: str = Query("room", regex="^(room|name|move_in)$"),
 ):
+    """
+    Sorted by floor → room → bed by default ('room' sort_by) so the list mirrors
+    the physical layout of the building. Pass sort_by=name or =move_in to override.
+    """
     conditions = ["t.org_id = :org_id", "t.is_deleted = false"]
     params: dict[str, Any] = {"org_id": str(ctx.org_id)}
 
@@ -231,29 +236,131 @@ async def list_tenants(
     if upcoming_moveout:
         conditions.append("t.expected_move_out_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'")
 
+    order_by = {
+        "room": "f.floor_number NULLS LAST, "
+                "NULLIF(regexp_replace(r.room_number, '\\D', '', 'g'), '')::int NULLS LAST, "
+                "r.room_number, b.bed_label, t.name",
+        "name": "t.name",
+        "move_in": "t.move_in_date DESC, t.name",
+    }[sort_by]
+
     where_clause = " AND ".join(conditions)
     result = await db.execute(
-        text(f"""
-            SELECT t.id, t.name, t.phone, t.status, t.move_in_date, t.expected_move_out_date,
-                   b.bed_label, r.room_number, r.display_name as room_name,
+        text(rf"""
+            SELECT t.id, t.name, t.phone, t.email, t.status,
+                   t.move_in_date, t.expected_move_out_date,
+                   b.id as bed_id, b.bed_label,
+                   r.id as room_id, r.room_number, r.display_name as room_name,
+                   f.id as floor_id, f.floor_number, f.display_name as floor_name,
+                   rt.name as room_type,
                    p.name as property_name,
+                   rp.monthly_rent_paise,
                    COALESCE(rle.amount_due_paise - rle.amount_paid_paise, 0) as outstanding_paise,
-                   COALESCE(rle.status, 'UNPAID') as rent_status
+                   COALESCE(rle.status::text, 'UNPAID') as rent_status,
+                   t.is_deleted
             FROM tenants t
             LEFT JOIN beds b ON b.id = t.bed_id
             LEFT JOIN rooms r ON r.id = b.room_id
+            LEFT JOIN floors f ON f.id = r.floor_id
+            LEFT JOIN room_types rt ON rt.id = r.room_type_id
             LEFT JOIN properties p ON p.id = t.property_id
+            LEFT JOIN LATERAL (
+                SELECT monthly_rent_paise FROM rent_plans
+                WHERE tenant_id = t.id AND is_active = true
+                ORDER BY effective_from DESC LIMIT 1
+            ) rp ON true
             LEFT JOIN rent_ledger_entries rle ON rle.tenant_id = t.id
                 AND rle.month = EXTRACT(MONTH FROM CURRENT_DATE)
                 AND rle.year = EXTRACT(YEAR FROM CURRENT_DATE)
             WHERE {where_clause}
-            ORDER BY t.name
+            ORDER BY {order_by}
             LIMIT :limit
         """),
         {**params, "limit": limit},
     )
     rows = result.mappings().fetchall()
-    return {"items": [dict(r) for r in rows], "total": len(rows), "next_cursor": None}
+
+    # is_active for backwards compat with the frontend
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["is_active"] = (d.get("status") == "ACTIVE")
+        items.append(d)
+    return {"items": items, "total": len(items), "next_cursor": None}
+
+
+class TenantUpdate(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    id_type: str | None = None
+    id_number: str | None = None
+    emergency_contact_name: str | None = None
+    emergency_contact_phone: str | None = None
+    emergency_contact_relation: str | None = None
+    occupation: str | None = None
+    employer_name: str | None = None
+    hometown: str | None = None
+    permanent_address: str | None = None
+    expected_move_out_date: date | None = None
+    notes: str | None = None
+
+
+@router.patch("/tenants/{tenant_id}", summary="Update tenant profile")
+async def update_tenant(
+    tenant_id: UUID,
+    body: TenantUpdate,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        from fastapi import HTTPException
+        raise HTTPException(400, "No fields to update")
+
+    # Phone normalisation if provided
+    if "phone" in updates:
+        normalised = _normalise_phone(updates["phone"])
+        if not normalised:
+            from fastapi import HTTPException
+            raise HTTPException(400, "Invalid phone")
+        updates["phone"] = normalised
+        # Phone uniqueness per property
+        existing = await db.execute(
+            text("""
+                SELECT id FROM tenants
+                WHERE phone = :phone AND id <> :id AND is_deleted = false
+                  AND property_id = (SELECT property_id FROM tenants WHERE id = :id)
+            """),
+            {"phone": updates["phone"], "id": str(tenant_id)},
+        )
+        if existing.scalar_one_or_none():
+            raise ConflictError("A tenant with this phone number already exists in this property")
+    if "emergency_contact_phone" in updates:
+        normalised = _normalise_phone(updates["emergency_contact_phone"])
+        if not normalised:
+            from fastapi import HTTPException
+            raise HTTPException(400, "Invalid emergency contact phone")
+        updates["emergency_contact_phone"] = normalised
+
+    set_parts = []
+    for k in updates:
+        if k == "id_type":
+            set_parts.append("id_type = CAST(:id_type AS id_type_enum)")
+        else:
+            set_parts.append(f"{k} = :{k}")
+    set_clause = ", ".join(set_parts)
+    updates["id"] = str(tenant_id)
+    updates["org_id"] = str(ctx.org_id)
+    await db.execute(
+        text(
+            f"UPDATE tenants SET {set_clause}, updated_at = NOW() "
+            f"WHERE id = :id AND org_id = :org_id AND is_deleted = false"
+        ),
+        updates,
+    )
+    await db.commit()
+    return {"message": "Tenant updated"}
 
 
 @router.get("/tenants/{tenant_id}", summary="Tenant full profile")

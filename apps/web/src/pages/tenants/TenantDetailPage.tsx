@@ -7,6 +7,8 @@ import {
   IndianRupee,
   LogOut,
   ShieldAlert,
+  Pencil,
+  BedDouble,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -23,7 +25,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useTenant, useTenantLedger, useCheckout } from '@/hooks/useTenants';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useTenant, useTenantLedger, useCheckout, useUpdateTenant } from '@/hooks/useTenants';
 import { usePayments } from '@/hooks/usePayments';
 import {
   formatPaise,
@@ -31,6 +40,7 @@ import {
   formatDatetime,
   monthName,
   statusBadgeVariant,
+  shortRoomType,
 } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 
@@ -38,6 +48,7 @@ export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [showCheckout, setShowCheckout] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
 
   const { data: tenant, isLoading } = useTenant(id!);
   const { data: ledger } = useTenantLedger(id!);
@@ -72,12 +83,20 @@ export default function TenantDetailPage() {
             <p className="text-sm text-muted-foreground">Tenant Details</p>
           </div>
         </div>
-        {isActive && (
-          <Button variant="outline" onClick={() => setShowCheckout(true)} className="gap-2">
-            <LogOut className="h-4 w-4" />
-            Check Out
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {isActive && (
+            <Button variant="outline" onClick={() => setShowEdit(true)} className="gap-2">
+              <Pencil className="h-4 w-4" />
+              Edit
+            </Button>
+          )}
+          {isActive && (
+            <Button variant="outline" onClick={() => setShowCheckout(true)} className="gap-2">
+              <LogOut className="h-4 w-4" />
+              Check Out
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Summary card */}
@@ -113,6 +132,14 @@ export default function TenantDetailPage() {
             {tenant.id_type && (
               <Badge variant="outline" className="gap-1">
                 <ShieldAlert className="h-3 w-3" /> {tenant.id_type}
+              </Badge>
+            )}
+            {tenant.room_number && (
+              <Badge variant="outline" className="gap-1">
+                <BedDouble className="h-3 w-3" />
+                {tenant.floor_name ? `${tenant.floor_name} · ` : ''}Room {tenant.room_number}
+                {tenant.bed_label ? ` · Bed ${tenant.bed_label}` : ''}
+                {tenant.room_type ? ` (${shortRoomType(tenant.room_type)})` : ''}
               </Badge>
             )}
           </div>
@@ -310,6 +337,11 @@ export default function TenantDetailPage() {
         tenantId={tenant.id}
         tenantName={tenant.name}
       />
+      <EditTenantDialog
+        open={showEdit}
+        onClose={() => setShowEdit(false)}
+        tenant={tenant}
+      />
     </div>
   );
 }
@@ -404,6 +436,227 @@ function CheckoutDialog({
           </Button>
           <Button onClick={submit} disabled={isPending}>
             {isPending ? 'Saving...' : 'Confirm Checkout'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface EditableTenant {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  id_type?: string;
+  id_number?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  emergency_contact_relation?: string;
+  occupation?: string;
+  hometown?: string;
+  permanent_address?: string;
+  expected_move_out_date?: string;
+  notes?: string;
+}
+
+function EditTenantDialog({
+  open,
+  onClose,
+  tenant,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenant: EditableTenant;
+}) {
+  const update = useUpdateTenant(tenant.id);
+  const { toast } = useToast();
+  const [form, setForm] = useState({
+    name: tenant.name,
+    phone: tenant.phone,
+    email: tenant.email ?? '',
+    id_type: (tenant.id_type as 'AADHAR' | 'PASSPORT' | 'DRIVING_LICENSE' | 'OTHER') ?? 'AADHAR',
+    id_number: tenant.id_number ?? '',
+    emergency_contact_name: tenant.emergency_contact_name ?? '',
+    emergency_contact_phone: tenant.emergency_contact_phone ?? '',
+    emergency_contact_relation: tenant.emergency_contact_relation ?? '',
+    occupation: tenant.occupation ?? '',
+    hometown: tenant.hometown ?? '',
+    permanent_address: tenant.permanent_address ?? '',
+    expected_move_out_date: tenant.expected_move_out_date ?? '',
+    notes: tenant.notes ?? '',
+  });
+
+  async function submit() {
+    try {
+      // Only send changed fields
+      const payload: Record<string, string | undefined> = {};
+      const orig: Record<string, string | undefined> = {
+        name: tenant.name,
+        phone: tenant.phone,
+        email: tenant.email,
+        id_type: tenant.id_type,
+        id_number: tenant.id_number,
+        emergency_contact_name: tenant.emergency_contact_name,
+        emergency_contact_phone: tenant.emergency_contact_phone,
+        emergency_contact_relation: tenant.emergency_contact_relation,
+        occupation: tenant.occupation,
+        hometown: tenant.hometown,
+        permanent_address: tenant.permanent_address,
+        expected_move_out_date: tenant.expected_move_out_date,
+        notes: tenant.notes,
+      };
+      for (const [k, v] of Object.entries(form)) {
+        if (v !== '' && v !== orig[k]) payload[k] = v;
+      }
+      if (Object.keys(payload).length === 0) {
+        toast({ title: 'No changes' });
+        onClose();
+        return;
+      }
+      await update.mutateAsync(payload);
+      toast({ title: 'Tenant updated' });
+      onClose();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
+          ?.message ?? 'Update failed';
+      toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit tenant</DialogTitle>
+          <DialogDescription>
+            Updates basic profile info. To change bed assignment or rent, check the tenant out and
+            re-check in (we'll add a "move bed" flow later).
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label>Name *</Label>
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Phone *</Label>
+              <Input
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label>Email</Label>
+              <Input
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>ID Type</Label>
+              <Select
+                value={form.id_type}
+                onValueChange={(v) =>
+                  setForm({ ...form, id_type: v as typeof form.id_type })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['AADHAR', 'PASSPORT', 'DRIVING_LICENSE', 'OTHER'] as const).map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t.replace(/_/g, ' ')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>ID Number</Label>
+              <Input
+                value={form.id_number}
+                onChange={(e) => setForm({ ...form, id_number: e.target.value })}
+              />
+            </div>
+          </div>
+          <hr className="my-2" />
+          <p className="text-xs font-medium text-muted-foreground">Emergency contact</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Name</Label>
+              <Input
+                value={form.emergency_contact_name}
+                onChange={(e) => setForm({ ...form, emergency_contact_name: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Phone</Label>
+              <Input
+                value={form.emergency_contact_phone}
+                onChange={(e) => setForm({ ...form, emergency_contact_phone: e.target.value })}
+              />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Relation</Label>
+            <Input
+              value={form.emergency_contact_relation}
+              onChange={(e) => setForm({ ...form, emergency_contact_relation: e.target.value })}
+            />
+          </div>
+          <hr className="my-2" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Occupation</Label>
+              <Input
+                value={form.occupation}
+                onChange={(e) => setForm({ ...form, occupation: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Hometown</Label>
+              <Input
+                value={form.hometown}
+                onChange={(e) => setForm({ ...form, hometown: e.target.value })}
+              />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Permanent address</Label>
+            <Input
+              value={form.permanent_address}
+              onChange={(e) => setForm({ ...form, permanent_address: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Expected move-out</Label>
+            <Input
+              type="date"
+              value={form.expected_move_out_date}
+              onChange={(e) => setForm({ ...form, expected_move_out_date: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Notes</Label>
+            <Input
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={update.isPending}>
+            {update.isPending ? 'Saving...' : 'Save changes'}
           </Button>
         </DialogFooter>
       </DialogContent>

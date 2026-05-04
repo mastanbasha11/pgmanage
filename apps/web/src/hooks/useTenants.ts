@@ -6,15 +6,24 @@ export interface Tenant {
   name: string;
   phone: string;
   email?: string;
-  property_id: string;
-  bed_id: string;
+  property_id?: string;
+  property_name?: string;
+  bed_id?: string;
   bed_label?: string;
+  room_id?: string;
   room_number?: string;
+  room_name?: string;
+  room_type?: string;
+  floor_id?: string;
+  floor_number?: number;
+  floor_name?: string;
   is_active: boolean;
   status: 'ACTIVE' | 'CHECKED_OUT' | 'RESERVED';
   move_in_date: string;
   expected_move_out_date?: string;
   monthly_rent_paise: number;
+  outstanding_paise?: number;
+  rent_status?: string;
 }
 
 export interface TenantsResponse {
@@ -72,10 +81,42 @@ export function useTenants(params?: {
   status?: string;
   search?: string;
   limit?: number;
+  sort_by?: 'room' | 'name' | 'move_in';
 }) {
   return useQuery<TenantsResponse>({
     queryKey: ['tenants', params],
-    queryFn: () => api.get('/tenants', { params }).then((r) => r.data),
+    queryFn: () =>
+      api
+        .get('/tenants', { params: { limit: 200, sort_by: 'room', ...params } })
+        .then((r) => r.data),
+  });
+}
+
+export interface UpdateTenantPayload {
+  name?: string;
+  phone?: string;
+  email?: string;
+  id_type?: 'AADHAR' | 'PASSPORT' | 'DRIVING_LICENSE' | 'OTHER';
+  id_number?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  emergency_contact_relation?: string;
+  occupation?: string;
+  hometown?: string;
+  permanent_address?: string;
+  expected_move_out_date?: string;
+  notes?: string;
+}
+
+export function useUpdateTenant(tenantId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: UpdateTenantPayload) =>
+      api.patch(`/tenants/${tenantId}`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenants'] });
+      qc.invalidateQueries({ queryKey: ['tenants', tenantId] });
+    },
   });
 }
 

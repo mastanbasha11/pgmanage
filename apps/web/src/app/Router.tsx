@@ -8,6 +8,7 @@ import SignupPage from '@/pages/auth/SignupPage';
 import Layout from './Layout';
 import DashboardPage from '@/pages/dashboard/DashboardPage';
 import PropertiesPage from '@/pages/properties/PropertiesPage';
+import PropertyDetailPage from '@/pages/properties/PropertyDetailPage';
 import TenantsPage from '@/pages/tenants/TenantsPage';
 import TenantDetailPage from '@/pages/tenants/TenantDetailPage';
 import RentDashboardPage from '@/pages/rent/RentDashboardPage';
@@ -122,6 +123,7 @@ export default function App() {
                   <Routes>
                     <Route index element={<DashboardPage />} />
                     <Route path="properties" element={<PropertiesPage />} />
+                    <Route path="properties/:id" element={<PropertyDetailPage />} />
                     <Route path="tenants" element={<TenantsPage />} />
                     <Route path="tenants/:id" element={<TenantDetailPage />} />
                     <Route path="rent" element={<RentDashboardPage />} />
