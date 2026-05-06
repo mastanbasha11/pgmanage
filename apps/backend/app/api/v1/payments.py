@@ -21,10 +21,13 @@ router = APIRouter()
 class PaymentCreate(BaseModel):
     tenant_id: UUID
     amount_paise: int
+    discount_paise: int = 0
+    for_days: int | None = None
     payment_type: str
     payment_mode: str = "CASH"
     reference_number: str | None = None
     upi_id: str | None = None
+    paid_to: str | None = None
     for_month: int | None = None
     for_year: int | None = None
     notes: str | None = None
@@ -68,22 +71,28 @@ async def record_payment(
     payment_result = await db.execute(
         text("""
             INSERT INTO payments (
-                org_id, property_id, tenant_id, amount_paise, payment_type,
-                payment_mode, reference_number, upi_id, for_month, for_year,
-                collected_by, collected_at, notes, idempotency_key
+                org_id, property_id, tenant_id, amount_paise, discount_paise,
+                for_days, payment_type, payment_mode, reference_number, upi_id,
+                paid_to, for_month, for_year, collected_by, collected_at,
+                notes, idempotency_key
             )
             VALUES (
-                :org_id, :pid, :tenant_id, :amount, CAST(:pay_type AS payment_type_enum),
-                CAST(:pay_mode AS payment_mode_enum), :ref_num, :upi, :month, :year,
-                :collected_by, :collected_at, :notes, :idempotency_key
+                :org_id, :pid, :tenant_id, :amount, :discount,
+                :for_days, CAST(:pay_type AS payment_type_enum),
+                CAST(:pay_mode AS payment_mode_enum), :ref_num, :upi,
+                :paid_to, :month, :year, :collected_by, :collected_at,
+                :notes, :idempotency_key
             )
             RETURNING id
         """),
         {
             "org_id": str(ctx.org_id), "pid": str(property_id),
             "tenant_id": str(body.tenant_id), "amount": body.amount_paise,
+            "discount": max(int(body.discount_paise or 0), 0),
+            "for_days": body.for_days,
             "pay_type": body.payment_type, "pay_mode": body.payment_mode,
             "ref_num": body.reference_number, "upi": body.upi_id,
+            "paid_to": (body.paid_to or "").strip() or None,
             "month": body.for_month, "year": body.for_year,
             "collected_by": str(ctx.user_id), "collected_at": collected_at,
             "notes": body.notes, "idempotency_key": idempotency_key,
@@ -95,7 +104,7 @@ async def record_payment(
     if body.payment_type == "RENT" and body.for_month and body.for_year:
         ledger_result = await db.execute(
             text("""
-                SELECT id, amount_due_paise, amount_paid_paise
+                SELECT id, amount_due_paise, amount_paid_paise, discount_paise
                 FROM rent_ledger_entries
                 WHERE tenant_id = :tid AND month = :month AND year = :year
             """),
@@ -104,15 +113,29 @@ async def record_payment(
         ledger = ledger_result.mappings().fetchone()
 
         if ledger:
-            new_paid = ledger["amount_paid_paise"] + body.amount_paise
-            new_status = "PAID" if new_paid >= ledger["amount_due_paise"] else "PARTIAL"
+            new_paid = (ledger["amount_paid_paise"] or 0) + body.amount_paise
+            new_discount = (ledger["discount_paise"] or 0) + max(int(body.discount_paise or 0), 0)
+            covered = new_paid + new_discount
+            due = ledger["amount_due_paise"] or 0
+            if covered >= due:
+                new_status = "PAID"
+            elif covered > 0:
+                new_status = "PARTIAL"
+            else:
+                new_status = "UNPAID"
             await db.execute(
                 text("""
                     UPDATE rent_ledger_entries
-                    SET amount_paid_paise = :paid, status = CAST(:status AS rent_status_enum), updated_at = NOW()
+                    SET amount_paid_paise = :paid,
+                        discount_paise = :discount,
+                        status = CAST(:status AS rent_status_enum),
+                        updated_at = NOW()
                     WHERE id = :id
                 """),
-                {"paid": new_paid, "status": new_status, "id": str(ledger["id"])},
+                {
+                    "paid": new_paid, "discount": new_discount,
+                    "status": new_status, "id": str(ledger["id"]),
+                },
             )
 
     # Audit log (every financial write)
@@ -197,13 +220,16 @@ async def rent_ledger(
     month: int = Query(...),
     year: int = Query(...),
 ):
+    # First-of-the-viewed-month — used to exclude tenants who already checked out
+    # before this month (e.g. ledger generated in advance, then tenant left).
     result = await db.execute(
         text(r"""
             SELECT rle.id, rle.tenant_id, rle.month, rle.year,
-                   rle.amount_due_paise, rle.amount_paid_paise,
-                   (rle.amount_due_paise - rle.amount_paid_paise) as outstanding_paise,
+                   rle.amount_due_paise, rle.amount_paid_paise, rle.discount_paise,
+                   (rle.amount_due_paise - rle.amount_paid_paise - rle.discount_paise) as outstanding_paise,
                    rle.status, rle.due_date,
                    t.name as tenant_name, t.phone,
+                   t.actual_move_out_date,
                    b.bed_label,
                    r.room_number,
                    f.floor_number, f.display_name as floor_name,
@@ -215,6 +241,10 @@ async def rent_ledger(
             LEFT JOIN floors f ON f.id = r.floor_id
             LEFT JOIN room_types rt ON rt.id = r.room_type_id
             WHERE rle.property_id = :pid AND rle.month = :month AND rle.year = :year
+              AND (
+                t.actual_move_out_date IS NULL
+                OR t.actual_move_out_date >= make_date(:year, :month, 1)
+              )
             ORDER BY f.floor_number NULLS LAST,
                      NULLIF(regexp_replace(r.room_number, '\D', '', 'g'), '')::int NULLS LAST,
                      r.room_number, b.bed_label
@@ -223,10 +253,45 @@ async def rent_ledger(
     )
     rows = result.mappings().fetchall()
 
-    # Aggregate stats
-    items = [dict(r) for r in rows]
+    # Recompute status to reflect discount in case some entries were saved before
+    # the discount column existed.
+    items = []
+    for r in rows:
+        d = dict(r)
+        covered = (d.get("amount_paid_paise") or 0) + (d.get("discount_paise") or 0)
+        due = d.get("amount_due_paise") or 0
+        if covered >= due and due > 0:
+            d["status"] = "PAID"
+        elif covered > 0:
+            d["status"] = "PARTIAL"
+        else:
+            d["status"] = "UNPAID"
+        items.append(d)
+
     total_due = sum(r["amount_due_paise"] for r in items)
     total_paid = sum(r["amount_paid_paise"] for r in items)
+    total_discount = sum(r["discount_paise"] or 0 for r in items)
+    settled = total_paid + total_discount
+
+    # Per-collector breakdown for the same month/year (RENT payments only).
+    by_collector = await db.execute(
+        text("""
+            SELECT
+                COALESCE(NULLIF(p.paid_to, ''), u.name, 'Unattributed') AS collector,
+                COUNT(*) AS payments,
+                SUM(p.amount_paise) AS amount_paise
+            FROM payments p
+            LEFT JOIN users u ON u.id = p.collected_by
+            WHERE p.property_id = :pid
+              AND p.is_deleted = false
+              AND p.payment_type = 'RENT'
+              AND p.for_month = :month AND p.for_year = :year
+            GROUP BY 1
+            ORDER BY amount_paise DESC
+        """),
+        {"pid": str(property_id), "month": month, "year": year},
+    )
+    collectors = [dict(c) for c in by_collector.mappings().fetchall()]
 
     return {
         "property_id": str(property_id),
@@ -236,9 +301,12 @@ async def rent_ledger(
         "stats": {
             "expected_paise": total_due,
             "collected_paise": total_paid,
-            "outstanding_paise": total_due - total_paid,
-            "collection_rate": round(total_paid / total_due * 100, 1) if total_due > 0 else 0,
+            "discount_paise": total_discount,
+            "settled_paise": settled,
+            "outstanding_paise": max(total_due - settled, 0),
+            "collection_rate": round(settled / total_due * 100, 1) if total_due > 0 else 0,
         },
+        "collectors": collectors,
     }
 
 
@@ -248,7 +316,14 @@ async def overdue_tenants(
     db: AsyncSession = Depends(get_db),
     property_id: UUID | None = Query(None),
 ):
-    conditions = ["rle.status IN ('UNPAID'::rent_status_enum, 'PARTIAL'::rent_status_enum)", "t.status = 'ACTIVE'::tenant_status_enum", "t.org_id = :org_id"]
+    conditions = [
+        "rle.status IN ('UNPAID'::rent_status_enum, 'PARTIAL'::rent_status_enum)",
+        "t.status = 'ACTIVE'::tenant_status_enum",
+        "t.org_id = :org_id",
+        # Exclude entries where the bill is already covered by paid+discount,
+        # in case status hasn't been recomputed yet.
+        "(rle.amount_due_paise - rle.amount_paid_paise - COALESCE(rle.discount_paise,0)) > 0",
+    ]
     params: dict[str, Any] = {"org_id": str(ctx.org_id)}
 
     if property_id:
@@ -260,7 +335,8 @@ async def overdue_tenants(
         text(f"""
             SELECT t.id, t.name, t.phone,
                    COUNT(rle.id) as months_overdue,
-                   SUM(rle.amount_due_paise - rle.amount_paid_paise) as total_outstanding_paise,
+                   SUM(rle.amount_due_paise - rle.amount_paid_paise - COALESCE(rle.discount_paise,0))
+                       as total_outstanding_paise,
                    b.bed_label, r.room_number
             FROM tenants t
             JOIN rent_ledger_entries rle ON rle.tenant_id = t.id

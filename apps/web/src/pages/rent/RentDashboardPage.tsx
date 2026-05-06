@@ -2,7 +2,16 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { IndianRupee, RefreshCw, AlertCircle, TrendingUp, Wallet, Receipt } from 'lucide-react';
+import {
+  IndianRupee,
+  RefreshCw,
+  AlertCircle,
+  TrendingUp,
+  Wallet,
+  Receipt,
+  Tag,
+  Users,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -53,6 +62,7 @@ interface LedgerEntry {
   year: number;
   amount_due_paise: number;
   amount_paid_paise: number;
+  discount_paise: number;
   outstanding_paise: number;
   status: string;
   bed_label?: string;
@@ -62,11 +72,20 @@ interface LedgerEntry {
   room_type?: string;
 }
 
+function daysInMonth(month: number, year: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
 const paymentSchema = z.object({
-  amount_rupees: z.coerce.number().positive('Amount must be > 0'),
+  amount_rupees: z.coerce.number().min(0, 'Amount must be ≥ 0'),
+  discount_rupees: z.coerce.number().min(0).default(0),
+  for_days: z.coerce.number().int().min(0).max(31).optional(),
   payment_mode: z.enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE']),
-  reference_number: z.string().optional(),
+  paid_to: z.string().optional(),
   notes: z.string().optional(),
+}).refine((d) => (d.amount_rupees ?? 0) + (d.discount_rupees ?? 0) > 0, {
+  message: 'Enter an amount or a discount',
+  path: ['amount_rupees'],
 });
 
 type PaymentFormData = z.infer<typeof paymentSchema>;
@@ -89,7 +108,11 @@ function RecordPaymentDialog({
     formState: { errors },
   } = useForm<PaymentFormData>({
     resolver: zodResolver(paymentSchema),
-    defaultValues: { payment_mode: 'CASH' },
+    defaultValues: {
+      payment_mode: 'CASH',
+      discount_rupees: 0,
+      for_days: entry ? daysInMonth(entry.month, entry.year) : undefined,
+    },
   });
 
   if (!entry) return null;
@@ -99,12 +122,14 @@ function RecordPaymentDialog({
     try {
       await mutateAsync({
         tenant_id: entry.tenant_id,
-        amount_paise: rupeesToPaise(data.amount_rupees),
+        amount_paise: rupeesToPaise(data.amount_rupees ?? 0),
+        discount_paise: rupeesToPaise(data.discount_rupees ?? 0),
+        for_days: data.for_days,
         payment_type: 'RENT',
         payment_mode: data.payment_mode,
         for_month: entry.month,
         for_year: entry.year,
-        reference_number: data.reference_number || undefined,
+        paid_to: data.paid_to?.trim() || undefined,
         notes: data.notes || undefined,
       });
       toast({
@@ -134,53 +159,87 @@ function RecordPaymentDialog({
             {entry.tenant_name} — {monthName(entry.month)} {entry.year}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit(submit)} className="space-y-4">
-          <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm flex justify-between">
-            <span className="text-muted-foreground">Outstanding</span>
-            <span className="font-semibold text-destructive">
-              {formatPaise(entry.outstanding_paise)}
-            </span>
+        <form onSubmit={handleSubmit(submit)} className="space-y-3">
+          <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm grid grid-cols-3 gap-2">
+            <div>
+              <p className="text-[11px] text-muted-foreground">Due</p>
+              <p className="font-semibold tabular-nums">{formatPaise(entry.amount_due_paise)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] text-muted-foreground">Already settled</p>
+              <p className="font-semibold tabular-nums">
+                {formatPaise((entry.amount_paid_paise ?? 0) + (entry.discount_paise ?? 0))}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] text-muted-foreground">Outstanding</p>
+              <p className="font-semibold tabular-nums text-destructive">
+                {formatPaise(entry.outstanding_paise)}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Amount paid (₹)</Label>
+              <Input
+                type="number"
+                step="1"
+                autoFocus
+                placeholder={String(Math.round(entry.outstanding_paise / 100))}
+                {...register('amount_rupees')}
+              />
+              {errors.amount_rupees && (
+                <p className="text-xs text-destructive mt-1">{errors.amount_rupees.message}</p>
+              )}
+            </div>
+            <div>
+              <Label>Discount (₹)</Label>
+              <Input type="number" step="1" placeholder="0" {...register('discount_rupees')} />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Counts toward closing the rent — paid + discount ≥ due ⇒ PAID
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Days covered</Label>
+              <Input
+                type="number"
+                min={0}
+                max={31}
+                placeholder={String(daysInMonth(entry.month, entry.year))}
+                {...register('for_days')}
+              />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Defaults to {daysInMonth(entry.month, entry.year)} days for{' '}
+                {monthName(entry.month)} {entry.year}.
+              </p>
+            </div>
+            <div>
+              <Label>Payment Mode</Label>
+              <Select
+                value={watch('payment_mode')}
+                onValueChange={(v) => setValue('payment_mode', v as PaymentMode)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE'] as const).map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m.replace(/_/g, ' ')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div>
-            <Label>Amount (₹) *</Label>
-            <Input
-              type="number"
-              step="1"
-              autoFocus
-              placeholder={String(Math.round(entry.outstanding_paise / 100))}
-              {...register('amount_rupees')}
-            />
-            {errors.amount_rupees && (
-              <p className="text-xs text-destructive mt-1">{errors.amount_rupees.message}</p>
-            )}
-          </div>
-
-          <div>
-            <Label>Payment Mode *</Label>
-            <Select
-              value={watch('payment_mode')}
-              onValueChange={(v) => setValue('payment_mode', v as PaymentMode)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE'] as const).map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m.replace(/_/g, ' ')}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label>Reference / UTR (optional)</Label>
-            <Input
-              {...register('reference_number')}
-              placeholder="UPI ref / cheque number"
-            />
+            <Label>Paid to (optional)</Label>
+            <Input {...register('paid_to')} placeholder="Who received the cash, e.g. Suresh" />
           </div>
 
           <div>
@@ -280,10 +339,24 @@ export default function RentDashboardPage() {
   }
 
   const entries: LedgerEntry[] = ledger?.items ?? [];
-  const totalDue = entries.reduce((s, e) => s + e.amount_due_paise, 0);
-  const totalPaid = entries.reduce((s, e) => s + e.amount_paid_paise, 0);
-  const totalOutstanding = entries.reduce((s, e) => s + e.outstanding_paise, 0);
-  const collectionPct = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
+  // Backend already returns these aggregated; recompute locally as a fallback
+  // (works even on older responses that didn't carry stats).
+  const stats = ledger?.stats ?? {
+    expected_paise: entries.reduce((s, e) => s + (e.amount_due_paise ?? 0), 0),
+    collected_paise: entries.reduce((s, e) => s + (e.amount_paid_paise ?? 0), 0),
+    discount_paise: entries.reduce((s, e) => s + (e.discount_paise ?? 0), 0),
+    settled_paise:
+      entries.reduce((s, e) => s + (e.amount_paid_paise ?? 0), 0) +
+      entries.reduce((s, e) => s + (e.discount_paise ?? 0), 0),
+    outstanding_paise: entries.reduce((s, e) => s + (e.outstanding_paise ?? 0), 0),
+    collection_rate: 0,
+  };
+  const collectors: Array<{ collector: string; payments: number; amount_paise: number }> =
+    ledger?.collectors ?? [];
+  const collectionPct =
+    stats.expected_paise > 0
+      ? Math.round((stats.settled_paise / stats.expected_paise) * 100)
+      : 0;
 
   return (
     <>
@@ -335,22 +408,72 @@ export default function RentDashboardPage() {
 
         {/* Summary — totals hidden for managers, only progress shown */}
         {showMoneyTotals ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Expected" value={formatPaise(totalDue)} icon={TrendingUp} />
-            <StatCard
-              label="Collected"
-              value={formatPaise(totalPaid)}
-              icon={Wallet}
-              tone="success"
-            />
-            <StatCard
-              label="Outstanding"
-              value={formatPaise(totalOutstanding)}
-              icon={Receipt}
-              tone={totalOutstanding > 0 ? 'destructive' : 'success'}
-            />
-            <StatCard label="Collection rate" value={`${collectionPct}%`} icon={TrendingUp} />
-          </div>
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <StatCard
+                label="Expected"
+                value={formatPaise(stats.expected_paise)}
+                icon={TrendingUp}
+              />
+              <StatCard
+                label="Collected"
+                value={formatPaise(stats.collected_paise)}
+                icon={Wallet}
+                tone="success"
+              />
+              <StatCard
+                label="Discount given"
+                value={formatPaise(stats.discount_paise)}
+                icon={Tag}
+                tone={stats.discount_paise > 0 ? 'success' : 'default'}
+              />
+              <StatCard
+                label="Outstanding"
+                value={formatPaise(stats.outstanding_paise)}
+                icon={Receipt}
+                tone={stats.outstanding_paise > 0 ? 'destructive' : 'success'}
+              />
+              <StatCard
+                label="Collection rate"
+                value={`${collectionPct}%`}
+                icon={TrendingUp}
+              />
+            </div>
+
+            {/* Collected by breakdown */}
+            {collectors.length > 0 && (
+              <Card>
+                <CardContent className="pt-4 pb-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-accent">
+                      <Users className="h-3.5 w-3.5" />
+                    </div>
+                    <p className="text-sm font-medium">
+                      Collected by — {monthName(month)} {year}
+                    </p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {collectors.map((c) => (
+                      <div
+                        key={c.collector}
+                        className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{c.collector}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {c.payments} {c.payments === 1 ? 'payment' : 'payments'}
+                          </p>
+                        </div>
+                        <p className="font-semibold tabular-nums">
+                          {formatPaise(c.amount_paise)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             <StatCard label="Collection rate" value={`${collectionPct}%`} icon={TrendingUp} />
@@ -364,7 +487,7 @@ export default function RentDashboardPage() {
         )}
 
         {/* Progress bar */}
-        {totalDue > 0 && (
+        {stats.expected_paise > 0 && (
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Collection progress</span>

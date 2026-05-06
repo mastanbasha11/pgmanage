@@ -18,9 +18,12 @@ export interface Payment {
   tenant_name: string;
   tenant_phone?: string;
   amount_paise: number;
+  discount_paise?: number;
+  for_days?: number;
   payment_type: PaymentType;
   payment_mode: PaymentMode;
   reference_number?: string;
+  paid_to?: string;
   for_month?: number;
   for_year?: number;
   collected_at: string;
@@ -31,13 +34,30 @@ export interface Payment {
 export interface RecordPaymentPayload {
   tenant_id: string;
   amount_paise: number;
+  discount_paise?: number;
+  for_days?: number;
   payment_type: PaymentType;
   payment_mode: PaymentMode;
   for_month?: number;
   for_year?: number;
-  reference_number?: string;
+  paid_to?: string;
   upi_id?: string;
   notes?: string;
+}
+
+export interface CollectorRow {
+  collector: string;
+  payments: number;
+  amount_paise: number;
+}
+
+export interface RentLedgerStats {
+  expected_paise: number;
+  collected_paise: number;
+  discount_paise: number;
+  settled_paise: number;
+  outstanding_paise: number;
+  collection_rate: number;
 }
 
 export function usePayments(params?: {
