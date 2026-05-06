@@ -4,22 +4,32 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useTenants } from '@/hooks/useTenants';
 import { useAuthStore } from '@/store/auth';
 import { formatPaise, formatDate, shortRoomType } from '@/lib/utils';
 import CheckinWizard from './CheckinWizard';
 import ImportTenantsDialog from './ImportTenantsDialog';
 
+type StatusFilter = 'ACTIVE' | 'CHECKED_OUT' | 'ALL';
+
 export default function TenantsPage() {
   const [search, setSearch] = useState('');
   const [showCheckin, setShowCheckin] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ACTIVE');
   const { selectedPropertyId } = useAuthStore();
 
   const { data, isLoading } = useTenants({
     property_id: selectedPropertyId ?? undefined,
     search: search || undefined,
-    status: 'ACTIVE',
+    status: statusFilter === 'ALL' ? undefined : statusFilter,
     sort_by: 'room',
     limit: 200,
   });
@@ -31,7 +41,13 @@ export default function TenantsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Tenants</h1>
             <p className="text-sm text-muted-foreground">
-              {data?.total ?? 0} active {(data?.total ?? 0) === 1 ? 'tenant' : 'tenants'}
+              {data?.total ?? 0}{' '}
+              {statusFilter === 'ACTIVE'
+                ? 'active'
+                : statusFilter === 'CHECKED_OUT'
+                ? 'checked-out'
+                : 'total'}{' '}
+              {(data?.total ?? 0) === 1 ? 'tenant' : 'tenants'}
               {(data?.total ?? 0) === 200 && ' (showing first 200)'}
             </p>
           </div>
@@ -52,14 +68,29 @@ export default function TenantsPage() {
           </div>
         </div>
 
-        <div className="relative max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search by name or phone..."
-            className="pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search by name or phone..."
+              className="pl-9"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as StatusFilter)}
+          >
+            <SelectTrigger className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ACTIVE">Active</SelectItem>
+              <SelectItem value="CHECKED_OUT">Checked-out</SelectItem>
+              <SelectItem value="ALL">All tenants</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {isLoading ? (
@@ -73,22 +104,34 @@ export default function TenantsPage() {
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <Users className="h-6 w-6 text-muted-foreground" />
             </div>
-            <p className="font-medium">No tenants yet</p>
-            <p className="text-sm text-muted-foreground">
-              Check in your first tenant to get started.
+            <p className="font-medium">
+              {statusFilter === 'CHECKED_OUT'
+                ? 'No checked-out tenants'
+                : search
+                ? 'No matches'
+                : 'No tenants yet'}
             </p>
-            <Button className="mt-4 gap-2" onClick={() => setShowCheckin(true)}>
-              <Plus className="h-4 w-4" />
-              Check in tenant
-            </Button>
+            <p className="text-sm text-muted-foreground">
+              {statusFilter === 'CHECKED_OUT'
+                ? 'Tenants who have checked out will appear here.'
+                : search
+                ? 'Try a different name or phone number.'
+                : 'Check in your first tenant to get started.'}
+            </p>
+            {statusFilter !== 'CHECKED_OUT' && !search && (
+              <Button className="mt-4 gap-2" onClick={() => setShowCheckin(true)}>
+                <Plus className="h-4 w-4" />
+                Check in tenant
+              </Button>
+            )}
           </div>
         ) : (
           <div className="overflow-hidden rounded-lg border bg-card">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tenant</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Room</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tenant</th>
                   <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground md:table-cell">
                     Phone
                   </th>
@@ -105,23 +148,19 @@ export default function TenantsPage() {
               <tbody className="divide-y">
                 {data?.items.map((t) => (
                   <tr key={t.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <Link
-                        to={`/tenants/${t.id}`}
-                        className="font-medium hover:underline text-foreground hover:text-accent"
-                      >
-                        {t.name}
-                      </Link>
-                    </td>
                     <td className="px-4 py-3 text-sm">
                       {t.room_number ? (
                         <div className="flex items-center gap-1.5">
-                          <span className="font-medium tabular-nums">{t.room_number}</span>
+                          <span className="inline-flex items-center justify-center min-w-[2.25rem] rounded-md bg-accent/10 px-1.5 py-0.5 text-accent font-bold tabular-nums">
+                            {t.room_number}
+                          </span>
                           {t.bed_label && (
-                            <span className="text-muted-foreground">·{t.bed_label}</span>
+                            <span className="text-muted-foreground tabular-nums">
+                              ·{t.bed_label}
+                            </span>
                           )}
                           {t.room_type && (
-                            <Badge variant="outline" className="text-[9px] px-1 h-4 ml-1">
+                            <Badge variant="outline" className="text-[9px] px-1 h-4 ml-0.5">
                               {shortRoomType(t.room_type)}
                             </Badge>
                           )}
@@ -129,8 +168,16 @@ export default function TenantsPage() {
                       ) : (
                         <span className="text-muted-foreground/40">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Link
+                        to={`/tenants/${t.id}`}
+                        className="font-medium hover:underline text-foreground hover:text-accent"
+                      >
+                        {t.name}
+                      </Link>
                       {t.floor_name && (
-                        <p className="text-[10px] text-muted-foreground mt-0.5">{t.floor_name}</p>
+                        <p className="text-[10px] text-muted-foreground">{t.floor_name}</p>
                       )}
                     </td>
                     <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">

@@ -223,7 +223,12 @@ async def list_tenants(
         pids = [str(p) for p in ctx.property_ids]
         conditions.append(f"t.property_id = ANY(ARRAY{pids}::uuid[])")
 
-    if status:
+    # status=None or "ACTIVE" → only active (default, back-compat).
+    # status="ALL" → no status filter (active + checked-out + reserved).
+    # status="CHECKED_OUT" / etc. → exact match.
+    if status and status.upper() == "ALL":
+        pass  # no status filter
+    elif status:
         conditions.append("t.status = CAST(:status AS tenant_status_enum)")
         params["status"] = status
     else:

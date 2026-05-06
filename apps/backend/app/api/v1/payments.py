@@ -47,6 +47,12 @@ async def record_payment(
     """
     idempotency_key = x_idempotency_key or str(uuid4())
 
+    # Reject zero-everything submissions (frontend should already block, but
+    # defend against malformed clients / direct API calls).
+    if (body.amount_paise or 0) <= 0 and (body.discount_paise or 0) <= 0:
+        from fastapi import HTTPException
+        raise HTTPException(400, "Either amount_paise or discount_paise must be > 0")
+
     # Check idempotency
     existing = await db.execute(
         text("SELECT id FROM payments WHERE idempotency_key = :key"),
