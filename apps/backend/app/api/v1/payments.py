@@ -248,6 +248,8 @@ async def rent_ledger(
             LEFT JOIN floors f ON f.id = r.floor_id
             LEFT JOIN room_types rt ON rt.id = r.room_type_id
             LEFT JOIN LATERAL (
+                -- Only attribute a "collector" when actual cash was collected.
+                -- Discount-only rows (amount = 0) shouldn't surface a name.
                 SELECT array_agg(DISTINCT COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name))
                   FILTER (WHERE COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name) IS NOT NULL)
                     AS collected_by
@@ -258,6 +260,7 @@ async def rent_ledger(
                   AND p.payment_type = 'RENT'
                   AND p.for_month = rle.month
                   AND p.for_year = rle.year
+                  AND p.amount_paise > 0
             ) collectors ON true
             WHERE rle.property_id = :pid AND rle.month = :month AND rle.year = :year
               AND (
@@ -292,7 +295,8 @@ async def rent_ledger(
     total_discount = sum(r["discount_paise"] or 0 for r in items)
     settled = total_paid + total_discount
 
-    # Per-collector breakdown for the same month/year (RENT payments only).
+    # Per-collector breakdown for the same month/year (cash-only — exclude
+    # discount-only rows so the breakdown reflects who actually handled money).
     by_collector = await db.execute(
         text("""
             SELECT
@@ -305,6 +309,7 @@ async def rent_ledger(
               AND p.is_deleted = false
               AND p.payment_type = 'RENT'
               AND p.for_month = :month AND p.for_year = :year
+              AND p.amount_paise > 0
             GROUP BY 1
             ORDER BY amount_paise DESC
         """),
