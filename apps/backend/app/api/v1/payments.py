@@ -239,13 +239,26 @@ async def rent_ledger(
                    b.bed_label,
                    r.room_number,
                    f.floor_number, f.display_name as floor_name,
-                   rt.name as room_type
+                   rt.name as room_type,
+                   collectors.collected_by
             FROM rent_ledger_entries rle
             JOIN tenants t ON t.id = rle.tenant_id
             LEFT JOIN beds b ON b.id = t.bed_id
             LEFT JOIN rooms r ON r.id = b.room_id
             LEFT JOIN floors f ON f.id = r.floor_id
             LEFT JOIN room_types rt ON rt.id = r.room_type_id
+            LEFT JOIN LATERAL (
+                SELECT array_agg(DISTINCT COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name))
+                  FILTER (WHERE COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name) IS NOT NULL)
+                    AS collected_by
+                FROM payments p
+                LEFT JOIN users u ON u.id = p.collected_by
+                WHERE p.tenant_id = rle.tenant_id
+                  AND p.is_deleted = false
+                  AND p.payment_type = 'RENT'
+                  AND p.for_month = rle.month
+                  AND p.for_year = rle.year
+            ) collectors ON true
             WHERE rle.property_id = :pid AND rle.month = :month AND rle.year = :year
               AND (
                 t.actual_move_out_date IS NULL

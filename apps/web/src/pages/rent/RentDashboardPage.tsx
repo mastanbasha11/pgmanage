@@ -70,7 +70,10 @@ interface LedgerEntry {
   floor_name?: string;
   floor_number?: number;
   room_type?: string;
+  collected_by?: string[] | null;
 }
+
+type LedgerStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'ALL';
 
 function daysInMonth(month: number, year: number): number {
   return new Date(year, month, 0).getDate();
@@ -299,6 +302,8 @@ export default function RentDashboardPage() {
   const { month: cm, year: cy } = currentMonthYear();
   const [month, setMonth] = useState(cm);
   const [year, setYear] = useState(cy);
+  const [statusFilter, setStatusFilter] = useState<LedgerStatus>('ALL');
+  const [collectorFilter, setCollectorFilter] = useState<string>('ALL');
   const [payingEntry, setPayingEntry] = useState<LedgerEntry | null>(null);
   const { toast } = useToast();
 
@@ -339,8 +344,7 @@ export default function RentDashboardPage() {
   }
 
   const entries: LedgerEntry[] = ledger?.items ?? [];
-  // Compute every field locally (backend's `stats` is informational only) so
-  // we never render NaN if the server happens to omit a field.
+  // KPI totals always reflect the whole property (filters only narrow the table below).
   const totalDue = entries.reduce((s, e) => s + (e.amount_due_paise ?? 0), 0);
   const totalPaid = entries.reduce((s, e) => s + (e.amount_paid_paise ?? 0), 0);
   const totalDiscount = entries.reduce((s, e) => s + (e.discount_paise ?? 0), 0);
@@ -356,6 +360,20 @@ export default function RentDashboardPage() {
   const collectors: Array<{ collector: string; payments: number; amount_paise: number }> =
     ledger?.collectors ?? [];
   const collectionPct = totalDue > 0 ? Math.round((totalSettled / totalDue) * 100) : 0;
+
+  // Build the dropdown options for the "Collected by" filter from the entries
+  // themselves so it always reflects what's actually visible.
+  const collectorOptions = Array.from(
+    new Set(entries.flatMap((e) => e.collected_by ?? [])),
+  ).sort();
+
+  const filteredEntries = entries.filter((e) => {
+    if (statusFilter !== 'ALL' && e.status !== statusFilter) return false;
+    if (collectorFilter !== 'ALL') {
+      if (!e.collected_by || !e.collected_by.includes(collectorFilter)) return false;
+    }
+    return true;
+  });
 
   return (
     <>
@@ -527,115 +545,201 @@ export default function RentDashboardPage() {
               ))}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-lg border bg-card">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                      Room
-                    </th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                      Tenant
-                    </th>
-                    {showMoneyTotals && (
-                      <>
-                        <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground md:table-cell">
-                          Due
-                        </th>
-                        <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
-                          Paid
-                        </th>
-                      </>
-                    )}
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                      {showMoneyTotals ? 'Outstanding' : 'Amount'}
-                    </th>
-                    <th className="px-4 py-3 text-center font-medium text-muted-foreground">
-                      Status
-                    </th>
-                    <th className="px-4 py-3" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {entries.map((e) => (
-                    <tr key={e.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 text-sm">
-                        {e.room_number ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="inline-flex items-center justify-center min-w-[2.25rem] rounded-md bg-accent/10 px-1.5 py-0.5 text-accent font-bold tabular-nums">
-                              {e.room_number}
-                            </span>
-                            {e.bed_label && (
-                              <span className="text-muted-foreground tabular-nums">
-                                ·{e.bed_label}
-                              </span>
-                            )}
-                            {e.room_type && (
-                              <Badge variant="outline" className="text-[10px] px-1 h-4 ml-0.5">
-                                {shortRoomType(e.room_type)}
-                              </Badge>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground/40">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-medium">{e.tenant_name}</td>
+            <>
+              {/* Filter bar */}
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-muted-foreground mr-1">Filter:</p>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(v) => setStatusFilter(v as LedgerStatus)}
+                >
+                  <SelectTrigger className="h-8 w-36 text-xs">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All statuses</SelectItem>
+                    <SelectItem value="UNPAID">Unpaid</SelectItem>
+                    <SelectItem value="PARTIAL">Partial</SelectItem>
+                    <SelectItem value="PAID">Paid</SelectItem>
+                  </SelectContent>
+                </Select>
+                {showMoneyTotals && (
+                  <Select value={collectorFilter} onValueChange={setCollectorFilter}>
+                    <SelectTrigger className="h-8 w-44 text-xs">
+                      <SelectValue placeholder="Collected by" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All collectors</SelectItem>
+                      {collectorOptions.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {(statusFilter !== 'ALL' || collectorFilter !== 'ALL') && (
+                  <>
+                    <span className="text-xs text-muted-foreground">
+                      Showing {filteredEntries.length} of {entries.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusFilter('ALL');
+                        setCollectorFilter('ALL');
+                      }}
+                      className="text-xs text-accent font-medium hover:underline"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="overflow-hidden rounded-lg border bg-card">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                        Room
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                        Tenant
+                      </th>
                       {showMoneyTotals && (
                         <>
-                          <td className="hidden px-4 py-3 text-right text-muted-foreground md:table-cell tabular-nums">
-                            {formatPaise(e.amount_due_paise)}
-                          </td>
-                          <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
-                            {formatPaise(e.amount_paid_paise)}
-                          </td>
+                          <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground md:table-cell">
+                            Due
+                          </th>
+                          <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
+                            Paid
+                          </th>
+                          <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
+                            Discount
+                          </th>
+                          <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground xl:table-cell">
+                            Collected by
+                          </th>
                         </>
                       )}
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {e.outstanding_paise > 0 ? (
-                          <span className="text-destructive font-medium">
-                            {formatPaise(e.outstanding_paise)}
-                          </span>
-                        ) : (
-                          <span className="text-green-600 text-xs font-medium">Clear</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <Badge variant={statusBadgeVariant(e.status)}>{e.status}</Badge>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {e.status !== 'PAID' && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs"
-                            onClick={() => setPayingEntry(e)}
-                          >
-                            <IndianRupee className="h-3 w-3 mr-1" />
-                            Pay
-                          </Button>
-                        )}
-                      </td>
+                      <th className="px-4 py-3 text-center font-medium text-muted-foreground">
+                        Status
+                      </th>
+                      <th className="px-4 py-3" />
                     </tr>
-                  ))}
-                  {entries.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
-                        No ledger entries for {monthName(month)} {year}.{' '}
-                        <button
-                          type="button"
-                          className="text-accent font-medium hover:underline"
-                          onClick={handleGenerate}
-                        >
-                          Click Generate
-                        </button>{' '}
-                        to create them.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filteredEntries.map((e) => (
+                      <tr key={e.id} className="hover:bg-muted/30">
+                        <td className="px-4 py-3 text-sm">
+                          {e.room_number ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="inline-flex items-center justify-center min-w-[2.25rem] rounded-md bg-accent/10 px-1.5 py-0.5 text-accent font-bold tabular-nums">
+                                {e.room_number}
+                              </span>
+                              {e.bed_label && (
+                                <span className="text-muted-foreground tabular-nums">
+                                  ·{e.bed_label}
+                                </span>
+                              )}
+                              {e.room_type && (
+                                <Badge variant="outline" className="text-[10px] px-1 h-4 ml-0.5">
+                                  {shortRoomType(e.room_type)}
+                                </Badge>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 font-medium">
+                          {e.tenant_name}
+                          {e.outstanding_paise > 0 && (
+                            <p className="text-[11px] text-destructive">
+                              {formatPaise(e.outstanding_paise)} outstanding
+                            </p>
+                          )}
+                        </td>
+                        {showMoneyTotals && (
+                          <>
+                            <td className="hidden px-4 py-3 text-right text-muted-foreground md:table-cell tabular-nums">
+                              {formatPaise(e.amount_due_paise)}
+                            </td>
+                            <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
+                              {formatPaise(e.amount_paid_paise)}
+                            </td>
+                            <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
+                              {e.discount_paise > 0 ? (
+                                <span className="text-emerald-600 font-medium">
+                                  {formatPaise(e.discount_paise)}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground/40">—</span>
+                              )}
+                            </td>
+                            <td className="hidden px-4 py-3 xl:table-cell text-xs">
+                              {e.collected_by && e.collected_by.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {e.collected_by.map((c) => (
+                                    <Badge
+                                      key={c}
+                                      variant="outline"
+                                      className="text-[10px] px-1.5 h-4"
+                                    >
+                                      {c}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground/40">—</span>
+                              )}
+                            </td>
+                          </>
+                        )}
+                        <td className="px-4 py-3 text-center">
+                          <Badge variant={statusBadgeVariant(e.status)}>{e.status}</Badge>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {e.status !== 'PAID' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              onClick={() => setPayingEntry(e)}
+                            >
+                              <IndianRupee className="h-3 w-3 mr-1" />
+                              Pay
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredEntries.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                          {entries.length === 0 ? (
+                            <>
+                              No ledger entries for {monthName(month)} {year}.{' '}
+                              <button
+                                type="button"
+                                className="text-accent font-medium hover:underline"
+                                onClick={handleGenerate}
+                              >
+                                Click Generate
+                              </button>{' '}
+                              to create them.
+                            </>
+                          ) : (
+                            <>No entries match the current filter.</>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
           ))}
       </div>
 
