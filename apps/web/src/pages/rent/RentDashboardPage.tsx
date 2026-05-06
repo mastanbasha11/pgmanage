@@ -339,24 +339,23 @@ export default function RentDashboardPage() {
   }
 
   const entries: LedgerEntry[] = ledger?.items ?? [];
-  // Backend already returns these aggregated; recompute locally as a fallback
-  // (works even on older responses that didn't carry stats).
-  const stats = ledger?.stats ?? {
-    expected_paise: entries.reduce((s, e) => s + (e.amount_due_paise ?? 0), 0),
-    collected_paise: entries.reduce((s, e) => s + (e.amount_paid_paise ?? 0), 0),
-    discount_paise: entries.reduce((s, e) => s + (e.discount_paise ?? 0), 0),
-    settled_paise:
-      entries.reduce((s, e) => s + (e.amount_paid_paise ?? 0), 0) +
-      entries.reduce((s, e) => s + (e.discount_paise ?? 0), 0),
-    outstanding_paise: entries.reduce((s, e) => s + (e.outstanding_paise ?? 0), 0),
-    collection_rate: 0,
+  // Compute every field locally (backend's `stats` is informational only) so
+  // we never render NaN if the server happens to omit a field.
+  const totalDue = entries.reduce((s, e) => s + (e.amount_due_paise ?? 0), 0);
+  const totalPaid = entries.reduce((s, e) => s + (e.amount_paid_paise ?? 0), 0);
+  const totalDiscount = entries.reduce((s, e) => s + (e.discount_paise ?? 0), 0);
+  const totalSettled = totalPaid + totalDiscount;
+  const totalOutstanding = Math.max(totalDue - totalSettled, 0);
+  const stats = {
+    expected_paise: totalDue,
+    collected_paise: totalPaid,
+    discount_paise: totalDiscount,
+    settled_paise: totalSettled,
+    outstanding_paise: totalOutstanding,
   };
   const collectors: Array<{ collector: string; payments: number; amount_paise: number }> =
     ledger?.collectors ?? [];
-  const collectionPct =
-    stats.expected_paise > 0
-      ? Math.round((stats.settled_paise / stats.expected_paise) * 100)
-      : 0;
+  const collectionPct = totalDue > 0 ? Math.round((totalSettled / totalDue) * 100) : 0;
 
   return (
     <>
@@ -533,10 +532,10 @@ export default function RentDashboardPage() {
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                      Tenant
-                    </th>
-                    <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground sm:table-cell">
                       Room
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Tenant
                     </th>
                     {showMoneyTotals && (
                       <>
@@ -560,22 +559,28 @@ export default function RentDashboardPage() {
                 <tbody className="divide-y">
                   {entries.map((e) => (
                     <tr key={e.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">{e.tenant_name}</td>
-                      <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell text-xs">
+                      <td className="px-4 py-3 text-sm">
                         {e.room_number ? (
-                          <span>
-                            {e.room_number}
-                            {e.bed_label ? `·${e.bed_label}` : ''}
-                            {e.room_type ? (
-                              <span className="ml-1 text-[10px] uppercase">
-                                {shortRoomType(e.room_type)}
+                          <div className="flex items-center gap-1.5">
+                            <span className="inline-flex items-center justify-center min-w-[2.25rem] rounded-md bg-accent/10 px-1.5 py-0.5 text-accent font-bold tabular-nums">
+                              {e.room_number}
+                            </span>
+                            {e.bed_label && (
+                              <span className="text-muted-foreground tabular-nums">
+                                ·{e.bed_label}
                               </span>
-                            ) : null}
-                          </span>
+                            )}
+                            {e.room_type && (
+                              <Badge variant="outline" className="text-[10px] px-1 h-4 ml-0.5">
+                                {shortRoomType(e.room_type)}
+                              </Badge>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-muted-foreground/40">—</span>
                         )}
                       </td>
+                      <td className="px-4 py-3 font-medium">{e.tenant_name}</td>
                       {showMoneyTotals && (
                         <>
                           <td className="hidden px-4 py-3 text-right text-muted-foreground md:table-cell tabular-nums">
