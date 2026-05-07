@@ -161,6 +161,7 @@ export interface CheckoutPayload {
   actual_move_out_date: string;
   final_payment_amount_paise?: number;
   refund_amount_paise?: number;
+  refund_paid_by?: string;
   notes?: string;
 }
 

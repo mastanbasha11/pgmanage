@@ -81,6 +81,7 @@ class CheckoutRequest(BaseModel):
     actual_move_out_date: date
     final_payment_amount_paise: int = 0
     refund_amount_paise: int = 0
+    refund_paid_by: str | None = None
     notes: str | None = None
 
 
@@ -450,6 +451,39 @@ async def checkout_tenant(
         text("UPDATE rent_plans SET is_active = false, effective_to = :date WHERE tenant_id = :tid AND is_active = true"),
         {"date": body.actual_move_out_date, "tid": str(tenant_id)},
     )
+
+    # If refund details given, record as a REFUND payment row so it surfaces
+    # in the rent KPI "Refunds Given" + dashboard.
+    if (body.refund_amount_paise or 0) > 0:
+        from uuid import uuid4 as _uuid4
+        await db.execute(
+            text("""
+                INSERT INTO payments (
+                    org_id, property_id, tenant_id, amount_paise,
+                    payment_type, payment_mode,
+                    paid_to, for_month, for_year, collected_by, collected_at,
+                    notes, idempotency_key
+                ) VALUES (
+                    :org_id, :pid, :tenant_id, :amount,
+                    'REFUND'::payment_type_enum, 'CASH'::payment_mode_enum,
+                    :paid_by, :month, :year, :user, :collected_at,
+                    :notes, :ikey
+                )
+            """),
+            {
+                "org_id": str(ctx.org_id),
+                "pid": str(tenant["property_id"]),
+                "tenant_id": str(tenant_id),
+                "amount": int(body.refund_amount_paise or 0),
+                "paid_by": (body.refund_paid_by or "").strip() or None,
+                "month": body.actual_move_out_date.month,
+                "year": body.actual_move_out_date.year,
+                "user": str(ctx.user_id),
+                "collected_at": body.actual_move_out_date,
+                "notes": (body.notes or "").strip() or "Refund on checkout",
+                "ikey": str(_uuid4()),
+            },
+        )
 
     # Audit log
     await db.execute(

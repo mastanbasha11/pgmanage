@@ -49,6 +49,8 @@ export interface CollectorRow {
   collector: string;
   payments: number;
   amount_paise: number;
+  rent_paise?: number;
+  advance_paise?: number;
 }
 
 export interface RentLedgerStats {
@@ -57,6 +59,8 @@ export interface RentLedgerStats {
   discount_paise: number;
   settled_paise: number;
   outstanding_paise: number;
+  advance_received_paise?: number;
+  refunds_given_paise?: number;
   collection_rate: number;
 }
 

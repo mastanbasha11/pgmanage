@@ -1,5 +1,15 @@
-import { useState } from 'react';
-import { Plus, Check, X, Wallet } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import {
+  Plus,
+  Check,
+  X,
+  Wallet,
+  Pencil,
+  Trash2,
+  ImagePlus,
+  Image as ImageIcon,
+  Eye,
+} from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -29,7 +39,12 @@ import {
   useExpenseSummary,
   useExpenseCategories,
   useCreateExpense,
+  useUpdateExpense,
+  useDeleteExpense,
+  useUploadReceipt,
+  useDeleteReceipt,
   useApproveExpense,
+  type Expense,
 } from '@/hooks/useExpenses';
 import { useAuthStore } from '@/store/auth';
 import {
@@ -40,6 +55,7 @@ import {
   rupeesToPaise,
 } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
+import { api } from '@/lib/api';
 
 const PAYMENT_MODES = ['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE'] as const;
 type PaymentMode = (typeof PAYMENT_MODES)[number];
@@ -48,6 +64,7 @@ const schema = z.object({
   category_id: z.string().uuid('Select a category'),
   description: z.string().min(2, 'Description required'),
   vendor_name: z.string().optional(),
+  paid_by: z.string().optional(),
   amount_rupees: z.coerce.number().positive('Amount required'),
   purchase_date: z.string().min(1, 'Date required'),
   payment_mode: z.enum(PAYMENT_MODES).default('CASH'),
@@ -56,11 +73,132 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
-function AddExpenseDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+// ── Receipt thumbnail (auth-protected fetch → blob URL) ───────────────────────
+
+function ReceiptThumb({
+  expenseId,
+  onOpen,
+}: {
+  expenseId: string;
+  onOpen: () => void;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let blob: string | null = null;
+    (async () => {
+      try {
+        const resp = await api.get(`/expenses/${expenseId}/receipt`, {
+          responseType: 'blob',
+        });
+        if (cancelled) return;
+        blob = URL.createObjectURL(resp.data);
+        setSrc(blob);
+      } catch {
+        // missing — leave null
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (blob) URL.revokeObjectURL(blob);
+    };
+  }, [expenseId]);
+
+  if (!src) {
+    return (
+      <span className="inline-flex h-8 w-8 items-center justify-center rounded bg-muted text-muted-foreground">
+        <ImageIcon className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group relative inline-block h-9 w-9 overflow-hidden rounded border bg-card"
+    >
+      <img src={src} alt="receipt" className="h-full w-full object-cover" />
+      <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 text-transparent group-hover:text-white transition-all">
+        <Eye className="h-4 w-4" />
+      </span>
+    </button>
+  );
+}
+
+function ReceiptViewer({
+  expenseId,
+  onClose,
+}: {
+  expenseId: string | null;
+  onClose: () => void;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!expenseId) return;
+    let cancelled = false;
+    let blob: string | null = null;
+    (async () => {
+      try {
+        const resp = await api.get(`/expenses/${expenseId}/receipt`, {
+          responseType: 'blob',
+        });
+        if (cancelled) return;
+        blob = URL.createObjectURL(resp.data);
+        setSrc(blob);
+      } catch {
+        setSrc(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (blob) URL.revokeObjectURL(blob);
+    };
+  }, [expenseId]);
+
+  return (
+    <Dialog open={!!expenseId} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Receipt</DialogTitle>
+        </DialogHeader>
+        {src ? (
+          <img
+            src={src}
+            alt="receipt"
+            className="mx-auto max-h-[70vh] w-auto rounded border"
+          />
+        ) : (
+          <p className="text-center text-sm text-muted-foreground py-8">
+            No receipt available.
+          </p>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Add/Edit dialog ───────────────────────────────────────────────────────────
+
+function ExpenseDialog({
+  open,
+  onClose,
+  expense,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** If set → edit mode. If null → create mode. */
+  expense: Expense | null;
+}) {
+  const isEdit = !!expense;
   const { selectedPropertyId } = useAuthStore();
   const { data: cats } = useExpenseCategories(selectedPropertyId ?? undefined);
-  const { mutateAsync, isPending } = useCreateExpense();
+  const create = useCreateExpense();
+  const update = useUpdateExpense(expense?.id ?? '');
+  const upload = useUploadReceipt();
   const { toast } = useToast();
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const {
     register,
@@ -68,7 +206,7 @@ function AddExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     setValue,
     watch,
     reset,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -77,8 +215,29 @@ function AddExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     },
   });
 
+  useEffect(() => {
+    if (open && expense) {
+      reset({
+        category_id: expense.category_id ?? '',
+        description: expense.description ?? '',
+        vendor_name: expense.vendor_name ?? '',
+        paid_by: expense.paid_by ?? '',
+        amount_rupees: expense.amount_paise / 100,
+        purchase_date: expense.purchase_date.slice(0, 10),
+        payment_mode: ((expense.payment_mode as PaymentMode) ?? 'CASH'),
+        reference_number: expense.reference_number ?? '',
+      });
+    } else if (open && !expense) {
+      reset({
+        payment_mode: 'CASH',
+        purchase_date: new Date().toISOString().slice(0, 10),
+      });
+    }
+    if (open) setPendingFile(null);
+  }, [open, expense, reset]);
+
   async function onSubmit(data: FormData) {
-    if (!selectedPropertyId) {
+    if (!selectedPropertyId && !isEdit) {
       toast({
         title: 'No property selected',
         description: 'Pick a property from the sidebar first.',
@@ -87,23 +246,43 @@ function AddExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
       return;
     }
     try {
-      await mutateAsync({
-        category_id: data.category_id,
-        description: data.description,
-        vendor_name: data.vendor_name || undefined,
-        amount_paise: rupeesToPaise(data.amount_rupees),
-        purchase_date: data.purchase_date,
-        property_id: selectedPropertyId,
-        payment_mode: data.payment_mode,
-        reference_number: data.reference_number || undefined,
-      });
-      toast({ title: 'Expense added', description: data.description });
+      let id = expense?.id;
+      if (isEdit) {
+        await update.mutateAsync({
+          category_id: data.category_id,
+          description: data.description,
+          vendor_name: data.vendor_name || undefined,
+          paid_by: data.paid_by || undefined,
+          amount_paise: rupeesToPaise(data.amount_rupees),
+          purchase_date: data.purchase_date,
+          payment_mode: data.payment_mode,
+          reference_number: data.reference_number || undefined,
+        });
+      } else {
+        const res = await create.mutateAsync({
+          category_id: data.category_id,
+          description: data.description,
+          vendor_name: data.vendor_name || undefined,
+          paid_by: data.paid_by || undefined,
+          amount_paise: rupeesToPaise(data.amount_rupees),
+          purchase_date: data.purchase_date,
+          property_id: selectedPropertyId!,
+          payment_mode: data.payment_mode,
+          reference_number: data.reference_number || undefined,
+        });
+        id = res.expense_id;
+      }
+      // Upload receipt if user picked one
+      if (pendingFile && id) {
+        await upload.mutateAsync({ id, file: pendingFile });
+      }
+      toast({ title: isEdit ? 'Expense updated' : 'Expense added' });
       reset();
       onClose();
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
-          ?.message ?? 'Could not add expense.';
+          ?.message ?? 'Could not save expense.';
       toast({ title: 'Failed', description: message, variant: 'destructive' });
     }
   }
@@ -118,10 +297,12 @@ function AddExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
         }
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add expense</DialogTitle>
-          <DialogDescription>Record a new spend for this property.</DialogDescription>
+          <DialogTitle>{isEdit ? 'Edit expense' : 'Add expense'}</DialogTitle>
+          <DialogDescription>
+            {isEdit ? 'Update fields and / or replace the receipt.' : 'Record a new spend.'}
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <div>
@@ -157,22 +338,23 @@ function AddExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
               <Label>Amount (₹) *</Label>
               <Input {...register('amount_rupees')} type="number" placeholder="500" />
               {errors.amount_rupees && (
-                <p className="text-xs text-destructive mt-1">
-                  {errors.amount_rupees.message}
-                </p>
+                <p className="text-xs text-destructive mt-1">{errors.amount_rupees.message}</p>
               )}
             </div>
             <div>
               <Label>Date *</Label>
               <Input {...register('purchase_date')} type="date" />
-              {errors.purchase_date && (
-                <p className="text-xs text-destructive mt-1">{errors.purchase_date.message}</p>
-              )}
             </div>
           </div>
-          <div>
-            <Label>Vendor (optional)</Label>
-            <Input {...register('vendor_name')} placeholder="BESCOM / Reliance" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Vendor</Label>
+              <Input {...register('vendor_name')} placeholder="BESCOM / Reliance" />
+            </div>
+            <div>
+              <Label>Paid by</Label>
+              <Input {...register('paid_by')} placeholder="Mastan / Harshi" />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -195,15 +377,38 @@ function AddExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
             </div>
             <div>
               <Label>Reference / UTR</Label>
-              <Input {...register('reference_number')} placeholder="UPI ref / cheque no" />
+              <Input {...register('reference_number')} placeholder="Optional" />
             </div>
+          </div>
+          <div>
+            <Label>Receipt (optional)</Label>
+            <label
+              htmlFor="receipt-input"
+              className="flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-sm cursor-pointer hover:bg-muted/50"
+            >
+              <ImagePlus className="h-4 w-4 text-muted-foreground" />
+              <span className="flex-1 truncate">
+                {pendingFile?.name ?? (expense?.receipt_path ? 'Replace existing receipt' : 'Choose image')}
+              </span>
+              <input
+                id="receipt-input"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Auto-compressed to JPEG ~85% quality, max 1600px wide. Stored on the
+              server + nightly backup to S3.
+            </p>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isPending}>
-              {isPending ? 'Saving...' : 'Add expense'}
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : isEdit ? 'Save changes' : 'Add expense'}
             </Button>
           </DialogFooter>
         </form>
@@ -212,8 +417,12 @@ function AddExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   );
 }
 
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function ExpensesPage() {
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<Expense | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<string | null>(null);
   const { selectedPropertyId, canApproveExpenses } = useAuthStore();
   const { month, year } = currentMonthYear();
 
@@ -229,12 +438,14 @@ export default function ExpensesPage() {
   });
 
   const { mutateAsync: approve } = useApproveExpense();
+  const { mutateAsync: del } = useDeleteExpense();
+  const { mutateAsync: deleteReceipt } = useDeleteReceipt();
   const { toast } = useToast();
 
   async function handleApprove(id: string, approved: boolean) {
     try {
       const reason = approved ? undefined : window.prompt('Reason for rejection?') ?? undefined;
-      if (!approved && !reason) return; // user cancelled
+      if (!approved && !reason) return;
       await approve({ id, approved, rejection_reason: reason });
       toast({ title: approved ? 'Expense approved' : 'Expense rejected' });
     } catch (err: unknown) {
@@ -242,6 +453,26 @@ export default function ExpensesPage() {
         (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
           ?.message ?? 'Action failed.';
       toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
+
+  async function handleDelete(e: Expense) {
+    if (!window.confirm(`Delete "${e.description}" (${formatPaise(e.amount_paise)})?`)) return;
+    try {
+      await del(e.id);
+      toast({ title: 'Expense removed' });
+    } catch {
+      toast({ title: 'Failed', variant: 'destructive' });
+    }
+  }
+
+  async function handleDeleteReceipt(e: Expense) {
+    if (!window.confirm('Remove the receipt image?')) return;
+    try {
+      await deleteReceipt(e.id);
+      toast({ title: 'Receipt removed' });
+    } catch {
+      toast({ title: 'Failed', variant: 'destructive' });
     }
   }
 
@@ -265,7 +496,6 @@ export default function ExpensesPage() {
           </Button>
         </div>
 
-        {/* Donut chart */}
         {(summary?.items?.length ?? 0) > 0 && (
           <Card>
             <CardHeader>
@@ -277,7 +507,6 @@ export default function ExpensesPage() {
           </Card>
         )}
 
-        {/* Expense list */}
         {isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -309,13 +538,19 @@ export default function ExpensesPage() {
                   <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground md:table-cell">
                     Date
                   </th>
+                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground lg:table-cell">
+                    Paid by
+                  </th>
+                  <th className="px-4 py-3 text-center font-medium text-muted-foreground">
+                    Receipt
+                  </th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground">
                     Amount
                   </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground">
                     Status
                   </th>
-                  {canApproveExpenses() && <th className="px-4 py-3" />}
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -333,6 +568,25 @@ export default function ExpensesPage() {
                     <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
                       {formatDate(e.purchase_date ?? e.expense_date)}
                     </td>
+                    <td className="hidden px-4 py-3 lg:table-cell">
+                      {e.paid_by ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          {e.paid_by}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {e.receipt_path ? (
+                        <ReceiptThumb
+                          expenseId={e.id}
+                          onOpen={() => setViewingReceipt(e.id)}
+                        />
+                      ) : (
+                        <span className="text-muted-foreground/40 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">
                       {formatPaise(e.amount_paise)}
                     </td>
@@ -341,32 +595,62 @@ export default function ExpensesPage() {
                         {e.status ?? e.approval_status}
                       </Badge>
                     </td>
-                    {canApproveExpenses() && (
-                      <td className="px-4 py-3 text-right">
-                        {(e.status ?? e.approval_status) === 'PENDING' && (
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
-                              onClick={() => handleApprove(e.id, true)}
-                              title="Approve"
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-red-50"
-                              onClick={() => handleApprove(e.id, false)}
-                              title="Reject"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex justify-end gap-1">
+                        {canApproveExpenses() &&
+                          (e.status ?? e.approval_status) === 'PENDING' && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 text-green-600"
+                                onClick={() => handleApprove(e.id, true)}
+                                title="Approve"
+                              >
+                                <Check className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 text-destructive"
+                                onClick={() => handleApprove(e.id, false)}
+                                title="Reject"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0"
+                          onClick={() => setEditing(e)}
+                          title="Edit"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        {e.receipt_path && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-destructive"
+                            onClick={() => handleDeleteReceipt(e)}
+                            title="Remove receipt"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5" />
+                          </Button>
                         )}
-                      </td>
-                    )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 text-destructive"
+                          onClick={() => handleDelete(e)}
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -375,7 +659,9 @@ export default function ExpensesPage() {
         )}
       </div>
 
-      <AddExpenseDialog open={showAdd} onClose={() => setShowAdd(false)} />
+      <ExpenseDialog open={showAdd} onClose={() => setShowAdd(false)} expense={null} />
+      <ExpenseDialog open={!!editing} onClose={() => setEditing(null)} expense={editing} />
+      <ReceiptViewer expenseId={viewingReceipt} onClose={() => setViewingReceipt(null)} />
     </>
   );
 }

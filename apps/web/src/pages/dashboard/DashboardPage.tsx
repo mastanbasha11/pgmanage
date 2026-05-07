@@ -6,6 +6,10 @@ import {
   BarChart3,
   Building2,
   Plus,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Receipt,
+  Users,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -116,7 +120,7 @@ export default function DashboardPage() {
         <p className="text-sm text-muted-foreground">Financial overview for this month</p>
       </div>
 
-      {/* KPI cards */}
+      {/* Row 1: cash in/out KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KPICard
           title="Collected Rent"
@@ -136,18 +140,44 @@ export default function DashboardPage() {
           className={summary.outstanding_paise > 0 ? 'border-amber-200' : ''}
         />
         <KPICard
+          title="Advance Received"
+          value={formatPaise(summary.advance_received_paise ?? 0)}
+          sub="Maintenance + Security deposits"
+          icon={ArrowDownToLine}
+        />
+        <KPICard
           title="Net Income"
           value={formatPaise(summary.net_income_paise)}
-          sub={`${formatPaise(summary.total_expenses_paise, true)} expenses`}
+          sub="(Rent + Advance) − (Refunds + Expenses)"
           icon={TrendingUp}
+        />
+      </div>
+
+      {/* Row 2: outflows + occupancy */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KPICard
+          title="Total Expenses"
+          value={formatPaise(summary.total_expenses_paise)}
+          sub="approved this month"
+          icon={Receipt}
+        />
+        <KPICard
+          title="Refunds Given"
+          value={formatPaise(summary.refunds_given_paise ?? 0)}
+          sub="security deposit refunds"
+          icon={ArrowUpFromLine}
         />
         <KPICard
           title="Occupancy"
           value={`${Math.round(summary.occupancy_rate * 100)}%`}
-          sub={`${summary.total_tenants ?? summary.active_tenants ?? 0} tenants · ${
-            summary.vacant_beds ?? 0
-          } vacant beds`}
+          sub={`${summary.total_tenants ?? summary.active_tenants ?? 0} tenants`}
           icon={BedDouble}
+        />
+        <KPICard
+          title="Vacant Beds"
+          value={`${summary.vacant_beds ?? 0}`}
+          sub={`of ${summary.total_beds ?? 0} total`}
+          icon={Building2}
         />
       </div>
 
@@ -186,6 +216,38 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Expenses by person panel */}
+      {(summary.expenses_by_person?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Users className="h-4 w-4 text-accent" />
+              Expenses by person
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {summary.expenses_by_person!.map((p) => (
+                <div
+                  key={p.person}
+                  className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{p.person}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {p.count} {p.count === 1 ? 'expense' : 'expenses'}
+                    </p>
+                  </div>
+                  <p className="font-semibold tabular-nums">
+                    {formatPaise(p.total_paise)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Overdue tenants */}
       {summary.overdue_tenants > 0 && (

@@ -11,7 +11,11 @@ import {
   Receipt,
   Tag,
   Users,
+  Plus,
+  ArrowDownToLine,
+  ArrowUpFromLine,
 } from 'lucide-react';
+import AddPaymentDialog from './AddPaymentDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -305,6 +309,7 @@ export default function RentDashboardPage() {
   const [statusFilter, setStatusFilter] = useState<LedgerStatus>('ALL');
   const [collectorFilter, setCollectorFilter] = useState<string>('ALL');
   const [payingEntry, setPayingEntry] = useState<LedgerEntry | null>(null);
+  const [showAddPayment, setShowAddPayment] = useState(false);
   const { toast } = useToast();
 
   const { data: ledger, isLoading } = useRentLedger({
@@ -350,15 +355,24 @@ export default function RentDashboardPage() {
   const totalDiscount = entries.reduce((s, e) => s + (e.discount_paise ?? 0), 0);
   const totalSettled = totalPaid + totalDiscount;
   const totalOutstanding = Math.max(totalDue - totalSettled, 0);
+  const advanceReceived = ledger?.stats?.advance_received_paise ?? 0;
+  const refundsGiven = ledger?.stats?.refunds_given_paise ?? 0;
   const stats = {
     expected_paise: totalDue,
     collected_paise: totalPaid,
     discount_paise: totalDiscount,
     settled_paise: totalSettled,
     outstanding_paise: totalOutstanding,
+    advance_received_paise: advanceReceived,
+    refunds_given_paise: refundsGiven,
   };
-  const collectors: Array<{ collector: string; payments: number; amount_paise: number }> =
-    ledger?.collectors ?? [];
+  const collectors: Array<{
+    collector: string;
+    payments: number;
+    amount_paise: number;
+    rent_paise?: number;
+    advance_paise?: number;
+  }> = ledger?.collectors ?? [];
   const collectionPct = totalDue > 0 ? Math.round((totalSettled / totalDue) * 100) : 0;
 
   // Build the dropdown options for the "Collected by" filter from the entries
@@ -420,13 +434,22 @@ export default function RentDashboardPage() {
               <RefreshCw className={`h-4 w-4 ${generating ? 'animate-spin' : ''}`} />
               Generate
             </Button>
+            <Button
+              size="sm"
+              className="gap-1"
+              onClick={() => setShowAddPayment(true)}
+              disabled={!selectedPropertyId}
+            >
+              <Plus className="h-4 w-4" />
+              Add Payment
+            </Button>
           </div>
         </div>
 
         {/* Summary — totals hidden for managers, only progress shown */}
         {showMoneyTotals ? (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard
                 label="Expected"
                 value={formatPaise(stats.expected_paise)}
@@ -450,6 +473,20 @@ export default function RentDashboardPage() {
                 icon={Receipt}
                 tone={stats.outstanding_paise > 0 ? 'destructive' : 'success'}
               />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <StatCard
+                label="Advance received"
+                value={formatPaise(advanceReceived)}
+                icon={ArrowDownToLine}
+                tone={advanceReceived > 0 ? 'success' : 'default'}
+              />
+              <StatCard
+                label="Refunds given"
+                value={formatPaise(refundsGiven)}
+                icon={ArrowUpFromLine}
+                tone={refundsGiven > 0 ? 'destructive' : 'default'}
+              />
               <StatCard
                 label="Collection rate"
                 value={`${collectionPct}%`}
@@ -470,22 +507,29 @@ export default function RentDashboardPage() {
                     </p>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {collectors.map((c) => (
-                      <div
-                        key={c.collector}
-                        className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium truncate">{c.collector}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {c.payments} {c.payments === 1 ? 'payment' : 'payments'}
+                    {collectors.map((c) => {
+                      const rent = c.rent_paise ?? c.amount_paise;
+                      const adv = c.advance_paise ?? 0;
+                      return (
+                        <div
+                          key={c.collector}
+                          className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{c.collector}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              <span>Rent {formatPaise(rent)}</span>
+                              {adv > 0 && (
+                                <span className="ml-2">· Advance {formatPaise(adv)}</span>
+                              )}
+                            </p>
+                          </div>
+                          <p className="font-semibold tabular-nums">
+                            {formatPaise(c.amount_paise)}
                           </p>
                         </div>
-                        <p className="font-semibold tabular-nums">
-                          {formatPaise(c.amount_paise)}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -744,6 +788,7 @@ export default function RentDashboardPage() {
       </div>
 
       <RecordPaymentDialog entry={payingEntry} onClose={() => setPayingEntry(null)} />
+      <AddPaymentDialog open={showAddPayment} onClose={() => setShowAddPayment(false)} />
     </>
   );
 }

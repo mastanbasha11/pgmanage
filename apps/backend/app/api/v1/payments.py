@@ -298,27 +298,73 @@ async def rent_ledger(
     total_discount = sum(r["discount_paise"] or 0 for r in items)
     settled = total_paid + total_discount
 
-    # Per-collector breakdown for the same month/year (cash-only — exclude
-    # discount-only rows so the breakdown reflects who actually handled money).
+    # Per-collector breakdown for the same month/year, split by RENT vs ADVANCE/DEPOSIT.
+    # We bucket DEPOSIT under ADVANCE in the UI (it's still 'advance' colloquially).
     by_collector = await db.execute(
         text("""
             SELECT
                 COALESCE(NULLIF(p.paid_to, ''), u.name, 'Unattributed') AS collector,
-                COUNT(*) AS payments,
-                SUM(p.amount_paise) AS amount_paise
+                SUM(p.amount_paise) FILTER (WHERE p.payment_type = 'RENT') AS rent_paise,
+                SUM(p.amount_paise) FILTER (
+                    WHERE p.payment_type IN ('ADVANCE', 'DEPOSIT')
+                ) AS advance_paise,
+                COUNT(*) FILTER (WHERE p.payment_type = 'RENT') AS rent_payments,
+                COUNT(*) FILTER (
+                    WHERE p.payment_type IN ('ADVANCE', 'DEPOSIT')
+                ) AS advance_payments
             FROM payments p
             LEFT JOIN users u ON u.id = p.collected_by
             WHERE p.property_id = :pid
               AND p.is_deleted = false
-              AND p.payment_type = 'RENT'
-              AND p.for_month = :month AND p.for_year = :year
               AND p.amount_paise > 0
+              AND (
+                  (p.payment_type = 'RENT' AND p.for_month = :month AND p.for_year = :year)
+                  OR (p.payment_type IN ('ADVANCE', 'DEPOSIT')
+                      AND EXTRACT(MONTH FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :month
+                      AND EXTRACT(YEAR FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :year)
+              )
             GROUP BY 1
-            ORDER BY amount_paise DESC
+            HAVING COALESCE(SUM(p.amount_paise), 0) > 0
+            ORDER BY (COALESCE(SUM(p.amount_paise) FILTER (WHERE p.payment_type='RENT'),0)
+                    + COALESCE(SUM(p.amount_paise) FILTER (
+                        WHERE p.payment_type IN ('ADVANCE','DEPOSIT')),0)) DESC
         """),
         {"pid": str(property_id), "month": month, "year": year},
     )
-    collectors = [dict(c) for c in by_collector.mappings().fetchall()]
+    collectors = []
+    for r in by_collector.mappings().fetchall():
+        d = dict(r)
+        rent = d.get("rent_paise") or 0
+        adv = d.get("advance_paise") or 0
+        collectors.append({
+            "collector": d["collector"],
+            "rent_paise": rent,
+            "advance_paise": adv,
+            "amount_paise": rent + adv,
+            "payments": (d.get("rent_payments") or 0) + (d.get("advance_payments") or 0),
+        })
+
+    # Property-wide advance & refund totals for this month (KPI cards).
+    adv_refund = await db.execute(
+        text("""
+            SELECT
+                COALESCE(SUM(amount_paise) FILTER (
+                    WHERE payment_type IN ('ADVANCE', 'DEPOSIT')
+                ), 0) AS advance_paise,
+                COALESCE(SUM(amount_paise) FILTER (
+                    WHERE payment_type = 'REFUND'
+                ), 0) AS refund_paise
+            FROM payments
+            WHERE property_id = :pid
+              AND is_deleted = false
+              AND EXTRACT(MONTH FROM collected_at AT TIME ZONE 'Asia/Kolkata') = :month
+              AND EXTRACT(YEAR FROM collected_at AT TIME ZONE 'Asia/Kolkata') = :year
+        """),
+        {"pid": str(property_id), "month": month, "year": year},
+    )
+    ar = adv_refund.mappings().fetchone() or {}
+    advance_received = ar.get("advance_paise", 0) or 0
+    refunds_given = ar.get("refund_paise", 0) or 0
 
     return {
         "property_id": str(property_id),
@@ -331,6 +377,8 @@ async def rent_ledger(
             "discount_paise": total_discount,
             "settled_paise": settled,
             "outstanding_paise": max(total_due - settled, 0),
+            "advance_received_paise": advance_received,
+            "refunds_given_paise": refunds_given,
             "collection_rate": round(settled / total_due * 100, 1) if total_due > 0 else 0,
         },
         "collectors": collectors,

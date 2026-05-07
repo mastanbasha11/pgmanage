@@ -1,13 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
+export interface ExpenseByPerson {
+  person: string;
+  total_paise: number;
+  count: number;
+}
+
 export interface DashboardSummary {
   expected_rent_paise: number;
   collected_rent_paise: number;
   outstanding_paise: number;
   collection_rate: number;       // 0..1 fraction
   total_expenses_paise: number;
+  advance_received_paise?: number;
+  refunds_given_paise?: number;
   net_income_paise: number;
+  expenses_by_person?: ExpenseByPerson[];
   occupancy_rate: number;        // 0..1 fraction
   total_tenants: number;
   overdue_tenants: number;

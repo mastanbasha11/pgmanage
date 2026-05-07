@@ -95,6 +95,52 @@ async def dashboard_summary(
     occupied = occ["occupied"] or 0
     vacant_beds = max(total_beds - occupied, 0)
 
+    # Advance + Refund (current month, by collected_at)
+    pay_filter = "AND p.property_id = :pid" if property_id else ""
+    adv_res = await db.execute(
+        text(f"""
+            SELECT
+                COALESCE(SUM(p.amount_paise) FILTER (
+                    WHERE p.payment_type IN ('ADVANCE', 'DEPOSIT')
+                ), 0) AS advance_paise,
+                COALESCE(SUM(p.amount_paise) FILTER (
+                    WHERE p.payment_type = 'REFUND'
+                ), 0) AS refund_paise
+            FROM payments p
+            WHERE p.org_id = :org_id
+              AND p.is_deleted = false
+              AND EXTRACT(MONTH FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :month
+              AND EXTRACT(YEAR FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :year
+              {pay_filter}
+        """),
+        params,
+    )
+    adv = adv_res.mappings().fetchone() or {}
+    advance_received = adv.get("advance_paise", 0) or 0
+    refunds_given = adv.get("refund_paise", 0) or 0
+
+    # Expenses by paid_by (or fall back to creator's username)
+    by_person_filter = "AND e.property_id = :pid" if property_id else ""
+    by_person_res = await db.execute(
+        text(f"""
+            SELECT COALESCE(NULLIF(TRIM(e.paid_by), ''), u.name, 'Unattributed') AS person,
+                   SUM(e.amount_paise) AS total_paise,
+                   COUNT(*) AS count
+            FROM expenses e
+            LEFT JOIN users u ON u.id = e.created_by
+            WHERE e.org_id = :org_id
+              AND e.is_deleted = false
+              AND e.approval_status = 'APPROVED'
+              AND EXTRACT(MONTH FROM e.purchase_date) = :month
+              AND EXTRACT(YEAR FROM e.purchase_date) = :year
+              {by_person_filter}
+            GROUP BY 1
+            ORDER BY total_paise DESC
+        """),
+        params,
+    )
+    expenses_by_person = [dict(r) for r in by_person_res.mappings().fetchall()]
+
     # Overdue: number of distinct tenants whose ledger this month or older isn't fully paid
     overdue_filter = "AND t.property_id = :pid" if property_id else ""
     overdue_res = await db.execute(
@@ -114,14 +160,19 @@ async def dashboard_summary(
     rate = (collected / expected) if expected > 0 else 0
     occupancy_rate = (occupied / total_beds) if total_beds > 0 else 0
 
+    cash_in = collected + advance_received
+    cash_out = total_expenses + refunds_given
     return {
         # Canonical names
         "expected_rent_paise": expected,
         "collected_rent_paise": collected,
         "outstanding_paise": max(expected - collected, 0),
         "collection_rate": round(rate, 4),                   # 0..1 fraction
+        "advance_received_paise": advance_received,
+        "refunds_given_paise": refunds_given,
         "total_expenses_paise": total_expenses,
-        "net_income_paise": collected - total_expenses,
+        "net_income_paise": cash_in - cash_out,
+        "expenses_by_person": expenses_by_person,
         "occupancy_rate": round(occupancy_rate, 4),          # 0..1 fraction
         "total_tenants": rent["total_tenants"] or 0,
         "vacant_beds": vacant_beds,

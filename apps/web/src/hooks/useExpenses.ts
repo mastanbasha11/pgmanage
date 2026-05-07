@@ -7,12 +7,15 @@ export interface Expense {
   category_name: string;
   description: string;
   vendor_name?: string;
+  paid_by?: string;
   amount_paise: number;
   purchase_date: string;
   expense_date: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   approval_status: 'PENDING' | 'APPROVED' | 'REJECTED';
   payment_mode?: string;
+  reference_number?: string;
+  receipt_path?: string;
   bill_photo_s3_key?: string;
   bill_photo_url?: string;
   submitted_by_name?: string;
@@ -79,6 +82,7 @@ export function useCreateExpense() {
       category_id: string;
       description?: string;
       vendor_name?: string;
+      paid_by?: string;
       amount_paise: number;
       purchase_date: string;
       property_id: string;
@@ -92,6 +96,70 @@ export function useCreateExpense() {
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
+}
+
+export function useUpdateExpense(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      category_id?: string;
+      amount_paise?: number;
+      description?: string;
+      vendor_name?: string;
+      paid_by?: string;
+      purchase_date?: string;
+      payment_mode?: string;
+      reference_number?: string;
+    }) => api.patch(`/expenses/${id}`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses'] });
+      qc.invalidateQueries({ queryKey: ['expense-summary'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useDeleteExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/expenses/${id}`).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses'] });
+      qc.invalidateQueries({ queryKey: ['expense-summary'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useUploadReceipt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, file }: { id: string; file: File }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await api.post(`/expenses/${id}/receipt`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return r.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+  });
+}
+
+export function useDeleteReceipt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/expenses/${id}/receipt`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+  });
+}
+
+/**
+ * Build a fully-qualified URL for a receipt that includes the JWT in the
+ * fetch request — uses an object URL so it can be assigned to <img src>.
+ */
+export function receiptUrl(expenseId: string): string {
+  return `/api/v1/expenses/${expenseId}/receipt`;
 }
 
 export function useApproveExpense() {

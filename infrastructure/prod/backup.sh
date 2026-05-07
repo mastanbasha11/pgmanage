@@ -34,9 +34,19 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
 echo "[backup] dump size: $(du -h "$DUMP_FILE" | cut -f1)"
 
 if [[ -n "${S3_BUCKET_NAME:-}" ]]; then
-  echo "[backup] uploading to s3://${S3_BUCKET_NAME}/postgres/"
+  echo "[backup] uploading dump to s3://${S3_BUCKET_NAME}/postgres/"
   aws s3 cp "$DUMP_FILE" "s3://${S3_BUCKET_NAME}/postgres/$(basename "$DUMP_FILE")" \
     --storage-class STANDARD_IA --no-progress
+
+  # Receipts / uploads — sync the Docker volume to S3 (offsite copy).
+  # `aws s3 sync` only uploads new/changed files, so this is cheap.
+  UPLOADS_DIR=/var/lib/docker/volumes/pgmanage_uploads/_data
+  if [[ -d "$UPLOADS_DIR" ]]; then
+    echo "[backup] syncing $UPLOADS_DIR → s3://${S3_BUCKET_NAME}/uploads/"
+    aws s3 sync "$UPLOADS_DIR/" "s3://${S3_BUCKET_NAME}/uploads/" \
+      --storage-class STANDARD_IA --no-progress \
+      --exclude "*.tmp"
+  fi
 fi
 
 # Local retention: 30 days

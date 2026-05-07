@@ -67,11 +67,14 @@ services:
       RATE_LIMIT_PER_MINUTE: 120
       RATE_LIMIT_OTP_PER_MIN: 5
       RATE_LIMIT_LOGIN_PER_MIN: 5
+      UPLOAD_ROOT: /app/uploads
       # External integrations — wire up later
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       META_APP_SECRET: ${META_APP_SECRET:-}
       SES_FROM_EMAIL: ${SES_FROM_EMAIL:-}
+    volumes:
+      - uploads:/app/uploads
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://localhost:8000/health\").status==200 else 1)'"]
       interval: 15s
@@ -130,3 +133,4 @@ volumes:
   webdist:
   caddydata:
   caddyconfig:
+  uploads:

@@ -376,6 +376,7 @@ function CheckoutDialog({
 }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [refundRupees, setRefundRupees] = useState('');
+  const [refundPaidBy, setRefundPaidBy] = useState('');
   const [notes, setNotes] = useState('');
   const { mutateAsync, isPending } = useCheckout(tenantId);
   const { toast } = useToast();
@@ -385,6 +386,7 @@ function CheckoutDialog({
       await mutateAsync({
         actual_move_out_date: date,
         refund_amount_paise: refundRupees ? Math.round(Number(refundRupees) * 100) : 0,
+        refund_paid_by: refundPaidBy.trim() || undefined,
         notes: notes || undefined,
       });
       toast({ title: 'Tenant checked out', description: `${tenantName} checkout recorded.` });
@@ -412,15 +414,28 @@ function CheckoutDialog({
             <Label>Move-out date *</Label>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
-          <div>
-            <Label>Refund deposit (₹)</Label>
-            <Input
-              type="number"
-              value={refundRupees}
-              onChange={(e) => setRefundRupees(e.target.value)}
-              placeholder="0"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Refund deposit (₹)</Label>
+              <Input
+                type="number"
+                value={refundRupees}
+                onChange={(e) => setRefundRupees(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <Label>Refund Paid By</Label>
+              <Input
+                value={refundPaidBy}
+                onChange={(e) => setRefundPaidBy(e.target.value)}
+                placeholder="e.g. Mastan"
+              />
+            </div>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Leave refund details blank now and add them later from the tenant page.
+          </p>
           <div>
             <Label>Notes</Label>
             <Input
