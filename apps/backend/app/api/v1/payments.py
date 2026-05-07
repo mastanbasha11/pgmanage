@@ -263,9 +263,12 @@ async def rent_ledger(
                   AND p.amount_paise > 0
             ) collectors ON true
             WHERE rle.property_id = :pid AND rle.month = :month AND rle.year = :year
+              -- Tenant must have been active past the END of the view month.
+              -- A check-out anywhere in/before this month → hide their row.
               AND (
                 t.actual_move_out_date IS NULL
-                OR t.actual_move_out_date >= make_date(:year, :month, 1)
+                OR t.actual_move_out_date
+                   >= (make_date(:year, :month, 1) + INTERVAL '1 month')::date
               )
             ORDER BY f.floor_number NULLS LAST,
                      NULLIF(regexp_replace(r.room_number, '\D', '', 'g'), '')::int NULLS LAST,
@@ -347,6 +350,10 @@ async def overdue_tenants(
         # Exclude entries where the bill is already covered by paid+discount,
         # in case status hasn't been recomputed yet.
         "(rle.amount_due_paise - rle.amount_paid_paise - COALESCE(rle.discount_paise,0)) > 0",
+        # Same checked-out-tenant rule as /rent/ledger: require active beyond
+        # the entry's billing month.
+        "(t.actual_move_out_date IS NULL "
+        "OR t.actual_move_out_date >= (make_date(rle.year, rle.month, 1) + INTERVAL '1 month')::date)",
     ]
     params: dict[str, Any] = {"org_id": str(ctx.org_id)}
 
