@@ -91,10 +91,24 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             google_maps_url TEXT,
             amenities_json JSONB NOT NULL DEFAULT '[]',
             logo_url TEXT,
+            settlement_day INTEGER NOT NULL DEFAULT 10,
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".billing_periods (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            property_id UUID NOT NULL REFERENCES "{schema}".properties(id) ON DELETE CASCADE,
+            period_month INTEGER NOT NULL CHECK (period_month BETWEEN 1 AND 12),
+            period_year INTEGER NOT NULL,
+            close_date DATE NOT NULL,
+            closed_at TIMESTAMPTZ,
+            closed_by UUID,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_billing_period_pmy UNIQUE (property_id, period_month, period_year)
         )""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".room_types (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

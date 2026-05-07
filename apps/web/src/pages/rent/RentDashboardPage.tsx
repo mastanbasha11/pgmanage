@@ -14,8 +14,13 @@ import {
   Plus,
   ArrowDownToLine,
   ArrowUpFromLine,
+  CalendarDays,
+  Pencil,
 } from 'lucide-react';
 import AddPaymentDialog from './AddPaymentDialog';
+import EditCloseDateDialog from './EditCloseDateDialog';
+import { api } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -310,7 +315,23 @@ export default function RentDashboardPage() {
   const [collectorFilter, setCollectorFilter] = useState<string>('ALL');
   const [payingEntry, setPayingEntry] = useState<LedgerEntry | null>(null);
   const [showAddPayment, setShowAddPayment] = useState(false);
+  const [showEditClose, setShowEditClose] = useState(false);
   const { toast } = useToast();
+
+  // Look up fiscal period for current selection (start, end, default close, override?)
+  const { data: period } = useQuery<{
+    period_start: string;
+    period_end: string;
+    settlement_day: number;
+    overridden: boolean;
+  }>({
+    queryKey: ['billing-period', selectedPropertyId, year, month],
+    queryFn: () =>
+      api
+        .get(`/properties/${selectedPropertyId}/billing-period/${year}/${month}`)
+        .then((r) => r.data),
+    enabled: !!selectedPropertyId,
+  });
 
   const { data: ledger, isLoading } = useRentLedger({
     property_id: selectedPropertyId ?? undefined,
@@ -395,9 +416,26 @@ export default function RentDashboardPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Rent &amp; Payments</h1>
-            <p className="text-sm text-muted-foreground">
-              Track collection for {monthName(month)} {year}
-            </p>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>Track collection for {monthName(month)} {year}</span>
+              {period && (
+                <button
+                  type="button"
+                  onClick={() => setShowEditClose(true)}
+                  className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-xs hover:border-accent hover:text-accent transition-colors"
+                  title="Edit fiscal close date"
+                >
+                  <CalendarDays className="h-3 w-3" />
+                  Period: {new Date(period.period_start).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                  {' – '}
+                  {new Date(period.period_end).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                  {period.overridden && (
+                    <span className="ml-1 text-[10px] uppercase text-amber-600">override</span>
+                  )}
+                  <Pencil className="h-3 w-3 opacity-60" />
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
@@ -789,6 +827,17 @@ export default function RentDashboardPage() {
 
       <RecordPaymentDialog entry={payingEntry} onClose={() => setPayingEntry(null)} />
       <AddPaymentDialog open={showAddPayment} onClose={() => setShowAddPayment(false)} />
+      {selectedPropertyId && period && (
+        <EditCloseDateDialog
+          open={showEditClose}
+          onClose={() => setShowEditClose(false)}
+          propertyId={selectedPropertyId}
+          month={month}
+          year={year}
+          currentClose={period.overridden ? period.period_end : null}
+          defaultClose={period.period_end}
+        />
+      )}
     </>
   );
 }

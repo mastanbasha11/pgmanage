@@ -304,11 +304,18 @@ async def list_expenses(
     if approval_status:
         conditions.append("e.approval_status = CAST(:approval_status AS expense_approval_enum)")
         params["approval_status"] = approval_status
-    # month/year shortcut → convert to date range
+    # month/year shortcut → resolve to fiscal period (close-date based) when a
+    # property is given, else fall back to calendar-month bounds.
     if month and year:
-        last_day = monthrange(year, month)[1]
-        start_date = start_date or date(year, month, 1)
-        end_date = end_date or date(year, month, last_day)
+        if property_id:
+            from app.services.billing_period import get_fiscal_period
+            fiscal = await get_fiscal_period(property_id, month, year, db)
+            start_date = start_date or fiscal.period_start
+            end_date = end_date or fiscal.period_end
+        else:
+            last_day = monthrange(year, month)[1]
+            start_date = start_date or date(year, month, 1)
+            end_date = end_date or date(year, month, last_day)
     if start_date:
         conditions.append("e.purchase_date >= :start_date")
         params["start_date"] = start_date
@@ -363,12 +370,19 @@ async def expense_summary(
     end_date: date | None = Query(None),
 ):
     today = date.today()
-    # Resolve date range — prefer explicit dates, fall back to month/year, then current month
+    # Resolve date range. Prefer explicit dates; else use fiscal-period bounds
+    # for the (property, month, year); else fall back to calendar month.
     if not start_date or not end_date:
         m = month or today.month
         y = year or today.year
-        start_date = start_date or date(y, m, 1)
-        end_date = end_date or date(y, m, monthrange(y, m)[1])
+        if property_id:
+            from app.services.billing_period import get_fiscal_period
+            fiscal = await get_fiscal_period(property_id, m, y, db)
+            start_date = start_date or fiscal.period_start
+            end_date = end_date or fiscal.period_end
+        else:
+            start_date = start_date or date(y, m, 1)
+            end_date = end_date or date(y, m, monthrange(y, m)[1])
 
     conditions = ["e.org_id = :org_id", "e.purchase_date BETWEEN :start AND :end",
                   "e.approval_status = 'APPROVED'::expense_approval_enum", "e.is_deleted = false"]

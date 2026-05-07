@@ -226,6 +226,11 @@ async def rent_ledger(
     month: int = Query(...),
     year: int = Query(...),
 ):
+    # Resolve fiscal period for this (property, month, year)
+    from app.services.billing_period import get_fiscal_period
+    fiscal = await get_fiscal_period(property_id, month, year, db)
+    period_start = fiscal.period_start
+    period_end = fiscal.period_end
     # First-of-the-viewed-month — used to exclude tenants who already checked out
     # before this month (e.g. ledger generated in advance, then tenant left).
     result = await db.execute(
@@ -298,8 +303,8 @@ async def rent_ledger(
     total_discount = sum(r["discount_paise"] or 0 for r in items)
     settled = total_paid + total_discount
 
-    # Per-collector breakdown for the same month/year, split by RENT vs ADVANCE/DEPOSIT.
-    # We bucket DEPOSIT under ADVANCE in the UI (it's still 'advance' colloquially).
+    # Per-collector breakdown using the fiscal period (collected_at in [start, end]).
+    # Splits Rent vs Advance/Deposit per person.
     by_collector = await db.execute(
         text("""
             SELECT
@@ -317,19 +322,15 @@ async def rent_ledger(
             WHERE p.property_id = :pid
               AND p.is_deleted = false
               AND p.amount_paise > 0
-              AND (
-                  (p.payment_type = 'RENT' AND p.for_month = :month AND p.for_year = :year)
-                  OR (p.payment_type IN ('ADVANCE', 'DEPOSIT')
-                      AND EXTRACT(MONTH FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :month
-                      AND EXTRACT(YEAR FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :year)
-              )
+              AND p.payment_type IN ('RENT', 'ADVANCE', 'DEPOSIT')
+              AND (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
             GROUP BY 1
             HAVING COALESCE(SUM(p.amount_paise), 0) > 0
             ORDER BY (COALESCE(SUM(p.amount_paise) FILTER (WHERE p.payment_type='RENT'),0)
                     + COALESCE(SUM(p.amount_paise) FILTER (
                         WHERE p.payment_type IN ('ADVANCE','DEPOSIT')),0)) DESC
         """),
-        {"pid": str(property_id), "month": month, "year": year},
+        {"pid": str(property_id), "start": period_start, "end": period_end},
     )
     collectors = []
     for r in by_collector.mappings().fetchall():
@@ -344,7 +345,8 @@ async def rent_ledger(
             "payments": (d.get("rent_payments") or 0) + (d.get("advance_payments") or 0),
         })
 
-    # Property-wide advance & refund totals for this month (KPI cards).
+    # Property-wide advance & refund + period-bound rent collected, for the
+    # KPI cards. All filtered by collected_at falling in the fiscal period.
     adv_refund = await db.execute(
         text("""
             SELECT
@@ -353,18 +355,21 @@ async def rent_ledger(
                 ), 0) AS advance_paise,
                 COALESCE(SUM(amount_paise) FILTER (
                     WHERE payment_type = 'REFUND'
-                ), 0) AS refund_paise
+                ), 0) AS refund_paise,
+                COALESCE(SUM(amount_paise) FILTER (
+                    WHERE payment_type = 'RENT'
+                ), 0) AS rent_collected_in_period_paise
             FROM payments
             WHERE property_id = :pid
               AND is_deleted = false
-              AND EXTRACT(MONTH FROM collected_at AT TIME ZONE 'Asia/Kolkata') = :month
-              AND EXTRACT(YEAR FROM collected_at AT TIME ZONE 'Asia/Kolkata') = :year
+              AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
         """),
-        {"pid": str(property_id), "month": month, "year": year},
+        {"pid": str(property_id), "start": period_start, "end": period_end},
     )
     ar = adv_refund.mappings().fetchone() or {}
     advance_received = ar.get("advance_paise", 0) or 0
     refunds_given = ar.get("refund_paise", 0) or 0
+    rent_collected_in_period = ar.get("rent_collected_in_period_paise", 0) or 0
 
     return {
         "property_id": str(property_id),
@@ -373,7 +378,10 @@ async def rent_ledger(
         "total": len(items),
         "stats": {
             "expected_paise": total_due,
+            # 'collected_paise' historically meant "sum across ledger items".
+            # For the partner-style P&L we want the period-bound collection.
             "collected_paise": total_paid,
+            "collected_in_period_paise": rent_collected_in_period,
             "discount_paise": total_discount,
             "settled_paise": settled,
             "outstanding_paise": max(total_due - settled, 0),
@@ -382,6 +390,13 @@ async def rent_ledger(
             "collection_rate": round(settled / total_due * 100, 1) if total_due > 0 else 0,
         },
         "collectors": collectors,
+        "period": {
+            "start": str(period_start),
+            "end": str(period_end),
+            "settlement_day": fiscal.settlement_day,
+            "overridden": fiscal.overridden,
+            "prev_overridden": fiscal.prev_overridden,
+        },
     }
 
 

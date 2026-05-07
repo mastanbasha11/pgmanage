@@ -419,12 +419,21 @@ function ExpenseDialog({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+const MONTHS = Array.from({ length: 12 }, (_, i) => ({
+  value: i + 1,
+  label: new Date(2000, i, 1).toLocaleString('en-IN', { month: 'long' }),
+}));
+const NOW = new Date().getFullYear();
+const YEARS = [NOW - 1, NOW, NOW + 1];
+
 export default function ExpensesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<string | null>(null);
   const { selectedPropertyId, canApproveExpenses } = useAuthStore();
-  const { month, year } = currentMonthYear();
+  const cmy = currentMonthYear();
+  const [month, setMonth] = useState(cmy.month);
+  const [year, setYear] = useState(cmy.year);
 
   const { data: expenses, isLoading } = useExpenses({
     property_id: selectedPropertyId ?? undefined,
@@ -485,15 +494,42 @@ export default function ExpensesPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Expenses</h1>
             <p className="text-sm text-muted-foreground">
-              Total this month:{' '}
+              Total for{' '}
+              {MONTHS.find((mm) => mm.value === month)?.label} {year}:{' '}
               <span className="font-semibold text-foreground">
                 {formatPaise(summary?.total_paise ?? 0)}
               </span>
             </p>
           </div>
-          <Button size="sm" className="gap-2" onClick={() => setShowAdd(true)}>
-            <Plus className="h-4 w-4" /> Add expense
-          </Button>
+          <div className="flex items-center gap-2">
+            <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
+              <SelectTrigger className="w-32 h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MONTHS.map((m) => (
+                  <SelectItem key={m.value} value={String(m.value)}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+              <SelectTrigger className="w-24 h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {YEARS.map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" className="gap-2" onClick={() => setShowAdd(true)}>
+              <Plus className="h-4 w-4" /> Add expense
+            </Button>
+          </div>
         </div>
 
         {(summary?.items?.length ?? 0) > 0 && (
@@ -518,7 +554,9 @@ export default function ExpensesPage() {
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <Wallet className="h-6 w-6 text-muted-foreground" />
             </div>
-            <p className="font-medium">No expenses recorded this month</p>
+            <p className="font-medium">
+              No expenses for {MONTHS.find((mm) => mm.value === month)?.label} {year}
+            </p>
             <Button className="mt-4 gap-2" onClick={() => setShowAdd(true)}>
               <Plus className="h-4 w-4" />
               Record your first expense

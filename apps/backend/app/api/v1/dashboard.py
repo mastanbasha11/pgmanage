@@ -34,6 +34,15 @@ async def dashboard_summary(
     m = month or now.month
     y = year or now.year
 
+    # Fiscal period (start/end dates) for the cash-flow KPIs.
+    period_start = None
+    period_end = None
+    if property_id:
+        from app.services.billing_period import get_fiscal_period
+        fiscal = await get_fiscal_period(property_id, m, y, db)
+        period_start = fiscal.period_start
+        period_end = fiscal.period_end
+
     pid_filter = "AND rle.property_id = :pid" if property_id else ""
     params: dict[str, Any] = {"org_id": str(ctx.org_id), "month": m, "year": y}
     if property_id:
@@ -55,21 +64,35 @@ async def dashboard_summary(
     )
     rent = rent_result.mappings().fetchone()
 
-    # Expense stats
+    # Expense stats — fiscal period when a property is selected, else calendar month
     exp_filter = "AND e.property_id = :pid" if property_id else ""
-    exp_result = await db.execute(
-        text(f"""
-            SELECT COALESCE(SUM(e.amount_paise), 0) as total_expenses
-            FROM expenses e
-            WHERE e.org_id = :org_id
-                AND EXTRACT(MONTH FROM e.purchase_date) = :month
-                AND EXTRACT(YEAR FROM e.purchase_date) = :year
-                AND e.approval_status = 'APPROVED'
-                AND e.is_deleted = false
-            {exp_filter}
-        """),
-        params,
-    )
+    if period_start and period_end:
+        exp_result = await db.execute(
+            text(f"""
+                SELECT COALESCE(SUM(e.amount_paise), 0) as total_expenses
+                FROM expenses e
+                WHERE e.org_id = :org_id
+                  AND e.purchase_date BETWEEN :start AND :end
+                  AND e.approval_status = 'APPROVED'
+                  AND e.is_deleted = false
+                {exp_filter}
+            """),
+            {**params, "start": period_start, "end": period_end},
+        )
+    else:
+        exp_result = await db.execute(
+            text(f"""
+                SELECT COALESCE(SUM(e.amount_paise), 0) as total_expenses
+                FROM expenses e
+                WHERE e.org_id = :org_id
+                    AND EXTRACT(MONTH FROM e.purchase_date) = :month
+                    AND EXTRACT(YEAR FROM e.purchase_date) = :year
+                    AND e.approval_status = 'APPROVED'
+                    AND e.is_deleted = false
+                {exp_filter}
+            """),
+            params,
+        )
     expenses = exp_result.mappings().fetchone()
 
     # Occupancy
@@ -95,50 +118,88 @@ async def dashboard_summary(
     occupied = occ["occupied"] or 0
     vacant_beds = max(total_beds - occupied, 0)
 
-    # Advance + Refund (current month, by collected_at)
+    # Advance + Refund (fiscal period when property given, else calendar month)
     pay_filter = "AND p.property_id = :pid" if property_id else ""
-    adv_res = await db.execute(
-        text(f"""
-            SELECT
-                COALESCE(SUM(p.amount_paise) FILTER (
-                    WHERE p.payment_type IN ('ADVANCE', 'DEPOSIT')
-                ), 0) AS advance_paise,
-                COALESCE(SUM(p.amount_paise) FILTER (
-                    WHERE p.payment_type = 'REFUND'
-                ), 0) AS refund_paise
-            FROM payments p
-            WHERE p.org_id = :org_id
-              AND p.is_deleted = false
-              AND EXTRACT(MONTH FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :month
-              AND EXTRACT(YEAR FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :year
-              {pay_filter}
-        """),
-        params,
-    )
+    if period_start and period_end:
+        adv_res = await db.execute(
+            text(f"""
+                SELECT
+                    COALESCE(SUM(p.amount_paise) FILTER (
+                        WHERE p.payment_type IN ('ADVANCE', 'DEPOSIT')
+                    ), 0) AS advance_paise,
+                    COALESCE(SUM(p.amount_paise) FILTER (
+                        WHERE p.payment_type = 'REFUND'
+                    ), 0) AS refund_paise
+                FROM payments p
+                WHERE p.org_id = :org_id
+                  AND p.is_deleted = false
+                  AND (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
+                  {pay_filter}
+            """),
+            {**params, "start": period_start, "end": period_end},
+        )
+    else:
+        adv_res = await db.execute(
+            text(f"""
+                SELECT
+                    COALESCE(SUM(p.amount_paise) FILTER (
+                        WHERE p.payment_type IN ('ADVANCE', 'DEPOSIT')
+                    ), 0) AS advance_paise,
+                    COALESCE(SUM(p.amount_paise) FILTER (
+                        WHERE p.payment_type = 'REFUND'
+                    ), 0) AS refund_paise
+                FROM payments p
+                WHERE p.org_id = :org_id
+                  AND p.is_deleted = false
+                  AND EXTRACT(MONTH FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :month
+                  AND EXTRACT(YEAR FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :year
+                  {pay_filter}
+            """),
+            params,
+        )
     adv = adv_res.mappings().fetchone() or {}
     advance_received = adv.get("advance_paise", 0) or 0
     refunds_given = adv.get("refund_paise", 0) or 0
 
-    # Expenses by paid_by (or fall back to creator's username)
+    # Expenses by paid_by (or fall back to creator's username) — same period semantics
     by_person_filter = "AND e.property_id = :pid" if property_id else ""
-    by_person_res = await db.execute(
-        text(f"""
-            SELECT COALESCE(NULLIF(TRIM(e.paid_by), ''), u.name, 'Unattributed') AS person,
-                   SUM(e.amount_paise) AS total_paise,
-                   COUNT(*) AS count
-            FROM expenses e
-            LEFT JOIN users u ON u.id = e.created_by
-            WHERE e.org_id = :org_id
-              AND e.is_deleted = false
-              AND e.approval_status = 'APPROVED'
-              AND EXTRACT(MONTH FROM e.purchase_date) = :month
-              AND EXTRACT(YEAR FROM e.purchase_date) = :year
-              {by_person_filter}
-            GROUP BY 1
-            ORDER BY total_paise DESC
-        """),
-        params,
-    )
+    if period_start and period_end:
+        by_person_res = await db.execute(
+            text(f"""
+                SELECT COALESCE(NULLIF(TRIM(e.paid_by), ''), u.name, 'Unattributed') AS person,
+                       SUM(e.amount_paise) AS total_paise,
+                       COUNT(*) AS count
+                FROM expenses e
+                LEFT JOIN users u ON u.id = e.created_by
+                WHERE e.org_id = :org_id
+                  AND e.is_deleted = false
+                  AND e.approval_status = 'APPROVED'
+                  AND e.purchase_date BETWEEN :start AND :end
+                  {by_person_filter}
+                GROUP BY 1
+                ORDER BY total_paise DESC
+            """),
+            {**params, "start": period_start, "end": period_end},
+        )
+    else:
+        by_person_res = await db.execute(
+            text(f"""
+                SELECT COALESCE(NULLIF(TRIM(e.paid_by), ''), u.name, 'Unattributed') AS person,
+                       SUM(e.amount_paise) AS total_paise,
+                       COUNT(*) AS count
+                FROM expenses e
+                LEFT JOIN users u ON u.id = e.created_by
+                WHERE e.org_id = :org_id
+                  AND e.is_deleted = false
+                  AND e.approval_status = 'APPROVED'
+                  AND EXTRACT(MONTH FROM e.purchase_date) = :month
+                  AND EXTRACT(YEAR FROM e.purchase_date) = :year
+                  {by_person_filter}
+                GROUP BY 1
+                ORDER BY total_paise DESC
+            """),
+            params,
+        )
     expenses_by_person = [dict(r) for r in by_person_res.mappings().fetchall()]
 
     # Overdue: number of distinct tenants whose ledger this month or older isn't fully paid
@@ -160,7 +221,24 @@ async def dashboard_summary(
     rate = (collected / expected) if expected > 0 else 0
     occupancy_rate = (occupied / total_beds) if total_beds > 0 else 0
 
-    cash_in = collected + advance_received
+    # For Net Income we use the period-bound rent collection if a property
+    # was selected (matches partner P&L), else the ledger-rolled-up figure.
+    if property_id and period_start and period_end:
+        rip_res = await db.execute(
+            text("""
+                SELECT COALESCE(SUM(amount_paise), 0) AS rip
+                FROM payments
+                WHERE org_id = :org_id AND property_id = :pid
+                  AND is_deleted = false
+                  AND payment_type = 'RENT'
+                  AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
+            """),
+            {**params, "start": period_start, "end": period_end},
+        )
+        rent_in_period = rip_res.scalar() or 0
+    else:
+        rent_in_period = collected
+    cash_in = rent_in_period + advance_received
     cash_out = total_expenses + refunds_given
     return {
         # Canonical names
@@ -180,6 +258,8 @@ async def dashboard_summary(
         "overdue_tenants": overdue_tenants or 0,
         "month": m,
         "year": y,
+        "period_start": str(period_start) if period_start else None,
+        "period_end": str(period_end) if period_end else None,
         # Back-compat aliases (older clients)
         "gross_rent_expected_paise": expected,
         "rent_collected_paise": collected,

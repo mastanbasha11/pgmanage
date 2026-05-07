@@ -1,6 +1,7 @@
 """Property, floor, room type, room, and bed management endpoints."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -659,3 +660,121 @@ async def update_bed(
     )
     await db.commit()
     return {"message": "Bed updated"}
+
+
+# ── Billing periods (fiscal-month overrides) ──────────────────────────────────
+
+class BillingPeriodSet(BaseModel):
+    close_date: date
+    notes: str | None = None
+
+
+@router.patch("/properties/{property_id}/settlement-day", summary="Update default settlement day")
+async def set_settlement_day(
+    property_id: UUID,
+    body: dict,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(403, "Only owners can change settlement day")
+    day = int(body.get("settlement_day", 10))
+    if day < 1 or day > 28:
+        raise HTTPException(400, "settlement_day must be 1-28")
+    await db.execute(
+        text("UPDATE properties SET settlement_day = :d, updated_at = NOW() "
+             "WHERE id = :id AND org_id = :org_id"),
+        {"d": day, "id": str(property_id), "org_id": str(ctx.org_id)},
+    )
+    await db.commit()
+    return {"message": "Settlement day updated", "settlement_day": day}
+
+
+@router.get(
+    "/properties/{property_id}/billing-period/{year}/{month}",
+    summary="Compute the fiscal period for a (property, month, year)",
+)
+async def get_billing_period(
+    property_id: UUID,
+    year: int,
+    month: int,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import date as _date
+    from app.services.billing_period import get_fiscal_period
+    p = await get_fiscal_period(property_id, month, year, db)
+    return {
+        "property_id": str(property_id),
+        "month": month,
+        "year": year,
+        "period_start": str(p.period_start),
+        "period_end": str(p.period_end),
+        "settlement_day": p.settlement_day,
+        "overridden": p.overridden,
+        "prev_overridden": p.prev_overridden,
+        "today": str(_date.today()),
+    }
+
+
+@router.put(
+    "/properties/{property_id}/billing-period/{year}/{month}",
+    summary="Set or update the close date for a (month, year). Pass null close_date to clear.",
+)
+async def set_billing_period(
+    property_id: UUID,
+    year: int,
+    month: int,
+    body: BillingPeriodSet,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(403, "Only owners can set the close date")
+    if month < 1 or month > 12:
+        raise HTTPException(400, "Invalid month")
+    # Sanity: close_date must be in the (month, year) ± a small grace window.
+    # We accept any date in the calendar month or up to 20 days into next month
+    # (some PGs close late).
+    if body.close_date.year != year or body.close_date.month not in (month, month % 12 + 1):
+        raise HTTPException(
+            400,
+            "close_date should fall in the named month or the first ~20 days of the next month",
+        )
+    await db.execute(
+        text("""
+            INSERT INTO billing_periods (property_id, period_month, period_year, close_date, notes)
+            VALUES (:pid, :m, :y, :d, :n)
+            ON CONFLICT (property_id, period_month, period_year)
+            DO UPDATE SET close_date = EXCLUDED.close_date, notes = EXCLUDED.notes,
+                          updated_at = NOW()
+        """),
+        {"pid": str(property_id), "m": month, "y": year,
+         "d": body.close_date, "n": body.notes},
+    )
+    await db.commit()
+    return {"message": "Billing period saved", "close_date": str(body.close_date)}
+
+
+@router.delete(
+    "/properties/{property_id}/billing-period/{year}/{month}",
+    summary="Clear the per-month override (fall back to settlement_day)",
+)
+async def clear_billing_period(
+    property_id: UUID,
+    year: int,
+    month: int,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(403, "Only owners can clear billing periods")
+    await db.execute(
+        text("""
+            DELETE FROM billing_periods
+            WHERE property_id = :pid AND period_month = :m AND period_year = :y
+        """),
+        {"pid": str(property_id), "m": month, "y": year},
+    )
+    await db.commit()
+    return {"message": "Override removed"}
