@@ -21,7 +21,7 @@ from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import NotFoundError
 from app.services.audit_constants import Event
-from app.services.audit_service import log_event
+from app.services.audit_service import diff_changes, log_event
 from app.services.s3_service import generate_presigned_upload_url
 
 router = APIRouter()
@@ -139,6 +139,14 @@ async def update_expense(
     if not updates:
         raise HTTPException(400, "No fields to update")
 
+    # Old values BEFORE the update, for the before/after diff.
+    exp_cols = ", ".join(updates.keys())
+    old_expense = (await db.execute(
+        text(f"SELECT {exp_cols} FROM expenses WHERE id = :id AND org_id = :org_id AND is_deleted = false"),
+        {"id": str(expense_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    changes = diff_changes(dict(old_expense) if old_expense else {}, updates)
+
     set_parts = []
     params: dict[str, Any] = {"id": str(expense_id), "org_id": str(ctx.org_id)}
     for k, v in updates.items():
@@ -173,7 +181,7 @@ async def update_expense(
         actor_name=ctx.name,
         entity_type="expense",
         entity_id=expense_id,
-        metadata={"fields": list(updates.keys())},
+        metadata={"changes": changes},
     )
     await db.commit()
     return {"message": "Expense updated"}

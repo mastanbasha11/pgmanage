@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import NotFoundError
 from app.services.audit_constants import Event
-from app.services.audit_service import log_event
+from app.services.audit_service import diff_changes, log_event
 
 router = APIRouter()
 
@@ -165,6 +165,15 @@ async def update_complaint(
         from fastapi import HTTPException
         raise HTTPException(400, "No fields to update")
 
+    # Old values for the before/after diff (real columns only, before we inject
+    # the synthetic resolved_at = NOW() marker).
+    comp_cols = ", ".join(updates.keys())
+    old_comp = (await db.execute(
+        text(f"SELECT {comp_cols} FROM complaints WHERE id = :id AND org_id = :org_id"),
+        {"id": str(complaint_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    changes = diff_changes(dict(old_comp) if old_comp else {}, updates)
+
     if updates.get("status") == "RESOLVED":
         updates["resolved_at"] = "NOW()"
 
@@ -196,7 +205,7 @@ async def update_complaint(
         actor_name=ctx.name,
         entity_type="complaint",
         entity_id=complaint_id,
-        metadata={k: v for k, v in updates.items() if k != "resolved_at"},
+        metadata={"changes": changes},
     )
     await db.commit()
     return {"message": "Complaint updated"}

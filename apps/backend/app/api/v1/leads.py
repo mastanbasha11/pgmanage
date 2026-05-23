@@ -14,7 +14,7 @@ from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import NotFoundError
 from app.services.audit_constants import Event
-from app.services.audit_service import log_event
+from app.services.audit_service import diff_changes, log_event
 
 router = APIRouter()
 
@@ -231,6 +231,14 @@ async def update_lead(
         from fastapi import HTTPException
         raise HTTPException(400, "No fields to update")
 
+    # Old values BEFORE the update, for the before/after diff.
+    lead_cols = ", ".join(updates.keys())
+    old_lead = (await db.execute(
+        text(f"SELECT {lead_cols} FROM leads WHERE id = :id AND org_id = :org_id"),
+        {"id": str(lead_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    changes = diff_changes(dict(old_lead) if old_lead else {}, updates)
+
     lead_enum_columns = {"status": "lead_status_enum"}
     set_clauses = ", ".join(
         f"{k} = CAST(:{k} AS {lead_enum_columns[k]})" if k in lead_enum_columns else f"{k} = :{k}"
@@ -244,17 +252,22 @@ async def update_lead(
         updates,
     )
 
-    if "status" in updates:
+    if changes:
+        status_changed = "status" in changes
         await log_event(
             db,
-            Event.LEAD_STATUS_CHANGED,
-            description=f"{ctx.name} moved a lead to {updates['status']}",
+            Event.LEAD_STATUS_CHANGED if status_changed else Event.LEAD_UPDATED,
+            description=(
+                f"{ctx.name} moved a lead to {changes['status']['new']}"
+                if status_changed
+                else f"{ctx.name} updated a lead"
+            ),
             actor_user_id=ctx.user_id,
             actor_role=ctx.role,
             actor_name=ctx.name,
             entity_type="lead",
             entity_id=lead_id,
-            metadata={"status": updates["status"]},
+            metadata={"changes": changes},
         )
     await db.commit()
     return {"message": "Lead updated"}

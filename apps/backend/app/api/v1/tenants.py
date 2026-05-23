@@ -21,7 +21,7 @@ from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import ConflictError, NotFoundError
 from app.services.audit_constants import Event
-from app.services.audit_service import log_event
+from app.services.audit_service import diff_changes, log_event
 from app.services.s3_service import generate_presigned_upload_url
 
 
@@ -388,7 +388,13 @@ async def update_tenant(
         if k in updates:
             rent_plan_updates[k] = int(updates.pop(k))
 
+    rent_plan_changes: dict[str, dict] = {}
     if rent_plan_updates:
+        rp_cols = ", ".join(rent_plan_updates.keys())
+        old_rp = (await db.execute(
+            text(f"SELECT {rp_cols} FROM rent_plans WHERE tenant_id = :tid AND is_active = true"),
+            {"tid": str(tenant_id)},
+        )).mappings().fetchone()
         rp_set = ", ".join(f"{k} = :{k}" for k in rent_plan_updates)
         result = await db.execute(
             text(
@@ -403,6 +409,7 @@ async def update_tenant(
                 400,
                 "No active rent plan for this tenant; cannot update deposit/advance.",
             )
+        rent_plan_changes = diff_changes(dict(old_rp) if old_rp else {}, rent_plan_updates)
 
     if not updates:
         await log_event(
@@ -415,7 +422,7 @@ async def update_tenant(
             entity_type="tenant",
             entity_id=tenant_id,
             tenant_id=tenant_id,
-            metadata={"fields": list(rent_plan_updates.keys())},
+            metadata={"changes": rent_plan_changes},
         )
         await db.commit()
         return {"message": "Tenant updated"}
@@ -445,6 +452,14 @@ async def update_tenant(
             raise HTTPException(400, "Invalid emergency contact phone")
         updates["emergency_contact_phone"] = normalised
 
+    # Capture old values BEFORE the update for a precise before/after diff.
+    tenant_cols = ", ".join(updates.keys())
+    old_tenant = (await db.execute(
+        text(f"SELECT {tenant_cols} FROM tenants WHERE id = :id AND org_id = :org_id"),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    tenant_changes = diff_changes(dict(old_tenant) if old_tenant else {}, updates)
+
     set_parts = []
     for k in updates:
         if k == "id_type":
@@ -472,7 +487,7 @@ async def update_tenant(
         entity_type="tenant",
         entity_id=tenant_id,
         tenant_id=tenant_id,
-        metadata={"fields": [k for k in updates if k not in ("id", "org_id")]},
+        metadata={"changes": {**tenant_changes, **rent_plan_changes}},
     )
     await db.commit()
     return {"message": "Tenant updated"}

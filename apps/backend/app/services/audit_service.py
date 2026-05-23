@@ -52,6 +52,30 @@ def _s(value: UUID | str | None) -> str | None:
     return str(value)
 
 
+def _jsonable(v):
+    """Coerce a DB value to something JSON-serialisable (dates/UUIDs/Decimals → str)."""
+    if v is None or isinstance(v, str | int | float | bool):
+        return v
+    return str(v)
+
+
+def diff_changes(old: dict, new: dict) -> dict:
+    """
+    Build a before/after map ``{field: {"old": ..., "new": ...}}`` for every
+    field in ``new`` whose value differs from ``old``.
+
+    Used by update endpoints so the audit feed records exactly what changed,
+    attribute by attribute. ``old`` is the row's current values; ``new`` is the
+    set of incoming changes.
+    """
+    changes: dict[str, dict] = {}
+    for field, new_val in new.items():
+        old_val = old.get(field)
+        if old_val != new_val:
+            changes[field] = {"old": _jsonable(old_val), "new": _jsonable(new_val)}
+    return changes
+
+
 async def log_event(
     db: AsyncSession,
     event_type: str,

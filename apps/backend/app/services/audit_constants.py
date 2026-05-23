@@ -54,12 +54,14 @@ class Event:
     # ── Leads ────────────────────────────────────────────────────────────────
     LEAD_CREATED = "lead_created"
     LEAD_STATUS_CHANGED = "lead_status_changed"
+    LEAD_UPDATED = "lead_updated"
     LEAD_CONVERTED = "lead_converted"
 
     # ── Bookings ─────────────────────────────────────────────────────────────
     BOOKING_CREATED = "booking_created"
     BOOKING_CONFIRMED = "booking_confirmed"
     BOOKING_CANCELLED = "booking_cancelled"
+    BOOKING_UPDATED = "booking_updated"
 
     # ── Properties / rooms ───────────────────────────────────────────────────
     ROOM_STATUS_CHANGED = "room_status_changed"
@@ -92,10 +94,12 @@ EVENT_CATEGORY: dict[str, str] = {
     Event.EXPENSE_DELETED: Category.EXPENSE,
     Event.LEAD_CREATED: Category.LEAD,
     Event.LEAD_STATUS_CHANGED: Category.LEAD,
+    Event.LEAD_UPDATED: Category.LEAD,
     Event.LEAD_CONVERTED: Category.LEAD,
     Event.BOOKING_CREATED: Category.BOOKING,
     Event.BOOKING_CONFIRMED: Category.BOOKING,
     Event.BOOKING_CANCELLED: Category.BOOKING,
+    Event.BOOKING_UPDATED: Category.BOOKING,
     Event.ROOM_STATUS_CHANGED: Category.PROPERTY,
     Event.BED_ASSIGNED: Category.PROPERTY,
     Event.BED_VACATED: Category.PROPERTY,

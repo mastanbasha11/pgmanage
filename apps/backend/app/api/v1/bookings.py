@@ -15,7 +15,7 @@ from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import NotFoundError
 from app.services.audit_constants import Event
-from app.services.audit_service import log_event
+from app.services.audit_service import diff_changes, log_event
 
 router = APIRouter()
 
@@ -241,6 +241,14 @@ async def update_booking(
     if "kind" in updates and updates["kind"] not in _VALID_KINDS:
         raise HTTPException(400, f"kind must be one of {sorted(_VALID_KINDS)}")
 
+    # Old values for the before/after diff.
+    book_cols = ", ".join(updates.keys())
+    old_booking = (await db.execute(
+        text(f"SELECT {book_cols} FROM bookings WHERE id = :id AND org_id = :org_id AND is_deleted = false"),
+        {"id": str(booking_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    changes = diff_changes(dict(old_booking) if old_booking else {}, updates)
+
     set_parts: list[str] = []
     params: dict[str, Any] = {"id": str(booking_id), "org_id": str(ctx.org_id)}
     for k, v in updates.items():
@@ -267,6 +275,18 @@ async def update_booking(
     )
     if res.rowcount == 0:
         raise NotFoundError("Booking", booking_id)
+
+    await log_event(
+        db,
+        Event.BOOKING_UPDATED,
+        description=f"{ctx.name} edited a booking",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="booking",
+        entity_id=booking_id,
+        metadata={"changes": changes},
+    )
     await db.commit()
     return {"message": "Booking updated"}
 

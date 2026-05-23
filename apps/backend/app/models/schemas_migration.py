@@ -54,6 +54,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         ("notif_channel_enum", "'WHATSAPP','EMAIL','PUSH','SMS'"),
         ("notif_status_enum", "'SENT','FAILED','PENDING'"),
         ("audit_action_enum", "'INSERT','UPDATE','DELETE'"),
+        ("booking_kind_enum", "'DAILY','ADVANCE'"),
     ]
 
     for type_name, values in enum_types:
@@ -187,6 +188,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             monthly_rent_paise INTEGER NOT NULL,
             security_deposit_paise INTEGER NOT NULL DEFAULT 0,
             advance_paid_paise INTEGER NOT NULL DEFAULT 0,
+            non_refundable_advance_paise INTEGER NOT NULL DEFAULT 0,
             discount_amount_paise INTEGER NOT NULL DEFAULT 0,
             discount_reason TEXT,
             food_included BOOLEAN NOT NULL DEFAULT false,
@@ -197,7 +199,8 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             effective_to DATE,
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".payments (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -352,6 +355,28 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         f'CREATE INDEX IF NOT EXISTS idx_activity_log_event_type ON "{schema}".activity_log(event_type, created_at DESC)',
         f'CREATE INDEX IF NOT EXISTS idx_activity_log_event_category ON "{schema}".activity_log(event_category, created_at DESC)',
         f'CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON "{schema}".activity_log(created_at DESC)',
+        # Bookings (daily stays + advance/future bookings). Mirrors migrations 007/008.
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".bookings (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id UUID NOT NULL,
+            property_id UUID NOT NULL REFERENCES "{schema}".properties(id) ON DELETE CASCADE,
+            guest_name TEXT NOT NULL,
+            guest_phone TEXT,
+            room_label TEXT NOT NULL,
+            kind booking_kind_enum NOT NULL,
+            amount_paise INTEGER NOT NULL,
+            check_in_date DATE NOT NULL,
+            check_out_date DATE,
+            payment_mode payment_mode_enum NOT NULL DEFAULT 'CASH',
+            reference_number TEXT,
+            collected_at DATE NOT NULL,
+            collected_by UUID,
+            paid_to TEXT,
+            notes TEXT,
+            is_deleted BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
     ]
 
     for stmt in ddl_statements:

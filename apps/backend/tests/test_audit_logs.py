@@ -13,7 +13,6 @@ import uuid
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import auth_headers
 
@@ -242,3 +241,94 @@ async def test_logging_failure_does_not_break_operation(
     )
     assert listing.status_code == 200
     assert listing.json()["total"] >= 1
+
+
+# ── Before/after diffs: every attribute change records old + new ────────────
+
+@pytest.mark.asyncio
+async def test_profile_update_records_old_and_new(client: AsyncClient, test_owner, test_tenant):
+    """Editing a tenant profile field records {old, new} in metadata.changes."""
+    resp = await client.patch(
+        f"/api/v1/tenants/{test_tenant['tenant_id']}",
+        headers=auth_headers(test_owner["token"]),
+        json={"occupation": "Software Engineer"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    tl = await client.get(
+        f"/api/v1/audit-logs/tenant/{test_tenant['tenant_id']}",
+        headers=auth_headers(test_owner["token"]),
+    )
+    updates = [e for e in tl.json()["items"] if e["event_type"] == "tenant_profile_updated"]
+    assert updates, "expected a tenant_profile_updated event"
+    changes = updates[0]["metadata"]["changes"]
+    assert "occupation" in changes
+    assert changes["occupation"]["new"] == "Software Engineer"
+    assert changes["occupation"]["old"] in (None, "")
+
+
+@pytest.mark.asyncio
+async def test_deposit_update_records_old_and_new(client: AsyncClient, test_owner, test_tenant):
+    """Editing the rent plan (deposit) records the numeric before/after."""
+    resp = await client.patch(
+        f"/api/v1/tenants/{test_tenant['tenant_id']}",
+        headers=auth_headers(test_owner["token"]),
+        json={"security_deposit_paise": 2000000},
+    )
+    assert resp.status_code == 200, resp.text
+
+    tl = await client.get(
+        f"/api/v1/audit-logs/tenant/{test_tenant['tenant_id']}",
+        headers=auth_headers(test_owner["token"]),
+    )
+    updates = [e for e in tl.json()["items"] if e["event_type"] == "tenant_profile_updated"]
+    assert updates
+    changes = updates[0]["metadata"]["changes"]
+    assert changes["security_deposit_paise"]["old"] == 1400000  # fixture value
+    assert changes["security_deposit_paise"]["new"] == 2000000
+
+
+# ── Regression: provision_org_schema must include non_refundable_advance_paise ──
+
+@pytest.mark.asyncio
+async def test_checkin_with_non_refundable_advance_succeeds(
+    client: AsyncClient, test_owner, test_property
+):
+    """
+    A freshly provisioned org's rent_plans must have non_refundable_advance_paise
+    (migration 006 added it for existing orgs; provision_org_schema must match).
+    Regression guard: check-in supplying that field must succeed, and emit a
+    tenant_checkin activity entry.
+    """
+    bed_id = test_property["bed_ids"][1]  # Bed B — vacant
+    resp = await client.post(
+        "/api/v1/tenants",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "name": "Anita Rao",
+            "phone": "+919876500077",
+            "id_type": "AADHAR",
+            "id_number": "111122223333",
+            "emergency_contact_name": "Rao",
+            "emergency_contact_phone": "+919876500078",
+            "emergency_contact_relation": "Parent",
+            "bed_id": str(bed_id),
+            "move_in_date": "2024-03-01",
+            "rent_plan": {
+                "monthly_rent_paise": 700000,
+                "security_deposit_paise": 1400000,
+                "advance_paid_paise": 500000,
+                "non_refundable_advance_paise": 200000,
+                "billing_day": 1,
+                "effective_from": "2024-03-01",
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    tenant_id = resp.json()["tenant_id"]
+
+    tl = await client.get(
+        f"/api/v1/audit-logs/tenant/{tenant_id}",
+        headers=auth_headers(test_owner["token"]),
+    )
+    assert any(e["event_type"] == "tenant_checkin" for e in tl.json()["items"])
