@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import NotFoundError
+from app.services.audit_constants import Event
+from app.services.audit_service import log_event
 
 router = APIRouter()
 
@@ -78,6 +80,20 @@ async def create_lead(
         },
     )
     lead_id = result.scalar_one()
+
+    await log_event(
+        db,
+        Event.LEAD_CREATED,
+        description=f"{ctx.name} added lead {body.name}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="lead",
+        entity_id=lead_id,
+        entity_name=body.name,
+        property_id=body.property_id,
+        metadata={"source": body.source},
+    )
     await db.commit()
     return {"lead_id": str(lead_id), "status": "NEW"}
 
@@ -227,6 +243,19 @@ async def update_lead(
         text(f"UPDATE leads SET {set_clauses}, updated_at = NOW() WHERE id = :lead_id AND org_id = :org_id"),
         updates,
     )
+
+    if "status" in updates:
+        await log_event(
+            db,
+            Event.LEAD_STATUS_CHANGED,
+            description=f"{ctx.name} moved a lead to {updates['status']}",
+            actor_user_id=ctx.user_id,
+            actor_role=ctx.role,
+            actor_name=ctx.name,
+            entity_type="lead",
+            entity_id=lead_id,
+            metadata={"status": updates["status"]},
+        )
     await db.commit()
     return {"message": "Lead updated"}
 
@@ -279,6 +308,19 @@ async def convert_lead(
     await db.execute(
         text("UPDATE leads SET status = 'CONVERTED'::lead_status_enum, updated_at = NOW() WHERE id = :id"),
         {"id": str(lead_id)},
+    )
+
+    await log_event(
+        db,
+        Event.LEAD_CONVERTED,
+        description=f"{ctx.name} converted lead {lead['name']}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="lead",
+        entity_id=lead_id,
+        entity_name=lead["name"],
+        property_id=lead["property_id"],
     )
     await db.commit()
 

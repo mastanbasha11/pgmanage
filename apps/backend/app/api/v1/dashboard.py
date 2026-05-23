@@ -48,16 +48,24 @@ async def dashboard_summary(
     if property_id:
         params["pid"] = str(property_id)
 
-    # Rent stats
+    # Rent stats — match the Rent & Payments page exactly:
+    #   1. Subtract discount from outstanding (settled = paid + discount)
+    #   2. Exclude tenants who checked out on or before the viewed month
     rent_result = await db.execute(
         text(f"""
             SELECT
                 COALESCE(SUM(rle.amount_due_paise), 0) as expected,
                 COALESCE(SUM(rle.amount_paid_paise), 0) as collected,
+                COALESCE(SUM(COALESCE(rle.discount_paise, 0)), 0) as discount_total,
                 COUNT(DISTINCT rle.tenant_id) as total_tenants
             FROM rent_ledger_entries rle
             JOIN tenants t ON t.id = rle.tenant_id
             WHERE t.org_id = :org_id AND rle.month = :month AND rle.year = :year
+              AND (
+                t.actual_move_out_date IS NULL
+                OR t.actual_move_out_date
+                   >= (make_date(:year, :month, 1) + INTERVAL '1 month')::date
+              )
             {pid_filter}
         """),
         params,
@@ -113,6 +121,8 @@ async def dashboard_summary(
 
     expected = rent["expected"] or 0
     collected = rent["collected"] or 0
+    discount_total = rent["discount_total"] or 0
+    settled = collected + discount_total
     total_expenses = expenses["total_expenses"] or 0
     total_beds = occ["total"] or 0
     occupied = occ["occupied"] or 0
@@ -161,6 +171,44 @@ async def dashboard_summary(
     advance_received = adv.get("advance_paise", 0) or 0
     refunds_given = adv.get("refund_paise", 0) or 0
 
+    # Fold bookings into rent_in_period (DAILY) + advance_received (ADVANCE).
+    # This keeps the dashboard's "Advance Received" KPI consistent with the
+    # Rent & Payments page's collector cards.
+    book_filter = "AND b.property_id = :pid" if property_id else ""
+    if period_start and period_end:
+        book_split_res = await db.execute(
+            text(f"""
+                SELECT
+                    COALESCE(SUM(b.amount_paise) FILTER (WHERE b.kind = 'ADVANCE'), 0) AS advance_paise,
+                    COALESCE(SUM(b.amount_paise) FILTER (WHERE b.kind = 'DAILY'), 0) AS daily_paise
+                FROM bookings b
+                WHERE b.org_id = :org_id
+                  AND b.is_deleted = false
+                  AND b.collected_at BETWEEN :start AND :end
+                  {book_filter}
+            """),
+            {**params, "start": period_start, "end": period_end},
+        )
+    else:
+        book_split_res = await db.execute(
+            text(f"""
+                SELECT
+                    COALESCE(SUM(b.amount_paise) FILTER (WHERE b.kind = 'ADVANCE'), 0) AS advance_paise,
+                    COALESCE(SUM(b.amount_paise) FILTER (WHERE b.kind = 'DAILY'), 0) AS daily_paise
+                FROM bookings b
+                WHERE b.org_id = :org_id
+                  AND b.is_deleted = false
+                  AND EXTRACT(MONTH FROM b.collected_at) = :month
+                  AND EXTRACT(YEAR FROM b.collected_at) = :year
+                  {book_filter}
+            """),
+            params,
+        )
+    bs = book_split_res.mappings().fetchone() or {}
+    advance_bookings = bs.get("advance_paise", 0) or 0
+    daily_bookings = bs.get("daily_paise", 0) or 0
+    advance_received += advance_bookings
+
     # Expenses by paid_by (or fall back to creator's username) — same period semantics
     by_person_filter = "AND e.property_id = :pid" if property_id else ""
     if period_start and period_end:
@@ -202,6 +250,80 @@ async def dashboard_summary(
         )
     expenses_by_person = [dict(r) for r in by_person_res.mappings().fetchall()]
 
+    # Cash collected by person — aggregates paid_to across rent/advance payments
+    # AND bookings. Falls back to the staff member's user.name when paid_to is
+    # blank, so historical rows still attribute somewhere.
+    cash_in_filter_p = "AND p.property_id = :pid" if property_id else ""
+    cash_in_filter_b = "AND b.property_id = :pid" if property_id else ""
+    if period_start and period_end:
+        cash_in_res = await db.execute(
+            text(f"""
+                WITH unioned AS (
+                    SELECT
+                        COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name, 'Unattributed') AS person,
+                        p.amount_paise AS amount
+                    FROM payments p
+                    LEFT JOIN users u ON u.id = p.collected_by
+                    WHERE p.org_id = :org_id
+                      AND p.is_deleted = false
+                      AND p.payment_type IN ('RENT','ADVANCE','DEPOSIT','FOOD','OTHER_CHARGE')
+                      AND (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date
+                          BETWEEN :start AND :end
+                      {cash_in_filter_p}
+                    UNION ALL
+                    SELECT
+                        COALESCE(NULLIF(TRIM(b.paid_to), ''), u.name, 'Unattributed') AS person,
+                        b.amount_paise AS amount
+                    FROM bookings b
+                    LEFT JOIN users u ON u.id = b.collected_by
+                    WHERE b.org_id = :org_id
+                      AND b.is_deleted = false
+                      AND b.collected_at BETWEEN :start AND :end
+                      {cash_in_filter_b}
+                )
+                SELECT person, SUM(amount) AS total_paise, COUNT(*) AS count
+                FROM unioned
+                GROUP BY person
+                ORDER BY total_paise DESC
+            """),
+            {**params, "start": period_start, "end": period_end},
+        )
+    else:
+        cash_in_res = await db.execute(
+            text(f"""
+                WITH unioned AS (
+                    SELECT
+                        COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name, 'Unattributed') AS person,
+                        p.amount_paise AS amount
+                    FROM payments p
+                    LEFT JOIN users u ON u.id = p.collected_by
+                    WHERE p.org_id = :org_id
+                      AND p.is_deleted = false
+                      AND p.payment_type IN ('RENT','ADVANCE','DEPOSIT','FOOD','OTHER_CHARGE')
+                      AND EXTRACT(MONTH FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :month
+                      AND EXTRACT(YEAR FROM p.collected_at AT TIME ZONE 'Asia/Kolkata') = :year
+                      {cash_in_filter_p}
+                    UNION ALL
+                    SELECT
+                        COALESCE(NULLIF(TRIM(b.paid_to), ''), u.name, 'Unattributed') AS person,
+                        b.amount_paise AS amount
+                    FROM bookings b
+                    LEFT JOIN users u ON u.id = b.collected_by
+                    WHERE b.org_id = :org_id
+                      AND b.is_deleted = false
+                      AND EXTRACT(MONTH FROM b.collected_at) = :month
+                      AND EXTRACT(YEAR FROM b.collected_at) = :year
+                      {cash_in_filter_b}
+                )
+                SELECT person, SUM(amount) AS total_paise, COUNT(*) AS count
+                FROM unioned
+                GROUP BY person
+                ORDER BY total_paise DESC
+            """),
+            params,
+        )
+    cash_in_by_person = [dict(r) for r in cash_in_res.mappings().fetchall()]
+
     # Overdue: number of distinct tenants whose ledger this month or older isn't fully paid
     overdue_filter = "AND t.property_id = :pid" if property_id else ""
     overdue_res = await db.execute(
@@ -218,11 +340,13 @@ async def dashboard_summary(
     )
     overdue_tenants = (overdue_res.mappings().fetchone() or {}).get("overdue_tenants", 0)
 
-    rate = (collected / expected) if expected > 0 else 0
+    # Match rent page: collection rate counts both cash + discount as "settled"
+    rate = (settled / expected) if expected > 0 else 0
     occupancy_rate = (occupied / total_beds) if total_beds > 0 else 0
 
     # For Net Income we use the period-bound rent collection if a property
     # was selected (matches partner P&L), else the ledger-rolled-up figure.
+    # Daily bookings are short-stay rent income — folded in here.
     if property_id and period_start and period_end:
         rip_res = await db.execute(
             text("""
@@ -238,19 +362,28 @@ async def dashboard_summary(
         rent_in_period = rip_res.scalar() or 0
     else:
         rent_in_period = collected
+    rent_in_period += daily_bookings
+
+    # Bookings revenue is already split into rent_in_period (DAILY) and
+    # advance_received (ADVANCE) above — keep the total exposed for the KPI.
+    bookings_revenue = advance_bookings + daily_bookings
+
     cash_in = rent_in_period + advance_received
     cash_out = total_expenses + refunds_given
     return {
         # Canonical names
         "expected_rent_paise": expected,
         "collected_rent_paise": collected,
-        "outstanding_paise": max(expected - collected, 0),
+        "discount_paise": discount_total,
+        "outstanding_paise": max(expected - settled, 0),
         "collection_rate": round(rate, 4),                   # 0..1 fraction
         "advance_received_paise": advance_received,
+        "bookings_revenue_paise": int(bookings_revenue),
         "refunds_given_paise": refunds_given,
         "total_expenses_paise": total_expenses,
         "net_income_paise": cash_in - cash_out,
         "expenses_by_person": expenses_by_person,
+        "cash_in_by_person": cash_in_by_person,
         "occupancy_rate": round(occupancy_rate, 4),          # 0..1 fraction
         "total_tenants": rent["total_tenants"] or 0,
         "vacant_beds": vacant_beds,

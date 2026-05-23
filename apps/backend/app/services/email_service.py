@@ -146,6 +146,54 @@ These links expire in 7 days. Until you approve, the user will see a
     )
 
 
+def send_password_reset_email(
+    *,
+    to_email: str,
+    user_name: str,
+    reset_url: str,
+    expires_in_hours: int = 1,
+) -> bool:
+    subject = "Reset your PGManage password"
+    body_text = f"""
+Hi {user_name},
+
+We received a request to reset your PGManage password. Click the link below
+to choose a new one. This link expires in {expires_in_hours} hour(s).
+
+  {reset_url}
+
+If you didn't request this, you can safely ignore this email — your password
+will stay unchanged.
+
+— PGManage
+""".strip()
+    body_html = f"""
+<!DOCTYPE html>
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                   color:#0F172A;background:#f8fafc;padding:24px;">
+  <div style="max-width:520px;margin:auto;background:white;border-radius:12px;
+              padding:32px;border:1px solid #e2e8f0;">
+    <h2 style="margin:0 0 12px 0;">Reset your password</h2>
+    <p style="color:#475569;margin:0 0 20px 0;">
+      Hi {user_name}, we got a request to reset your PGManage password. Click the
+      button below to choose a new one.
+    </p>
+    <p style="margin:24px 0;">
+      <a href="{reset_url}" style="background:#0D9488;color:white;text-decoration:none;
+         padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">
+        Set a new password
+      </a>
+    </p>
+    <p style="color:#94a3b8;font-size:12px;margin-top:24px;">
+      This link expires in {expires_in_hours} hour(s).<br>
+      Didn't request this? You can ignore this email — your password stays unchanged.
+    </p>
+  </div>
+</body></html>
+""".strip()
+    return send_email(to=to_email, subject=subject, body_text=body_text, body_html=body_html)
+
+
 def send_signup_approved_email(*, owner_email: str, owner_name: str, login_url: str) -> bool:
     subject = "Your PGManage account is approved"
     body_text = f"""

@@ -148,6 +148,7 @@ export default function AddPaymentDialog({
         for_year: data.for_year,
         for_days: data.for_days,
         paid_to: data.paid_to?.trim() || undefined,
+        collected_at: data.collected_at,
         notes: data.notes || undefined,
       });
       toast({
@@ -313,8 +314,12 @@ export default function AddPaymentDialog({
           </div>
 
           <div>
-            <Label>Payment Date *</Label>
+            <Label>Collected on *</Label>
             <Input type="date" {...register('collected_at')} />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Determines which fiscal month this lands in (period is set by the
+              property's close date).
+            </p>
             {errors.collected_at && (
               <p className="mt-1 text-xs text-destructive">{errors.collected_at.message}</p>
             )}

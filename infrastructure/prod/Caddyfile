@@ -25,7 +25,10 @@ www.{$DOMAIN} {
 		Referrer-Policy strict-origin-when-cross-origin
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		# Defense-in-depth CSP — relax if recharts / shadcn break.
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+		# Allow blob: in img-src + frame-src so receipt thumbnails and PDF
+		# previews (rendered via URL.createObjectURL on auth-fetched blobs)
+		# can display inline.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'self' blob:; object-src 'self' blob:; frame-ancestors 'none'"
 		-Server
 	}
 

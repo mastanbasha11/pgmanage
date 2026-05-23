@@ -333,6 +333,25 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             old_values JSONB, new_values JSONB, ip_address VARCHAR(45),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
+        # High-level semantic activity feed (audit dashboard + tenant timeline).
+        # Distinct from audit_log above, which stores low-level row diffs.
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".activity_log (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            actor_user_id UUID, actor_role VARCHAR(20),
+            actor_name VARCHAR(200), actor_ip VARCHAR(45),
+            event_type VARCHAR(80) NOT NULL, event_category VARCHAR(40) NOT NULL,
+            description TEXT NOT NULL,
+            entity_type VARCHAR(40), entity_id UUID, entity_name VARCHAR(200),
+            property_id UUID, property_name VARCHAR(200),
+            tenant_id UUID,
+            metadata JSONB DEFAULT '{{}}'
+        )""",
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_actor_user_id ON "{schema}".activity_log(actor_user_id, created_at DESC)',
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_tenant_id ON "{schema}".activity_log(tenant_id, created_at DESC)',
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_event_type ON "{schema}".activity_log(event_type, created_at DESC)',
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_event_category ON "{schema}".activity_log(event_category, created_at DESC)',
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON "{schema}".activity_log(created_at DESC)',
     ]
 
     for stmt in ddl_statements:

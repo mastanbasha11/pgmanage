@@ -13,6 +13,8 @@ import {
   X,
   ChevronDown,
   UserCog,
+  CalendarCheck,
+  ClipboardList,
 } from 'lucide-react';
 import { cn, initials } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
@@ -40,8 +42,10 @@ const NAV_ITEMS = [
   { to: '/properties', icon: Building2, label: 'Properties' },
   { to: '/tenants', icon: Users, label: 'Tenants' },
   { to: '/rent', icon: IndianRupee, label: 'Rent & Payments' },
+  { to: '/bookings', icon: CalendarCheck, label: 'Bookings' },
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/leads', icon: UserCircle, label: 'Leads' },
+  { to: '/audit-logs', icon: ClipboardList, label: 'Audit Logs', ownerOnly: true },
   { to: '/settings/team', icon: UserCog, label: 'Team', ownerOnly: true },
 ];
 

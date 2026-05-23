@@ -9,8 +9,15 @@ import {
   ShieldAlert,
   Pencil,
   BedDouble,
+  Undo2,
+  Wallet,
+  FileUp,
+  FileText,
+  Image as ImageIcon,
+  Eye,
+  Trash2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -32,7 +39,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useTenant, useTenantLedger, useCheckout, useUpdateTenant } from '@/hooks/useTenants';
+import {
+  useTenant,
+  useTenantLedger,
+  useCheckout,
+  useUpdateTenant,
+  useRecordRefund,
+  useUploadIdProof,
+  useDeleteIdProof,
+} from '@/hooks/useTenants';
+import { api } from '@/lib/api';
 import { usePayments } from '@/hooks/usePayments';
 import {
   formatPaise,
@@ -43,12 +59,15 @@ import {
   shortRoomType,
 } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
+import TenantTimeline from '@/components/tenants/TenantTimeline';
 
 export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [showCheckout, setShowCheckout] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showRefund, setShowRefund] = useState(false);
+  const [showDepositEdit, setShowDepositEdit] = useState(false);
 
   const { data: tenant, isLoading } = useTenant(id!);
   const { data: ledger } = useTenantLedger(id!);
@@ -84,16 +103,20 @@ export default function TenantDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {isActive && (
-            <Button variant="outline" onClick={() => setShowEdit(true)} className="gap-2">
-              <Pencil className="h-4 w-4" />
-              Edit
-            </Button>
-          )}
+          <Button variant="outline" onClick={() => setShowEdit(true)} className="gap-2">
+            <Pencil className="h-4 w-4" />
+            Edit
+          </Button>
           {isActive && (
             <Button variant="outline" onClick={() => setShowCheckout(true)} className="gap-2">
               <LogOut className="h-4 w-4" />
               Check Out
+            </Button>
+          )}
+          {!isActive && (
+            <Button onClick={() => setShowRefund(true)} className="gap-2">
+              <Undo2 className="h-4 w-4" />
+              Record refund
             </Button>
           )}
         </div>
@@ -146,6 +169,70 @@ export default function TenantDetailPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardContent className="pt-6">
+          <div className="mb-4 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-accent" />
+              <h2 className="text-base font-semibold">Deposit &amp; Advance</h2>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1 h-8"
+              onClick={() => setShowDepositEdit(true)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              {tenant.active_rent_plan
+                ? 'Edit deposit & advance'
+                : 'Add deposit & advance'}
+            </Button>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Field
+              label="Security deposit"
+              value={formatPaise(tenant.active_rent_plan?.security_deposit_paise ?? 0)}
+            />
+            <Field
+              label="Refundable advance"
+              value={formatPaise(tenant.active_rent_plan?.advance_paid_paise ?? 0)}
+            />
+            <Field
+              label="Non-refundable advance"
+              value={formatPaise(
+                tenant.active_rent_plan?.non_refundable_advance_paise ?? 0,
+              )}
+            />
+            {!isActive ? (
+              <Field
+                label="Refunded so far"
+                value={formatPaise(tenant.refunded_paise ?? 0)}
+              />
+            ) : (
+              <Field
+                label="Total held (refundable)"
+                value={formatPaise(
+                  (tenant.active_rent_plan?.security_deposit_paise ?? 0) +
+                    (tenant.active_rent_plan?.advance_paid_paise ?? 0),
+                )}
+              />
+            )}
+          </div>
+          {!isActive && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Use <strong>Record refund</strong> above to log the deposit refund (multiple
+              entries are fine if you split it across days or modes). Each entry shows up in
+              the Payments tab as a REFUND.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <IdProofCard
+        tenantId={tenant.id}
+        idProofPath={tenant.id_proof_path ?? null}
+      />
+
       <Tabs defaultValue="ledger">
         <TabsList>
           <TabsTrigger value="ledger">Rent Ledger</TabsTrigger>
@@ -153,6 +240,7 @@ export default function TenantDetailPage() {
             Payments ({paymentsData?.items.length ?? 0})
           </TabsTrigger>
           <TabsTrigger value="info">Info</TabsTrigger>
+          <TabsTrigger value="timeline">Timeline</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ledger" className="mt-4">
@@ -251,6 +339,9 @@ export default function TenantDetailPage() {
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                       Mode
                     </th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Paid to
+                    </th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">
                       Amount
                     </th>
@@ -279,6 +370,15 @@ export default function TenantDetailPage() {
                       <td className="px-4 py-3 text-muted-foreground">
                         {p.payment_mode}
                         {p.reference_number ? ` · ${p.reference_number}` : ''}
+                      </td>
+                      <td className="px-4 py-3">
+                        {p.paid_to ? (
+                          <Badge variant="outline" className="text-[10px]">
+                            {p.paid_to}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground/40">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold tabular-nums">
                         {formatPaise(p.amount_paise)}
@@ -329,6 +429,10 @@ export default function TenantDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="timeline" className="mt-4">
+          <TenantTimeline tenantId={tenant.id} />
+        </TabsContent>
       </Tabs>
 
       <CheckoutDialog
@@ -341,6 +445,19 @@ export default function TenantDetailPage() {
         open={showEdit}
         onClose={() => setShowEdit(false)}
         tenant={tenant}
+      />
+      <RefundDialog
+        open={showRefund}
+        onClose={() => setShowRefund(false)}
+        tenantId={tenant.id}
+        tenantName={tenant.name}
+      />
+      <DepositAdvanceDialog
+        open={showDepositEdit}
+        onClose={() => setShowDepositEdit(false)}
+        tenantId={tenant.id}
+        tenantName={tenant.name}
+        current={tenant.active_rent_plan ?? null}
       />
     </div>
   );
@@ -453,6 +570,447 @@ function CheckoutDialog({
             {isPending ? 'Saving...' : 'Confirm Checkout'}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RefundDialog({
+  open,
+  onClose,
+  tenantId,
+  tenantName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantId: string;
+  tenantName: string;
+}) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [amountRupees, setAmountRupees] = useState('');
+  const [paidBy, setPaidBy] = useState('');
+  const [mode, setMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE'>(
+    'CASH',
+  );
+  const [reference, setReference] = useState('');
+  const [notes, setNotes] = useState('');
+  const { mutateAsync, isPending } = useRecordRefund(tenantId);
+  const { toast } = useToast();
+
+  async function submit() {
+    const amt = Number(amountRupees);
+    if (!amt || amt <= 0) {
+      toast({ title: 'Enter a refund amount', variant: 'destructive' });
+      return;
+    }
+    try {
+      await mutateAsync({
+        refund_date: date,
+        refund_amount_paise: Math.round(amt * 100),
+        refund_paid_by: paidBy.trim() || undefined,
+        payment_mode: mode,
+        reference_number: reference.trim() || undefined,
+        notes: notes.trim() || undefined,
+      });
+      toast({
+        title: 'Refund recorded',
+        description: `₹${amt.toLocaleString('en-IN')} refunded to ${tenantName}.`,
+      });
+      setAmountRupees('');
+      setPaidBy('');
+      setReference('');
+      setNotes('');
+      onClose();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data
+          ?.error?.message ?? 'Failed to record refund.';
+      toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Record refund — {tenantName}</DialogTitle>
+          <DialogDescription>
+            Logs a REFUND payment row. You can record multiple refunds (e.g. cash now, UPI
+            later) and they'll add up in the Payments tab.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Refund date *</Label>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            <div>
+              <Label>Amount (₹) *</Label>
+              <Input
+                type="number"
+                value={amountRupees}
+                onChange={(e) => setAmountRupees(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Paid by</Label>
+              <Input
+                value={paidBy}
+                onChange={(e) => setPaidBy(e.target.value)}
+                placeholder="e.g. Mastan"
+              />
+            </div>
+            <div>
+              <Label>Mode</Label>
+              <Select value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE'] as const).map(
+                    (m) => (
+                      <SelectItem key={m} value={m}>
+                        {m.replace(/_/g, ' ')}
+                      </SelectItem>
+                    ),
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label>Reference / UTR</Label>
+            <Input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder="Optional"
+            />
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Reason / handover info"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={isPending}>
+            {isPending ? 'Saving...' : 'Save refund'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DepositAdvanceDialog({
+  open,
+  onClose,
+  tenantId,
+  tenantName,
+  current,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantId: string;
+  tenantName: string;
+  current: {
+    security_deposit_paise?: number;
+    advance_paid_paise?: number;
+    non_refundable_advance_paise?: number;
+  } | null;
+}) {
+  const update = useUpdateTenant(tenantId);
+  const { toast } = useToast();
+  const toRupees = (paise: number | undefined) =>
+    paise != null && paise !== 0 ? String(paise / 100) : '';
+  const [deposit, setDeposit] = useState(toRupees(current?.security_deposit_paise));
+  const [refundable, setRefundable] = useState(toRupees(current?.advance_paid_paise));
+  const [nonRefundable, setNonRefundable] = useState(
+    toRupees(current?.non_refundable_advance_paise),
+  );
+
+  // Reset to current values whenever the dialog is reopened
+  useEffect(() => {
+    if (open) {
+      setDeposit(toRupees(current?.security_deposit_paise));
+      setRefundable(toRupees(current?.advance_paid_paise));
+      setNonRefundable(toRupees(current?.non_refundable_advance_paise));
+    }
+  }, [
+    open,
+    current?.security_deposit_paise,
+    current?.advance_paid_paise,
+    current?.non_refundable_advance_paise,
+  ]);
+
+  async function submit() {
+    try {
+      const payload: Record<string, number> = {};
+      const origDeposit = toRupees(current?.security_deposit_paise);
+      const origRefundable = toRupees(current?.advance_paid_paise);
+      const origNonRefundable = toRupees(current?.non_refundable_advance_paise);
+      if (deposit !== origDeposit) {
+        payload.security_deposit_paise = Math.round(Number(deposit || 0) * 100);
+      }
+      if (refundable !== origRefundable) {
+        payload.advance_paid_paise = Math.round(Number(refundable || 0) * 100);
+      }
+      if (nonRefundable !== origNonRefundable) {
+        payload.non_refundable_advance_paise = Math.round(
+          Number(nonRefundable || 0) * 100,
+        );
+      }
+      if (Object.keys(payload).length === 0) {
+        toast({ title: 'No changes' });
+        onClose();
+        return;
+      }
+      await update.mutateAsync(payload);
+      toast({ title: 'Deposit & advance saved' });
+      onClose();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data
+          ?.error?.message ?? 'Update failed';
+      toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Deposit &amp; advance — {tenantName}</DialogTitle>
+          <DialogDescription>
+            Refundable amounts are returned (less dues) at checkout. Non-refundable
+            advance is a one-time joining/maintenance fee that the PG keeps.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label>Security deposit (₹)</Label>
+            <Input
+              type="number"
+              value={deposit}
+              onChange={(e) => setDeposit(e.target.value)}
+              placeholder="0"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Refundable. Held against damage / dues.
+            </p>
+          </div>
+          <div>
+            <Label>Refundable advance (₹)</Label>
+            <Input
+              type="number"
+              value={refundable}
+              onChange={(e) => setRefundable(e.target.value)}
+              placeholder="0"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Refundable. Adjusted at checkout against any unpaid rent.
+            </p>
+          </div>
+          <div>
+            <Label>Non-refundable advance (₹)</Label>
+            <Input
+              type="number"
+              value={nonRefundable}
+              onChange={(e) => setNonRefundable(e.target.value)}
+              placeholder="0"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Joining fee / one-time charge. Not returned at checkout.
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={update.isPending}>
+            {update.isPending ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function IdProofCard({
+  tenantId,
+  idProofPath,
+}: {
+  tenantId: string;
+  idProofPath: string | null;
+}) {
+  const upload = useUploadIdProof();
+  const del = useDeleteIdProof(tenantId);
+  const { toast } = useToast();
+  const [showViewer, setShowViewer] = useState(false);
+
+  const isPdf = !!idProofPath && idProofPath.toLowerCase().endsWith('.pdf');
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      await upload.mutateAsync({ id: tenantId, file: f });
+      toast({ title: idProofPath ? 'ID proof replaced' : 'ID proof uploaded' });
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response
+          ?.data?.error?.message ?? 'Could not upload ID proof';
+      toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
+
+  async function onRemove() {
+    if (!window.confirm('Remove the ID proof?')) return;
+    try {
+      await del.mutateAsync();
+      toast({ title: 'ID proof removed' });
+    } catch {
+      toast({ title: 'Failed', variant: 'destructive' });
+    }
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            {isPdf ? (
+              <FileText className="h-4 w-4 text-accent" />
+            ) : (
+              <ImageIcon className="h-4 w-4 text-accent" />
+            )}
+            <div>
+              <p className="font-medium text-sm">ID proof</p>
+              <p className="text-xs text-muted-foreground">
+                {idProofPath
+                  ? `Aadhar / address proof on file (${isPdf ? 'PDF' : 'image'})`
+                  : 'No file attached yet'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {idProofPath && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => setShowViewer(true)}
+              >
+                <Eye className="h-3.5 w-3.5" />
+                View
+              </Button>
+            )}
+            <label
+              htmlFor="tenant-id-proof-input"
+              className="inline-flex h-9 items-center gap-1 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent/10 cursor-pointer"
+            >
+              <FileUp className="h-3.5 w-3.5" />
+              {idProofPath ? 'Replace' : 'Upload'}
+              <input
+                id="tenant-id-proof-input"
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={onPick}
+              />
+            </label>
+            {idProofPath && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-9 px-2 text-destructive"
+                onClick={onRemove}
+                title="Remove"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+      <IdProofViewer
+        tenantId={showViewer ? tenantId : null}
+        isPdf={isPdf}
+        onClose={() => setShowViewer(false)}
+      />
+    </Card>
+  );
+}
+
+function IdProofViewer({
+  tenantId,
+  isPdf,
+  onClose,
+}: {
+  tenantId: string | null;
+  isPdf: boolean;
+  onClose: () => void;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!tenantId) {
+      setSrc(null);
+      return;
+    }
+    let cancelled = false;
+    let blob: string | null = null;
+    (async () => {
+      try {
+        const resp = await api.get(`/tenants/${tenantId}/id-proof`, {
+          responseType: 'blob',
+        });
+        if (cancelled) return;
+        blob = URL.createObjectURL(resp.data);
+        setSrc(blob);
+      } catch {
+        setSrc(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (blob) URL.revokeObjectURL(blob);
+    };
+  }, [tenantId]);
+
+  return (
+    <Dialog open={!!tenantId} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>ID proof</DialogTitle>
+        </DialogHeader>
+        {src ? (
+          isPdf ? (
+            <iframe src={src} title="id-proof" className="h-[75vh] w-full rounded border" />
+          ) : (
+            <img
+              src={src}
+              alt="id-proof"
+              className="mx-auto max-h-[75vh] w-auto rounded border"
+            />
+          )
+        ) : (
+          <p className="text-center text-sm text-muted-foreground py-8">
+            No ID proof available.
+          </p>
+        )}
       </DialogContent>
     </Dialog>
   );

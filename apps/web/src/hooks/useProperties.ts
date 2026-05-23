@@ -68,6 +68,22 @@ export function usePropertyOccupancy(id: string) {
   });
 }
 
+export type BedStatusUpdate = 'VACANT' | 'RESERVED' | 'MAINTENANCE';
+
+export function useUpdateBedStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ bedId, status, notes }: { bedId: string; status: BedStatusUpdate; notes?: string }) =>
+      api
+        .patch(`/beds/${bedId}/status`, { status, notes })
+        .then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['properties'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
 export function useCreateProperty() {
   const qc = useQueryClient();
   return useMutation({

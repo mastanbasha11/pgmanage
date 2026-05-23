@@ -70,7 +70,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return any(path.startswith(p) for p in self.STRICT_PATHS)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        client_ip = request.client.host if request.client else "unknown"
+        # Behind Caddy: request.client.host is the proxy container's IP, so
+        # without this every user shares one rate-limit bucket. Caddy sets
+        # X-Forwarded-For; take the first hop (the actual end user).
+        fwd = request.headers.get("x-forwarded-for", "")
+        client_ip = (
+            fwd.split(",")[0].strip()
+            or (request.client.host if request.client else "unknown")
+        )
         path = request.url.path
         limit = self.STRICT_LIMIT if self._is_strict(path) else settings.RATE_LIMIT_PER_MINUTE
         key = f"rate:{client_ip}:{path if self._is_strict(path) else 'global'}"

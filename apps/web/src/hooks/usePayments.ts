@@ -42,6 +42,8 @@ export interface RecordPaymentPayload {
   for_year?: number;
   paid_to?: string;
   upi_id?: string;
+  /** ISO date; defaults to server NOW() when omitted. */
+  collected_at?: string;
   notes?: string;
 }
 

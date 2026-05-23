@@ -44,6 +44,12 @@ export interface VacantBed {
   floor_name: string;
   room_type?: string;
   monthly_base_rent_paise: number;
+  /** "VACANT" right now, or "UPCOMING" when an active tenant's vacate date is set. */
+  status?: 'VACANT' | 'UPCOMING';
+  /** ISO date — today for VACANT rows, expected_move_out_date for UPCOMING. */
+  available_from?: string;
+  current_tenant_id?: string | null;
+  current_tenant_name?: string | null;
 }
 
 /**
@@ -69,6 +75,7 @@ export interface CheckinPayload {
     monthly_rent_paise: number;
     security_deposit_paise: number;
     advance_paid_paise: number;
+    non_refundable_advance_paise?: number;
     food_included: boolean;
     food_charges_paise: number;
     billing_day: number;
@@ -106,6 +113,10 @@ export interface UpdateTenantPayload {
   permanent_address?: string;
   expected_move_out_date?: string;
   notes?: string;
+  /** Updates the active rent_plan, not the tenants row. */
+  security_deposit_paise?: number;
+  advance_paid_paise?: number;
+  non_refundable_advance_paise?: number;
 }
 
 export function useUpdateTenant(tenantId: string) {
@@ -116,6 +127,31 @@ export function useUpdateTenant(tenantId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tenants'] });
       qc.invalidateQueries({ queryKey: ['tenants', tenantId] });
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export interface RecordRefundPayload {
+  refund_amount_paise: number;
+  refund_paid_by?: string;
+  refund_date: string;
+  notes?: string;
+  payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE';
+  reference_number?: string;
+}
+
+export function useRecordRefund(tenantId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: RecordRefundPayload) =>
+      api.post(`/tenants/${tenantId}/refund`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenants'] });
+      qc.invalidateQueries({ queryKey: ['tenants', tenantId] });
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }
@@ -136,11 +172,26 @@ export function useTenantLedger(id: string) {
   });
 }
 
-export function useVacantBeds(propertyId: string | undefined) {
-  return useQuery<{ items: VacantBed[]; total: number }>({
-    queryKey: ['properties', propertyId, 'vacant-beds'],
+export function useVacantBeds(
+  propertyId: string | undefined,
+  opts?: { includeUpcoming?: boolean; withinDays?: number },
+) {
+  return useQuery<{
+    items: VacantBed[];
+    total: number;
+    vacant_count?: number;
+    upcoming_count?: number;
+  }>({
+    queryKey: ['properties', propertyId, 'vacant-beds', opts],
     queryFn: () =>
-      api.get(`/properties/${propertyId}/vacant-beds`).then((r) => r.data),
+      api
+        .get(`/properties/${propertyId}/vacant-beds`, {
+          params: {
+            include_upcoming: opts?.includeUpcoming ?? true,
+            upcoming_within_days: opts?.withinDays ?? 60,
+          },
+        })
+        .then((r) => r.data),
     enabled: !!propertyId,
   });
 }
@@ -173,6 +224,36 @@ export function useCheckout(tenantId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tenants'] });
       qc.invalidateQueries({ queryKey: ['properties'] });
+    },
+  });
+}
+
+export function useUploadIdProof() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, file }: { id: string; file: File }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await api.post(`/tenants/${id}/id-proof`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return r.data;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['tenants'] });
+      qc.invalidateQueries({ queryKey: ['tenants', vars.id] });
+    },
+  });
+}
+
+export function useDeleteIdProof(tenantId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.delete(`/tenants/${tenantId}/id-proof`).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenants'] });
+      qc.invalidateQueries({ queryKey: ['tenants', tenantId] });
     },
   });
 }

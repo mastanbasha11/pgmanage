@@ -82,7 +82,15 @@ export default function LoginPage() {
               )}
             </div>
             <div>
-              <Label>Password</Label>
+              <div className="flex items-baseline justify-between">
+                <Label>Password</Label>
+                <Link
+                  to="/auth/forgot-password"
+                  className="text-xs text-muted-foreground hover:text-primary hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <Input
                 {...register('password')}
                 type="password"
