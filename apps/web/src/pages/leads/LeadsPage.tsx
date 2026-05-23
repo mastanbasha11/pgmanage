@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Phone, Calendar } from 'lucide-react';
+import { Plus, Phone, Calendar, Globe } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -29,6 +29,9 @@ import { useProperties } from '@/hooks/useProperties';
 import { useAuthStore } from '@/store/auth';
 import { useToast } from '@/hooks/useToast';
 import { formatDate, rupeesToPaise, normaliseIndianPhone, PHONE_HELP } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import WebsiteLeadsView from './WebsiteLeadsView';
+import { useNewWebsiteLeadCount } from '@/hooks/useWebsiteLeads';
 
 type LeadStatus = 'NEW' | 'CONTACTED' | 'SITE_VISITED' | 'NEGOTIATING' | 'CONVERTED' | 'LOST';
 type LeadSource = 'META_AD' | 'INSTAGRAM' | 'REFERRAL' | 'WALKIN' | 'JUSTDIAL' | 'OTHER';
@@ -278,6 +281,7 @@ export default function LeadsPage() {
   });
   const [showCreate, setShowCreate] = useState(false);
   const { selectedPropertyId } = useAuthStore();
+  const newWebsiteCount = useNewWebsiteLeadCount();
 
   const leads = data?.items ?? [];
   const byStatus = (s: LeadStatus) => leads.filter((l) => l.status === s);
@@ -296,6 +300,21 @@ export default function LeadsPage() {
         </Button>
       </div>
 
+      <Tabs defaultValue="pipeline">
+        <TabsList>
+          <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
+          <TabsTrigger value="website" className="gap-1.5">
+            <Globe className="h-3.5 w-3.5" />
+            Website Leads
+            {newWebsiteCount > 0 && (
+              <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-foreground">
+                {newWebsiteCount}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="pipeline" className="mt-4 space-y-6">
       {/* Pipeline stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {COLUMNS.map(({ status, label }) => (
@@ -349,6 +368,12 @@ export default function LeadsPage() {
           ))}
         </div>
       )}
+        </TabsContent>
+
+        <TabsContent value="website" className="mt-4">
+          <WebsiteLeadsView />
+        </TabsContent>
+      </Tabs>
 
       <CreateLeadDialog
         open={showCreate}

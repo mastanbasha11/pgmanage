@@ -150,9 +150,9 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     org_id_result = await db.execute(
         text("""
             INSERT INTO public.organisations
-                (name, slug, owner_email, owner_phone, plan_id, trial_ends_at, plan_expires_at, schema_name, is_active)
+                (name, slug, owner_email, owner_phone, plan_id, trial_ends_at, plan_expires_at, schema_name, is_active, website_lead_token)
             VALUES
-                (:name, :slug, :email, :phone, :plan_id, :trial_end, :plan_expires_at, :schema_name, false)
+                (:name, :slug, :email, :phone, :plan_id, :trial_end, :plan_expires_at, :schema_name, false, :website_token)
             RETURNING id, schema_name
         """),
         {
@@ -164,6 +164,8 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
             "trial_end": trial_end,
             "plan_expires_at": trial_end,
             "schema_name": "",  # will update
+            # Public site key for the owner's website booking form (not a secret).
+            "website_token": generate_invite_token(),
         },
     )
     row = org_id_result.fetchone()

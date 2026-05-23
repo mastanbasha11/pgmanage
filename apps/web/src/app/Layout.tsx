@@ -15,10 +15,12 @@ import {
   UserCog,
   CalendarCheck,
   ClipboardList,
+  Globe,
 } from 'lucide-react';
 import { cn, initials } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
 import { useProperties } from '@/hooks/useProperties';
+import { useNewWebsiteLeadCount } from '@/hooks/useWebsiteLeads';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +48,7 @@ const NAV_ITEMS = [
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/leads', icon: UserCircle, label: 'Leads' },
   { to: '/audit-logs', icon: ClipboardList, label: 'Audit Logs', ownerOnly: true },
+  { to: '/settings/website-integration', icon: Globe, label: 'Website Integration', ownerOnly: true },
   { to: '/settings/team', icon: UserCog, label: 'Team', ownerOnly: true },
 ];
 
@@ -59,6 +62,7 @@ export default function Layout({ children }: Props) {
     useAuthStore();
   const navigate = useNavigate();
   const { data: propertiesData } = useProperties();
+  const newWebsiteLeads = useNewWebsiteLeadCount();
 
   const properties = propertiesData?.items ?? [];
   const activePropertyId = selectedPropertyId ?? properties[0]?.id ?? '';
@@ -153,7 +157,12 @@ export default function Layout({ children }: Props) {
                   onClick={() => setSidebarOpen(false)}
                 >
                   <Icon className="h-4 w-4 flex-shrink-0" />
-                  {label}
+                  <span className="flex-1">{label}</span>
+                  {to === '/leads' && newWebsiteLeads > 0 && (
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-semibold text-accent-foreground">
+                      {newWebsiteLeads}
+                    </span>
+                  )}
                 </NavLink>
               </li>
             ))}

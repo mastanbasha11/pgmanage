@@ -10,13 +10,71 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.dependencies import OrgContext, get_org_context
+from app.core.dependencies import OrgContext, get_org_context, require_roles
 from app.core.exceptions import NotFoundError
 from app.services.audit_constants import Event
 from app.services.audit_service import diff_changes, log_event
 
 router = APIRouter()
+
+
+@router.get(
+    "/website/integration",
+    summary="Website-lead integration details (public token, webhook URL, embed snippet)",
+)
+async def website_integration(
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns the org's website-lead integration config for the
+    Settings → Website Integration page: the public site token, the webhook URL
+    to POST to, the configured CORS allowlist, and a ready-to-paste JS snippet.
+    """
+    row = (
+        await db.execute(
+            text(
+                "SELECT website_lead_token, website_allowed_origins "
+                "FROM public.organisations WHERE id = :id"
+            ),
+            {"id": str(ctx.org_id)},
+        )
+    ).fetchone()
+    token = row[0] if row else None
+    allowed_origins = row[1] if row else None
+
+    base = settings.APP_BASE_URL.rstrip("/")
+    webhook_url = f"{base}/api/v1/leads/website?token={token}" if token else None
+
+    snippet = (
+        "<script>\n"
+        "async function submitBooking(form) {\n"
+        f'  const res = await fetch("{webhook_url}", {{\n'
+        '    method: "POST",\n'
+        '    headers: { "Content-Type": "application/json" },\n'
+        "    body: JSON.stringify({\n"
+        "      name: form.name.value,\n"
+        "      email: form.email.value,\n"
+        "      phone: form.phone.value,\n"
+        "      roomType: form.roomType.value,\n"
+        "      moveInDate: form.moveInDate.value,\n"
+        "      message: form.message.value,\n"
+        "    }),\n"
+        "  });\n"
+        "  return res.json(); // { success: true, leadId: \"...\" }\n"
+        "}\n"
+        "</script>"
+    )
+
+    return {
+        "token": token,
+        "webhook_url": webhook_url,
+        "allowed_origins": allowed_origins,
+        "snippet": snippet,
+        "rate_limit_per_hour": 10,
+    }
 
 
 class LeadCreate(BaseModel):
@@ -127,7 +185,7 @@ async def list_leads(
     where = " AND ".join(conditions)
     result = await db.execute(
         text(f"""
-            SELECT l.id, l.name, l.phone, l.source, l.status, l.notes,
+            SELECT l.id, l.name, l.phone, l.email, l.source, l.status, l.notes,
                    l.budget_min_paise, l.budget_max_paise, l.interested_room_type,
                    l.expected_move_in_date, l.next_followup_at, l.last_contacted_at,
                    l.created_at, l.assigned_to,
