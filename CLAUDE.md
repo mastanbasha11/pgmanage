@@ -137,3 +137,24 @@ GitHub Actions in `.github/workflows/`: `backend.yml` (ruff + pytest on PG/Redis
 ECR/ECS deploy), `web.yml`, `deploy-prod.yml`. Backend deploys to AWS ECS in `ap-south-1`.
 Prod runs via [docker-compose.prod.yml](docker-compose.prod.yml) behind Caddy
 ([infrastructure/prod/Caddyfile](infrastructure/prod/Caddyfile)).
+
+## Future improvements / backlog
+
+### Website-lead intake (shipped — v1)
+PG owners embed a booking form on their own site; it POSTs to the public, unauthenticated
+endpoint `POST /api/v1/leads/website?token=…` ([app/api/v1/public_leads.py](apps/backend/app/api/v1/public_leads.py)),
+which routes by `organisations.website_lead_token` (a **public site key**, not a secret —
+it ships in the website's JS) and stores a `source=WEBSITE` lead. Owner-facing UI:
+Leads → Website Leads tab + Settings → Website Integration. v1 protections are CORS allowlist +
+10/IP/hour rate limit + validation. Two known follow-ups before promoting it widely:
+
+- **Bot/spam protection (Cloudflare Turnstile or hCaptcha).** CORS only constrains browsers
+  and the token is public, so neither is a real auth boundary. Add an invisible captcha widget to
+  the booking form, pass its token in the payload, and verify it server-side in `create_website_lead`
+  before inserting (there's a `_verify_captcha` hook comment in the endpoint for this). Needs a
+  `TURNSTILE_SECRET` setting + the owner's site key surfaced in the embed snippet.
+- **Per-owner CORS allowlist editor.** `organisations.website_allowed_origins` exists and is
+  enforced (`_allowed_origin` in the endpoint), but there's no UI to set it — it's currently
+  permissive (NULL = allow any origin, token still required). Add an origins field to
+  Settings → Website Integration + a small authed PATCH endpoint so owners can lock submissions to
+  their own domain(s).
