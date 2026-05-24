@@ -9,6 +9,7 @@ import {
   BedDouble,
   CalendarClock,
   TrendingUp,
+  MessageCircle,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { cn, formatDate } from '@/lib/utils';
+import { cn, formatDate, whatsappLink } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import {
   useWebsiteLeads,
@@ -211,6 +212,14 @@ export default function WebsiteLeadsView() {
                           </a>
                         </div>
                       )}
+                      <a
+                        href={whatsappLink(lead.phone, `Hi ${lead.name}, thanks for enquiring about a stay with us!`)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 inline-flex items-center gap-1 text-[#128C7E] hover:underline"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                      </a>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {lead.interested_room_type && (

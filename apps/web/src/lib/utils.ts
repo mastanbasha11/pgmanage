@@ -132,3 +132,14 @@ export function normaliseIndianPhone(input: string): string | null {
 /** Zod-friendly: turns user input into canonical +91… or throws message. */
 export const PHONE_HELP = '10-digit Indian mobile (e.g. 9876543210, +91 9876543210)';
 
+
+/**
+ * Build a click-to-chat WhatsApp deep link (wa.me). `phone` may be in any
+ * format; non-digits are stripped. Optional `text` pre-fills the message.
+ * Needs no WhatsApp API or template approval — opens the user's WhatsApp.
+ */
+export function whatsappLink(phone: string, text?: string): string {
+  const digits = (phone || '').replace(/\D/g, '');
+  const base = `https://wa.me/${digits}`;
+  return text ? `${base}?text=${encodeURIComponent(text)}` : base;
+}

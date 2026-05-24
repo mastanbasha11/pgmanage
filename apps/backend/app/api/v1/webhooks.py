@@ -7,6 +7,7 @@ import json
 
 import stripe
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -172,3 +173,149 @@ async def stripe_webhook(
                 await db.commit()
 
     return {"received": True}
+
+
+# ── WhatsApp (Meta Cloud API) ──────────────────────────────────────────────────
+
+# Intent keywords for routing inbound messages (lowercase substring match).
+_COMPLAINT_KW = (
+    "complaint", "issue", "problem", "broken", "not working", "leak", "water",
+    "wifi", "internet", "dirty", "clean", "ac ", "fan", "repair", "maintenance",
+)
+_RENT_KW = ("rent", "pay", "payment", "due", "balance", "amount", "receipt")
+
+
+def _classify_intent(text_body: str) -> str:
+    """Crude keyword router: complaint / rent_query / general."""
+    t = (text_body or "").lower()
+    if any(k in t for k in _COMPLAINT_KW):
+        return "complaint"
+    if any(k in t for k in _RENT_KW):
+        return "rent_query"
+    return "general"
+
+
+async def _handle_inbound_message(db, route, from_phone: str, text_body: str) -> None:
+    """Match the sender to a tenant of this property, classify, and act."""
+    digits = "".join(c for c in (from_phone or "") if c.isdigit())[-10:]
+    tenant = None
+    if digits:
+        tenant = (
+            await db.execute(
+                text(
+                    "SELECT id FROM tenants "
+                    "WHERE right(regexp_replace(phone, '[^0-9]', '', 'g'), 10) = :d "
+                    "AND property_id = :pid AND is_deleted = false LIMIT 1"
+                ),
+                {"d": digits, "pid": str(route["property_id"])},
+            )
+        ).mappings().fetchone()
+
+    intent = _classify_intent(text_body)
+
+    # A complaint from a known tenant opens a complaint ticket.
+    if intent == "complaint" and tenant:
+        await db.execute(
+            text(
+                """
+                INSERT INTO complaints (tenant_id, property_id, org_id, category, description, status)
+                VALUES (:tid, :pid, :org, 'OTHER'::complaint_category_enum, :desc,
+                        'OPEN'::complaint_status_enum)
+                """
+            ),
+            {
+                "tid": str(tenant["id"]),
+                "pid": str(route["property_id"]),
+                "org": str(route["org_id"]),
+                "desc": (f"[WhatsApp] {text_body}")[:1000],
+            },
+        )
+
+    # Record the inbound message in notification_log (only when attributable to a tenant).
+    if tenant:
+        await db.execute(
+            text(
+                """
+                INSERT INTO notification_log (
+                    org_id, property_id, recipient_type, recipient_id,
+                    channel, template_name, message_body, status, sent_at
+                )
+                VALUES (
+                    :org, :pid, 'TENANT'::notif_recipient_type_enum, :tid,
+                    'WHATSAPP'::notif_channel_enum, :tpl, :body,
+                    'SENT'::notif_status_enum, NOW()
+                )
+                """
+            ),
+            {
+                "org": str(route["org_id"]),
+                "pid": str(route["property_id"]),
+                "tid": str(tenant["id"]),
+                "tpl": f"inbound:{intent}",
+                "body": (text_body or "")[:2000],
+            },
+        )
+
+
+@router.get("/whatsapp", summary="WhatsApp webhook verification (Meta subscribe)")
+async def whatsapp_verify(request: Request):
+    """Meta calls this once with hub.challenge to verify the webhook URL."""
+    p = request.query_params
+    if p.get("hub.mode") == "subscribe" and p.get("hub.verify_token") == settings.WHATSAPP_VERIFY_TOKEN:
+        return PlainTextResponse(p.get("hub.challenge") or "")
+    raise HTTPException(403, "Verification failed")
+
+
+@router.post("/whatsapp", summary="WhatsApp inbound message webhook")
+async def whatsapp_inbound(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
+):
+    """
+    Inbound WhatsApp messages. Routes by phone_number_id (which property's number
+    received it) via public.whatsapp_routing, then classifies intent and acts.
+    """
+    raw = await request.body()
+
+    if settings.WHATSAPP_APP_SECRET:
+        expected = "sha256=" + hmac.new(
+            settings.WHATSAPP_APP_SECRET.encode(), raw, hashlib.sha256
+        ).hexdigest()
+        if not (x_hub_signature_256 and hmac.compare_digest(expected, x_hub_signature_256)):
+            raise HTTPException(401, "Invalid webhook signature")
+
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        raise HTTPException(400, "Invalid JSON payload") from None
+
+    processed = 0
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            messages = value.get("messages") or []
+            if not messages:
+                continue  # status callbacks etc. — ignore for now
+            phone_number_id = (value.get("metadata") or {}).get("phone_number_id")
+            if not phone_number_id:
+                continue
+            route = (
+                await db.execute(
+                    text(
+                        "SELECT org_id, schema_name, property_id FROM public.whatsapp_routing "
+                        "WHERE phone_number_id = :pid"
+                    ),
+                    {"pid": phone_number_id},
+                )
+            ).mappings().fetchone()
+            if not route:
+                continue  # unknown number — not one of ours
+            await set_schema(db, route["schema_name"])
+            for msg in messages:
+                body = (msg.get("text") or {}).get("body", "")
+                await _handle_inbound_message(db, route, msg.get("from", ""), body)
+                processed += 1
+
+    await db.commit()
+    return {"received": True, "processed": processed}

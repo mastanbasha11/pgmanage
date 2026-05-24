@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     STRIPE_PRICE_STARTER: str = ""
     STRIPE_PRICE_GROWTH: str = ""
 
+    # ── WhatsApp (Meta Cloud API) ────────────────────────────────────────────
+    WHATSAPP_VERIFY_TOKEN: str = ""   # echoed back during webhook subscribe verification
+    WHATSAPP_APP_SECRET: str = ""     # validates X-Hub-Signature-256 on inbound messages
+
     # ── CORS / Trusted hosts ─────────────────────────────────────────────────
     # Accepts either a JSON array string or a comma-separated list.
     CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:3001"]'

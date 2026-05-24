@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Phone, Calendar, Globe } from 'lucide-react';
+import { Plus, Phone, Calendar, Globe, MessageCircle } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -28,7 +28,7 @@ import {
 import { useProperties } from '@/hooks/useProperties';
 import { useAuthStore } from '@/store/auth';
 import { useToast } from '@/hooks/useToast';
-import { formatDate, rupeesToPaise, normaliseIndianPhone, PHONE_HELP } from '@/lib/utils';
+import { formatDate, rupeesToPaise, normaliseIndianPhone, PHONE_HELP, whatsappLink } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import WebsiteLeadsView from './WebsiteLeadsView';
 import { useNewWebsiteLeadCount } from '@/hooks/useWebsiteLeads';
@@ -79,6 +79,18 @@ function LeadCard({ lead }: { lead: Lead }) {
         <Phone className="h-3 w-3" />
         {lead.phone}
       </div>
+      <a
+        href={whatsappLink(
+          lead.phone,
+          `Hi ${lead.name}, thanks for your interest in our PG! How can we help you with your stay?`,
+        )}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-[#25D366]/10 px-2 py-1 text-xs font-medium text-[#128C7E] hover:bg-[#25D366]/20"
+      >
+        <MessageCircle className="h-3 w-3" /> WhatsApp
+      </a>
       {lead.next_followup_at && (
         <div className="mt-1 flex items-center gap-1 text-muted-foreground text-xs">
           <Calendar className="h-3 w-3" />
