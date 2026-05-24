@@ -153,10 +153,10 @@ async def test_cashflow_owner_succeeds(
     )
     assert response.status_code == 200
     data = response.json()
-    assert "data" in data
+    assert "items" in data
     assert "months" in data
     assert data["months"] == 12  # default
-    assert isinstance(data["data"], list)
+    assert isinstance(data["items"], list)
 
 
 @pytest.mark.asyncio
@@ -222,14 +222,16 @@ async def test_cashflow_data_structure(
         headers=auth_headers(test_owner["token"]),
     )
     assert response.status_code == 200
-    data = response.json()["data"]
-    if data:
-        for item in data:
-            assert "year" in item
-            assert "month" in item
-            assert "income_paise" in item
-            assert "expense_paise" in item
-            assert "net_paise" in item
+    body = response.json()
+    assert "items" in body, body  # frontend reads .items, not .data
+    items = body["items"]
+    assert len(items) >= 1  # the RENT payment we just recorded must appear
+    for item in items:
+        assert "month" in item          # display label, e.g. "Jun 2024"
+        assert "income_paise" in item
+        assert "expenses_paise" in item  # frontend key (not expense_paise)
+        assert "net_paise" in item
+    assert any(i["income_paise"] >= 700000 for i in items)
 
 
 # ── Occupancy trend ────────────────────────────────────────────────────────────

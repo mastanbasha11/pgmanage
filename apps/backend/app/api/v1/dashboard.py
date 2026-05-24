@@ -422,6 +422,7 @@ async def cashflow(
                    SUM(amount_paise) as income_paise
             FROM payments
             WHERE org_id = :org_id AND is_deleted = false
+                AND payment_type <> 'REFUND'
                 AND collected_at >= NOW() - INTERVAL '{months} months'
             {pid_filter_income}
             GROUP BY year, month
@@ -447,20 +448,22 @@ async def cashflow(
     )
     expense_rows = {(r["year"], r["month"]): r["expense_paise"] for r in expense_result.mappings().fetchall()}
 
-    # Build unified timeline
-    from datetime import date
+    # Build unified timeline. Frontend expects {items: [{month, income_paise, expenses_paise}]}
+    # with `month` as a display label (e.g. "May 2026").
+    import calendar
     all_keys = sorted(set(income_rows.keys()) | set(expense_rows.keys()))
-    cashflow_data = []
+    items = []
     for year, month in all_keys:
         income = income_rows.get((year, month), 0)
         expense = expense_rows.get((year, month), 0)
-        cashflow_data.append({
-            "year": year, "month": month,
-            "income_paise": income, "expense_paise": expense,
+        items.append({
+            "month": f"{calendar.month_abbr[month]} {year}",
+            "income_paise": income,
+            "expenses_paise": expense,
             "net_paise": income - expense,
         })
 
-    return {"data": cashflow_data, "months": months}
+    return {"items": items, "months": months}
 
 
 @router.get("/dashboard/occupancy-trend", summary="Occupancy rate by month (owner only)")
