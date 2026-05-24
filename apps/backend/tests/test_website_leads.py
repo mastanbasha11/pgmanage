@@ -154,3 +154,59 @@ async def test_integration_endpoint_forbidden_for_supervisor(client: AsyncClient
         "/api/v1/website/integration", headers=auth_headers(test_supervisor["token"])
     )
     assert resp.status_code == 403
+
+
+# ── Email notification ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_website_lead_sends_notification_email(client: AsyncClient, test_property, monkeypatch):
+    token = f"tok_{uuid.uuid4().hex}"
+    async with TestSessionLocal() as s:
+        await s.execute(
+            text(
+                "UPDATE public.organisations "
+                "SET website_lead_token = :t, website_lead_notify_email = :e WHERE id = :id"
+            ),
+            {"t": token, "e": "owner@notify.com", "id": str(test_property["org_id"])},
+        )
+        await s.commit()
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "app.api.v1.public_leads.send_website_lead_email",
+        lambda **kw: calls.append(kw) or True,
+    )
+
+    resp = await client.post(f"/api/v1/leads/website?token={token}", json=_payload())
+    assert resp.status_code == 200, resp.text
+    # Background task runs within the ASGI request cycle under the test transport.
+    assert len(calls) == 1
+    assert calls[0]["to_email"] == "owner@notify.com"
+    assert calls[0]["lead_name"] == "Tamman Patnaik"
+    assert calls[0]["lead_phone"] == "+919937303032"
+    assert calls[0]["room_type"] == "gold"
+
+
+@pytest.mark.asyncio
+async def test_update_notify_email(client: AsyncClient, test_owner):
+    resp = await client.patch(
+        "/api/v1/website/integration",
+        headers=auth_headers(test_owner["token"]),
+        json={"notify_email": "new@notify.com"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    got = await client.get(
+        "/api/v1/website/integration", headers=auth_headers(test_owner["token"])
+    )
+    assert got.json()["notify_email"] == "new@notify.com"
+
+
+@pytest.mark.asyncio
+async def test_update_notify_email_forbidden_for_supervisor(client: AsyncClient, test_supervisor):
+    resp = await client.patch(
+        "/api/v1/website/integration",
+        headers=auth_headers(test_supervisor["token"]),
+        json={"notify_email": "x@example.com"},
+    )
+    assert resp.status_code == 403

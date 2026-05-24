@@ -5,8 +5,8 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +36,7 @@ async def website_integration(
     row = (
         await db.execute(
             text(
-                "SELECT website_lead_token, website_allowed_origins "
+                "SELECT website_lead_token, website_allowed_origins, website_lead_notify_email "
                 "FROM public.organisations WHERE id = :id"
             ),
             {"id": str(ctx.org_id)},
@@ -44,6 +44,7 @@ async def website_integration(
     ).fetchone()
     token = row[0] if row else None
     allowed_origins = row[1] if row else None
+    notify_email = row[2] if row else None
 
     base = settings.APP_BASE_URL.rstrip("/")
     webhook_url = f"{base}/api/v1/leads/website?token={token}" if token else None
@@ -72,9 +73,39 @@ async def website_integration(
         "token": token,
         "webhook_url": webhook_url,
         "allowed_origins": allowed_origins,
+        "notify_email": notify_email,
         "snippet": snippet,
         "rate_limit_per_hour": 10,
     }
+
+
+class WebsiteIntegrationUpdate(BaseModel):
+    notify_email: EmailStr | None = None
+    allowed_origins: str | None = None
+
+
+@router.patch("/website/integration", summary="Update website-lead integration settings")
+async def update_website_integration(
+    body: WebsiteIntegrationUpdate,
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set where new-website-lead emails go (notify_email) and/or the CORS allowlist."""
+    sets: list[str] = []
+    params: dict[str, Any] = {"id": str(ctx.org_id)}
+    if body.notify_email is not None:
+        sets.append("website_lead_notify_email = :email")
+        params["email"] = str(body.notify_email)
+    if body.allowed_origins is not None:
+        sets.append("website_allowed_origins = :origins")
+        params["origins"] = body.allowed_origins.strip() or None
+    if not sets:
+        raise HTTPException(400, "No fields to update")
+    await db.execute(
+        text(f"UPDATE public.organisations SET {', '.join(sets)} WHERE id = :id"), params
+    )
+    await db.commit()
+    return {"message": "Website integration updated"}
 
 
 class LeadCreate(BaseModel):

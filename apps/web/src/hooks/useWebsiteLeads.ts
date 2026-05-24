@@ -22,6 +22,7 @@ export interface WebsiteIntegration {
   token: string | null;
   webhook_url: string | null;
   allowed_origins: string | null;
+  notify_email: string | null;
   snippet: string;
   rate_limit_per_hour: number;
 }
@@ -68,5 +69,15 @@ export function useWebsiteIntegration() {
   return useQuery<WebsiteIntegration>({
     queryKey: ['website-integration'],
     queryFn: () => api.get('/website/integration').then((r) => r.data),
+  });
+}
+
+/** Update integration settings — currently the new-lead notification email. */
+export function useUpdateWebsiteIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { notify_email?: string; allowed_origins?: string }) =>
+      api.patch('/website/integration', data).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['website-integration'] }),
   });
 }

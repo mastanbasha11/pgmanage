@@ -25,7 +25,7 @@ import re
 from datetime import date
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db, set_schema
 from app.core.exceptions import NotFoundError
+from app.services.email_service import send_website_lead_email
 
 logger = logging.getLogger("pgmanage.website_leads")
 
@@ -112,7 +113,7 @@ async def _lookup_org(db: AsyncSession, token: str | None):
     row = (
         await db.execute(
             text(
-                "SELECT id, schema_name, website_allowed_origins "
+                "SELECT id, schema_name, website_allowed_origins, name, website_lead_notify_email "
                 "FROM public.organisations "
                 "WHERE website_lead_token = :t AND is_active = true"
             ),
@@ -121,7 +122,7 @@ async def _lookup_org(db: AsyncSession, token: str | None):
     ).fetchone()
     if not row:
         raise NotFoundError("Website integration", "invalid token")
-    return row  # (org_id, schema_name, allowed_origins)
+    return row  # (org_id, schema_name, allowed_origins, org_name, notify_email)
 
 
 async def _rate_limited(token: str, client_ip: str) -> bool:
@@ -165,10 +166,11 @@ async def create_website_lead(
     body: WebsiteLeadIn,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     token: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    org_id, schema_name, allowlist = await _lookup_org(db, token)
+    org_id, schema_name, allowlist, org_name, notify_email = await _lookup_org(db, token)
 
     # CORS: reflect the owner's origin if allowed (browser enforces this).
     origin = request.headers.get("origin")
@@ -205,6 +207,15 @@ async def create_website_lead(
     if not property_id:
         raise HTTPException(status_code=400, detail="This account has no active property to receive leads yet.")
 
+    # Resolve the property name now, while the org search_path is still set —
+    # after commit the SET LOCAL search_path is reset and org tables are unreachable.
+    property_name = (
+        await db.execute(
+            text("SELECT name FROM properties WHERE id = :id"),
+            {"id": str(property_id)},
+        )
+    ).scalar_one_or_none()
+
     lead_id = (
         await db.execute(
             text(
@@ -234,6 +245,22 @@ async def create_website_lead(
         )
     ).scalar_one()
     await db.commit()
+
+    # Email the owner (non-blocking background task; send failures are swallowed).
+    if notify_email:
+        background_tasks.add_task(
+            send_website_lead_email,
+            to_email=notify_email,
+            org_name=org_name,
+            property_name=property_name,
+            lead_name=body.name,
+            lead_email=str(body.email),
+            lead_phone=body.phone,
+            room_type=body.room_type,
+            move_in_date=str(body.move_in_date) if body.move_in_date else None,
+            message=body.message,
+            leads_url=f"{settings.APP_BASE_URL.rstrip('/')}/leads",
+        )
 
     logger.info(
         "website lead received org=%s lead=%s ip=%s origin=%s name=%s",

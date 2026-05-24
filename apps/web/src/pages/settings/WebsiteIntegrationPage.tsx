@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { Copy, Check, Globe, Plug, Loader2, CircleCheck, CircleX, ShieldAlert } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Copy, Check, Globe, Plug, Loader2, CircleCheck, CircleX, ShieldAlert, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/useToast';
-import { useWebsiteIntegration } from '@/hooks/useWebsiteLeads';
+import { useWebsiteIntegration, useUpdateWebsiteIntegration } from '@/hooks/useWebsiteLeads';
 
 type TestState = 'idle' | 'testing' | 'ok' | 'fail';
 
@@ -29,8 +30,23 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 
 export default function WebsiteIntegrationPage() {
   const { data, isLoading } = useWebsiteIntegration();
+  const { toast } = useToast();
+  const updateIntegration = useUpdateWebsiteIntegration();
   const [testState, setTestState] = useState<TestState>('idle');
   const [testMsg, setTestMsg] = useState('');
+  const [notifyEmail, setNotifyEmail] = useState('');
+  useEffect(() => {
+    if (data?.notify_email) setNotifyEmail(data.notify_email);
+  }, [data?.notify_email]);
+
+  async function saveNotifyEmail() {
+    try {
+      await updateIntegration.mutateAsync({ notify_email: notifyEmail.trim() });
+      toast({ title: 'Saved', description: 'New website leads will be emailed here.' });
+    } catch {
+      toast({ title: 'Could not save', variant: 'destructive' });
+    }
+  }
 
   async function testConnection() {
     if (!data?.token) return;
@@ -110,6 +126,38 @@ export default function WebsiteIntegrationPage() {
               This token is a <strong>public site key</strong> — it's visible in your website's code.
               It can't do anything except submit leads (rate-limited to {data?.rate_limit_per_hour ?? 10}/hour).
             </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Email notifications */}
+      <Card>
+        <CardContent className="space-y-3 p-5">
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 text-accent" />
+            <div>
+              <p className="font-medium">Email new leads to</p>
+              <p className="text-xs text-muted-foreground">
+                We'll send a copy of every website booking enquiry to this address.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              type="email"
+              value={notifyEmail}
+              onChange={(e) => setNotifyEmail(e.target.value)}
+              placeholder="owner@example.com"
+              className="sm:flex-1"
+            />
+            <Button
+              onClick={saveNotifyEmail}
+              disabled={updateIntegration.isPending || !notifyEmail.trim()}
+              className="shrink-0 gap-2"
+            >
+              {updateIntegration.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save
+            </Button>
           </div>
         </CardContent>
       </Card>

@@ -150,9 +150,9 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     org_id_result = await db.execute(
         text("""
             INSERT INTO public.organisations
-                (name, slug, owner_email, owner_phone, plan_id, trial_ends_at, plan_expires_at, schema_name, is_active, website_lead_token)
+                (name, slug, owner_email, owner_phone, plan_id, trial_ends_at, plan_expires_at, schema_name, is_active, website_lead_token, website_lead_notify_email)
             VALUES
-                (:name, :slug, :email, :phone, :plan_id, :trial_end, :plan_expires_at, :schema_name, false, :website_token)
+                (:name, :slug, :email, :phone, :plan_id, :trial_end, :plan_expires_at, :schema_name, false, :website_token, :email)
             RETURNING id, schema_name
         """),
         {
