@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cn, formatPaise } from '@/lib/utils';
 import { useTenantTimeline, type AuditLogEntry } from '@/hooks/useAuditLogs';
+import AuditDetails from '@/components/audit/AuditDetails';
 
 interface NodeStyle {
   Icon: LucideIcon;
@@ -167,6 +168,7 @@ function TimelineNode({ entry }: { entry: AuditLogEntry }) {
             </>
           )}
         </div>
+        <AuditDetails entry={entry} showTenant={false} />
       </div>
     </li>
   );

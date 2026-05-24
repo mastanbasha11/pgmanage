@@ -23,13 +23,16 @@ router = APIRouter()
 
 _ADMIN = require_roles(["OWNER", "PARTNER"])
 
-# Columns returned for every feed/timeline row.
+# Columns returned for every feed/timeline row. Aliased `al` so we can LEFT JOIN
+# tenants and enrich tenant-related rows with the tenant's current name + phone.
 _COLUMNS = """
-    id, created_at, actor_user_id, actor_role, actor_name, actor_ip,
-    event_type, event_category, description,
-    entity_type, entity_id, entity_name,
-    property_id, property_name, tenant_id, metadata
+    al.id, al.created_at, al.actor_user_id, al.actor_role, al.actor_name, al.actor_ip,
+    al.event_type, al.event_category, al.description,
+    al.entity_type, al.entity_id, al.entity_name,
+    al.property_id, al.property_name, al.tenant_id, al.metadata,
+    t.name AS tenant_name, t.phone AS tenant_phone
 """
+_FROM = "FROM activity_log al LEFT JOIN tenants t ON t.id = al.tenant_id"
 
 
 def _serialize(row: Any) -> dict:
@@ -56,6 +59,8 @@ def _serialize(row: Any) -> dict:
         "property_id": str(row.property_id) if row.property_id else None,
         "property_name": row.property_name,
         "tenant_id": str(row.tenant_id) if row.tenant_id else None,
+        "tenant_name": getattr(row, "tenant_name", None),
+        "tenant_phone": getattr(row, "tenant_phone", None),
         "metadata": m or {},
     }
 
@@ -78,41 +83,41 @@ async def list_audit_logs(
     params: dict[str, Any] = {}
 
     if actor_user_id is not None:
-        where.append("actor_user_id = :actor_user_id")
+        where.append("al.actor_user_id = :actor_user_id")
         params["actor_user_id"] = str(actor_user_id)
     if event_category:
-        where.append("event_category = :event_category")
+        where.append("al.event_category = :event_category")
         params["event_category"] = event_category
     if tenant_id is not None:
-        where.append("tenant_id = :tenant_id")
+        where.append("al.tenant_id = :tenant_id")
         params["tenant_id"] = str(tenant_id)
     if property_id is not None:
-        where.append("property_id = :property_id")
+        where.append("al.property_id = :property_id")
         params["property_id"] = str(property_id)
     if date_from is not None:
-        where.append("created_at >= :date_from")
+        where.append("al.created_at >= :date_from")
         params["date_from"] = date_from
     if date_to is not None:
         # inclusive of the whole `date_to` day
-        where.append("created_at < (:date_to::date + INTERVAL '1 day')")
+        where.append("al.created_at < (:date_to::date + INTERVAL '1 day')")
         params["date_to"] = date_to
     if search:
-        where.append("description ILIKE :search")
+        where.append("al.description ILIKE :search")
         params["search"] = f"%{search}%"
 
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
     total = (
         await db.execute(
-            text(f"SELECT COUNT(*) FROM activity_log{where_sql}"), params
+            text(f"SELECT COUNT(*) FROM activity_log al{where_sql}"), params
         )
     ).scalar_one()
 
     rows = (
         await db.execute(
             text(
-                f"SELECT {_COLUMNS} FROM activity_log{where_sql} "
-                "ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"
+                f"SELECT {_COLUMNS} {_FROM}{where_sql} "
+                "ORDER BY al.created_at DESC, al.id DESC LIMIT :limit OFFSET :offset"
             ),
             {**params, "limit": page_size, "offset": (page - 1) * page_size},
         )
@@ -136,8 +141,8 @@ async def tenant_timeline(
     rows = (
         await db.execute(
             text(
-                f"SELECT {_COLUMNS} FROM activity_log "
-                "WHERE tenant_id = :tid ORDER BY created_at DESC, id DESC LIMIT 500"
+                f"SELECT {_COLUMNS} {_FROM} "
+                "WHERE al.tenant_id = :tid ORDER BY al.created_at DESC, al.id DESC LIMIT 500"
             ),
             {"tid": str(tenant_id)},
         )

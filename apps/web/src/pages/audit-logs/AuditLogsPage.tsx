@@ -36,6 +36,7 @@ import {
   type AuditLogFilters,
   type StaffSummary,
 } from '@/hooks/useAuditLogs';
+import AuditDetails from '@/components/audit/AuditDetails';
 
 // ── Category visual styling ────────────────────────────────────────────────
 // Full static class strings (no dynamic concatenation) so Tailwind keeps them.
@@ -359,6 +360,8 @@ function FeedItem({
             {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
           </span>
         </div>
+
+        <AuditDetails entry={entry} />
       </div>
     </div>
   );

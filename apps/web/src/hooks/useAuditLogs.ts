@@ -17,7 +17,15 @@ export interface AuditLogEntry {
   property_id: string | null;
   property_name: string | null;
   tenant_id: string | null;
+  tenant_name: string | null;
+  tenant_phone: string | null;
   metadata: Record<string, unknown>;
+}
+
+/** Shape of a single before/after change recorded in metadata.changes. */
+export interface FieldChange {
+  old: unknown;
+  new: unknown;
 }
 
 export interface AuditLogFilters {
