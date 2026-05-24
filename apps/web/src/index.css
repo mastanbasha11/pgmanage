@@ -5,7 +5,7 @@
 @layer base {
   :root {
     /* Brand: primary = slate-900 (#0F172A), accent = teal-600 (#0D9488) */
-    --background: 0 0% 100%;
+    --background: 210 40% 98%;               /* soft off-white so white cards lift off the page */
     --foreground: 222.2 47.4% 11.2%;
 
     --card: 0 0% 100%;
@@ -23,7 +23,7 @@
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
 
-    --accent: 173 80% 31%;                   /* #0D9488 teal-600 */
+    --accent: 172 82% 33%;                   /* teal, a touch brighter/cleaner than teal-600 */
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84.2% 60.2%;
@@ -35,10 +35,10 @@
     --warning: 38 92% 50%;                   /* amber-500 */
     --warning-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 173 80% 31%;                     /* teal focus ring */
-    --radius: 0.5rem;
+    --border: 214.3 31.8% 89%;               /* slightly crisper card edges */
+    --input: 214.3 31.8% 89%;
+    --ring: 172 82% 33%;                     /* teal focus ring */
+    --radius: 0.625rem;                      /* softer corners (Linear/Notion feel) */
   }
 
   .dark {
@@ -54,13 +54,13 @@
     --secondary-foreground: 210 40% 98%;
     --muted: 217.2 32.6% 17.5%;
     --muted-foreground: 215 20.2% 65.1%;
-    --accent: 173 80% 38%;
+    --accent: 172 82% 42%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
-    --ring: 173 80% 38%;
+    --ring: 172 82% 42%;
   }
 }
 
