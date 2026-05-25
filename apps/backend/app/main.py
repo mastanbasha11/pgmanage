@@ -16,7 +16,12 @@ from app.core.exceptions import (
     pgmanage_exception_handler,
     validation_exception_handler,
 )
-from app.core.middleware import RequestIDMiddleware, RequestLoggingMiddleware, RateLimitMiddleware
+from app.core.middleware import (
+    RateLimitMiddleware,
+    RequestIDMiddleware,
+    RequestLoggingMiddleware,
+    WebsiteLeadCorsMiddleware,
+)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 from app.api.v1 import (
@@ -85,6 +90,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Runs before CORSMiddleware on incoming requests so external PG-site origins pass preflight.
+app.add_middleware(WebsiteLeadCorsMiddleware)
 if settings.is_production:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
 

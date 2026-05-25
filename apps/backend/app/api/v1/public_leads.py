@@ -25,7 +25,7 @@ import re
 from datetime import date
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db, set_schema
 from app.core.exceptions import NotFoundError
+from app.core.website_lead_cors import resolve_allowed_origin
 from app.services.email_service import send_website_lead_email
 
 logger = logging.getLogger("pgmanage.website_leads")
@@ -78,35 +79,6 @@ class WebsiteLeadIn(BaseModel):
         return v
 
 
-def _allowed_origin(origin: str | None, allowlist: str | None) -> str | None:
-    """
-    Return the origin to echo in Access-Control-Allow-Origin if it's allowed.
-
-    allowlist is a comma-separated list of origins the owner configured. An empty
-    allowlist means "not configured yet" — we allow but do not reflect a wildcard
-    with credentials (we don't use credentials here).
-    """
-    if not origin:
-        return None
-    allowed = [o.strip().rstrip("/") for o in (allowlist or "").split(",") if o.strip()]
-    o = origin.rstrip("/")
-    if not allowed:
-        return o  # not configured -> permissive (token still required)
-    return o if o in allowed else None
-
-
-def _cors_headers(origin: str | None) -> dict[str, str]:
-    if not origin:
-        return {}
-    return {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Max-Age": "600",
-        "Vary": "Origin",
-    }
-
-
 async def _lookup_org(db: AsyncSession, token: str | None):
     if not token:
         raise NotFoundError("Website integration", "missing token")
@@ -144,39 +116,19 @@ def _client_ip(request: Request) -> str:
     return fwd.split(",")[0].strip() or (request.client.host if request.client else "unknown")
 
 
-@router.options("/leads/website", include_in_schema=False)
-async def website_lead_preflight(request: Request, token: str | None = None,
-                                 db: AsyncSession = Depends(get_db)) -> Response:
-    """CORS preflight — echo the owner's allowed origin."""
-    origin = request.headers.get("origin")
-    allowlist = None
-    if token:
-        row = (
-            await db.execute(
-                text("SELECT website_allowed_origins FROM public.organisations WHERE website_lead_token = :t"),
-                {"t": token},
-            )
-        ).fetchone()
-        allowlist = row[0] if row else None
-    return Response(status_code=204, headers=_cors_headers(_allowed_origin(origin, allowlist)))
-
-
 @router.post("/leads/website", summary="Public website booking-form lead intake")
 async def create_website_lead(
     body: WebsiteLeadIn,
     request: Request,
-    response: Response,
     background_tasks: BackgroundTasks,
     token: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     org_id, schema_name, allowlist, org_name, notify_email = await _lookup_org(db, token)
 
-    # CORS: reflect the owner's origin if allowed (browser enforces this).
     origin = request.headers.get("origin")
-    allow = _allowed_origin(origin, allowlist)
-    for k, v in _cors_headers(allow).items():
-        response.headers[k] = v
+    if origin and resolve_allowed_origin(origin, allowlist) is None:
+        raise HTTPException(status_code=403, detail="Origin not allowed for this website integration.")
 
     client_ip = _client_ip(request)
     if await _rate_limited(token, client_ip):

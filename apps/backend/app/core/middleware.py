@@ -10,6 +10,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.website_lead_cors import (
+    WEBSITE_LEAD_PATH,
+    build_cors_headers,
+    fetch_allowlist_for_token,
+    resolve_allowed_origin,
+)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -98,3 +104,31 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             pass
 
         return await call_next(request)
+
+
+class WebsiteLeadCorsMiddleware(BaseHTTPMiddleware):
+    """
+    Handle CORS for POST /api/v1/leads/website before the global CORSMiddleware.
+
+    The global middleware only allows app origins (localhost, pgmanage.in). PG owners
+    embed the booking form on their own domains, so preflight must reflect each org's
+    website_allowed_origins (or any origin when not configured yet).
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.url.path != WEBSITE_LEAD_PATH:
+            return await call_next(request)
+
+        origin = request.headers.get("origin")
+        token = request.query_params.get("token")
+        allowlist = await fetch_allowlist_for_token(token)
+        allowed = resolve_allowed_origin(origin, allowlist)
+        headers = build_cors_headers(allowed)
+
+        if request.method == "OPTIONS":
+            return Response(status_code=204, headers=headers)
+
+        response = await call_next(request)
+        for key, value in headers.items():
+            response.headers[key] = value
+        return response

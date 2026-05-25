@@ -27,6 +27,15 @@ async def _set_token(org_id, token: str) -> None:
         await s.commit()
 
 
+async def _set_allowlist(org_id, allowlist: str | None) -> None:
+    async with TestSessionLocal() as s:
+        await s.execute(
+            text("UPDATE public.organisations SET website_allowed_origins = :a WHERE id = :id"),
+            {"a": allowlist, "id": str(org_id)},
+        )
+        await s.commit()
+
+
 def _payload(**over) -> dict:
     base = {
         "name": "Tamman Patnaik",
@@ -112,6 +121,74 @@ async def test_website_lead_unknown_token(client: AsyncClient):
 async def test_website_lead_missing_token(client: AsyncClient):
     resp = await client.post("/api/v1/leads/website", json=_payload())
     assert resp.status_code == 404
+
+
+# ── CORS (external PG owner websites) ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_website_lead_preflight_reflects_origin(client: AsyncClient, test_property):
+    token = f"tok_{uuid.uuid4().hex}"
+    await _set_token(test_property["org_id"], token)
+
+    resp = await client.options(
+        f"/api/v1/leads/website?token={token}",
+        headers={
+            "Origin": "https://theloopliving.in",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert resp.status_code == 204, resp.text
+    assert resp.headers.get("access-control-allow-origin") == "https://theloopliving.in"
+
+
+@pytest.mark.asyncio
+async def test_website_lead_post_includes_cors_for_external_origin(
+    client: AsyncClient, test_property
+):
+    token = f"tok_{uuid.uuid4().hex}"
+    await _set_token(test_property["org_id"], token)
+
+    resp = await client.post(
+        f"/api/v1/leads/website?token={token}",
+        json=_payload(),
+        headers={"Origin": "https://owner-pg-site.example"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers.get("access-control-allow-origin") == "https://owner-pg-site.example"
+
+
+@pytest.mark.asyncio
+async def test_website_lead_preflight_honors_allowlist(client: AsyncClient, test_property):
+    token = f"tok_{uuid.uuid4().hex}"
+    await _set_token(test_property["org_id"], token)
+    await _set_allowlist(test_property["org_id"], "https://allowed.example")
+
+    blocked = await client.options(
+        f"/api/v1/leads/website?token={token}",
+        headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+    )
+    assert blocked.status_code == 204
+    assert blocked.headers.get("access-control-allow-origin") is None
+
+    allowed = await client.options(
+        f"/api/v1/leads/website?token={token}",
+        headers={"Origin": "https://allowed.example", "Access-Control-Request-Method": "POST"},
+    )
+    assert allowed.headers.get("access-control-allow-origin") == "https://allowed.example"
+
+
+@pytest.mark.asyncio
+async def test_website_lead_post_rejects_disallowed_origin(client: AsyncClient, test_property):
+    token = f"tok_{uuid.uuid4().hex}"
+    await _set_token(test_property["org_id"], token)
+    await _set_allowlist(test_property["org_id"], "https://allowed.example")
+
+    resp = await client.post(
+        f"/api/v1/leads/website?token={token}",
+        json=_payload(),
+        headers={"Origin": "https://evil.example"},
+    )
+    assert resp.status_code == 403
 
 
 # ── Rate limiting (10 / IP / hour, keyed by token) ──────────────────────────
