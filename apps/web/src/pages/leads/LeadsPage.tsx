@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Plus, Phone, Calendar, Globe, MessageCircle } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Plus, Phone, Calendar, Globe, MessageCircle, Search } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -34,7 +35,7 @@ import WebsiteLeadsView from './WebsiteLeadsView';
 import { useNewWebsiteLeadCount } from '@/hooks/useWebsiteLeads';
 
 type LeadStatus = 'NEW' | 'CONTACTED' | 'SITE_VISITED' | 'NEGOTIATING' | 'CONVERTED' | 'LOST';
-type LeadSource = 'META_AD' | 'INSTAGRAM' | 'REFERRAL' | 'WALKIN' | 'JUSTDIAL' | 'OTHER';
+type LeadSource = 'META_AD' | 'INSTAGRAM' | 'REFERRAL' | 'WALKIN' | 'JUSTDIAL' | 'WEBSITE' | 'OTHER';
 
 interface Lead {
   id: string;
@@ -63,6 +64,7 @@ const SOURCE_LABEL: Record<LeadSource, string> = {
   REFERRAL: 'Referral',
   WALKIN: 'Walk-in',
   JUSTDIAL: 'JustDial',
+  WEBSITE: 'Website',
   OTHER: 'Other',
 };
 
@@ -295,8 +297,24 @@ export default function LeadsPage() {
   const { selectedPropertyId } = useAuthStore();
   const newWebsiteCount = useNewWebsiteLeadCount();
 
+  // Open the Website Leads tab directly when arrived via the email deep-link.
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get('tab') === 'website' ? 'website' : 'pipeline');
+
+  // Pipeline search + source filter.
+  const [pipelineSearch, setPipelineSearch] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<string>('ALL');
+
   const leads = data?.items ?? [];
-  const byStatus = (s: LeadStatus) => leads.filter((l) => l.status === s);
+  const filteredLeads = useMemo(() => {
+    const q = pipelineSearch.trim().toLowerCase();
+    return leads.filter((l) => {
+      if (sourceFilter !== 'ALL' && l.source !== sourceFilter) return false;
+      if (!q) return true;
+      return l.name.toLowerCase().includes(q) || (l.phone ?? '').toLowerCase().includes(q);
+    });
+  }, [leads, pipelineSearch, sourceFilter]);
+  const byStatus = (s: LeadStatus) => filteredLeads.filter((l) => l.status === s);
 
   return (
     <div className="space-y-6">
@@ -312,7 +330,7 @@ export default function LeadsPage() {
         </Button>
       </div>
 
-      <Tabs defaultValue="pipeline">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
           <TabsTrigger value="website" className="gap-1.5">
@@ -327,6 +345,32 @@ export default function LeadsPage() {
         </TabsList>
 
         <TabsContent value="pipeline" className="mt-4 space-y-6">
+      {/* Search + source filter */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <Select value={sourceFilter} onValueChange={setSourceFilter}>
+          <SelectTrigger className="h-9 w-[180px]">
+            <SelectValue placeholder="All sources" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All sources</SelectItem>
+            {(Object.keys(SOURCE_LABEL) as LeadSource[]).map((s) => (
+              <SelectItem key={s} value={s}>
+                {SOURCE_LABEL[s]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="relative sm:w-64">
+          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={pipelineSearch}
+            onChange={(e) => setPipelineSearch(e.target.value)}
+            placeholder="Search name or phone…"
+            className="h-9 pl-8"
+          />
+        </div>
+      </div>
+
       {/* Pipeline stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {COLUMNS.map(({ status, label }) => (

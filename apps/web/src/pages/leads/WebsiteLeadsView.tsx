@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import {
   Search,
@@ -80,6 +81,16 @@ export default function WebsiteLeadsView() {
       return () => clearTimeout(t);
     }
   }, [leads]);
+
+  // Deep-link from the new-lead email: ?lead=<id> highlights + scrolls to that row.
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('lead');
+  const highlightRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    if (highlightId && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightId, leads]);
 
   // ── Summary metrics ──
   const now = new Date();
@@ -185,10 +196,12 @@ export default function WebsiteLeadsView() {
                 {filtered.map((lead) => (
                   <tr
                     key={lead.id}
+                    ref={lead.id === highlightId ? highlightRef : undefined}
                     className={cn(
                       'align-top hover:bg-muted/30',
                       freshIds.has(lead.id) &&
                         'animate-in fade-in slide-in-from-top-2 duration-500 bg-blue-50/60',
+                      lead.id === highlightId && 'bg-accent/5 ring-2 ring-inset ring-accent',
                     )}
                   >
                     <td className="px-4 py-3">
@@ -254,6 +267,7 @@ export default function WebsiteLeadsView() {
                 key={lead.id}
                 className={cn(
                   freshIds.has(lead.id) && 'animate-in fade-in slide-in-from-top-2 duration-500 ring-1 ring-blue-300',
+                  lead.id === highlightId && 'ring-2 ring-accent',
                 )}
               >
                 <CardContent className="space-y-2 p-3">

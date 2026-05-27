@@ -211,7 +211,7 @@ async def create_website_lead(
             room_type=body.room_type,
             move_in_date=str(body.move_in_date) if body.move_in_date else None,
             message=body.message,
-            leads_url=f"{settings.APP_BASE_URL.rstrip('/')}/leads",
+            leads_url=f"{settings.APP_BASE_URL.rstrip('/')}/leads?tab=website&lead={lead_id}",
         )
 
     logger.info(
