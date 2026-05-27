@@ -56,6 +56,14 @@ async def _test_get_db() -> AsyncGenerator[AsyncSession, None]:
 
 app.dependency_overrides[get_db] = _test_get_db
 
+# WebsiteLeadCorsMiddleware opens its own session via AsyncSessionLocal (bound to the
+# prod engine) instead of the request's get_db, so point it at the test DB too —
+# otherwise it reads the dev DB and uses the pooled engine, causing cross-event-loop
+# errors. (Prod runs a single loop + one DB, so this only matters for tests.)
+import app.core.website_lead_cors as _wlc  # noqa: E402
+
+_wlc.AsyncSessionLocal = TestSessionLocal
+
 
 # ── Database setup (once per session) ─────────────────────────────────────────
 
