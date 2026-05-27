@@ -3,15 +3,87 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
+from app.services.audit_constants import Event
+from app.services.audit_service import log_event
 
 router = APIRouter()
+
+
+class BedStatusUpdate(BaseModel):
+    """Block/unblock a bed.
+
+    Valid transitions:
+      VACANT      -> RESERVED | MAINTENANCE
+      RESERVED    -> VACANT | MAINTENANCE
+      MAINTENANCE -> VACANT | RESERVED
+    OCCUPIED beds can't be changed here — check out the tenant first.
+    """
+    status: str
+    notes: str | None = None
+
+
+@router.patch("/beds/{bed_id}/status", summary="Block / unblock a bed (single-occupancy holds etc.)")
+async def update_bed_status(
+    bed_id: UUID,
+    body: BedStatusUpdate,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER"):
+        raise HTTPException(403, "Insufficient permission to change bed status")
+
+    allowed = {"VACANT", "RESERVED", "MAINTENANCE"}
+    if body.status not in allowed:
+        raise HTTPException(400, f"status must be one of {sorted(allowed)}")
+
+    cur = await db.execute(
+        text("""
+            SELECT b.id, b.status, b.property_id, p.org_id
+            FROM beds b
+            JOIN properties p ON p.id = b.property_id
+            WHERE b.id = :id
+        """),
+        {"id": str(bed_id)},
+    )
+    bed = cur.mappings().fetchone()
+    if not bed or str(bed["org_id"]) != str(ctx.org_id):
+        raise NotFoundError("Bed", bed_id)
+    if bed["status"] == "OCCUPIED":
+        raise ConflictError(
+            "Bed is currently OCCUPIED. Check the tenant out before changing its status."
+        )
+
+    await db.execute(
+        text("""
+            UPDATE beds
+            SET status = CAST(:status AS bed_status_enum), updated_at = NOW()
+            WHERE id = :id
+        """),
+        {"id": str(bed_id), "status": body.status},
+    )
+
+    await log_event(
+        db,
+        Event.ROOM_STATUS_CHANGED,
+        description=f"{ctx.name} set a bed to {body.status}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="bed",
+        entity_id=bed_id,
+        property_id=bed["property_id"],
+        metadata={"from": bed["status"], "to": body.status},
+    )
+    await db.commit()
+    return {"bed_id": str(bed_id), "status": body.status}
 
 
 @router.get("/rooms/{room_id}", summary="Room detail with beds")

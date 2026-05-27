@@ -8,16 +8,26 @@ import {
   Settings,
   AlertCircle,
   Wrench,
+  Lock,
+  Unlock,
+  Calendar,
+  User,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { OccupancyGrid } from '@/components/occupancy-grid/OccupancyGrid';
-import { useProperty, usePropertyOccupancy } from '@/hooks/useProperties';
-import { useVacantBeds } from '@/hooks/useTenants';
-import { formatPaise, shortRoomType, cn } from '@/lib/utils';
+import {
+  useProperty,
+  usePropertyOccupancy,
+  useUpdateBedStatus,
+} from '@/hooks/useProperties';
+import { useVacantBeds, type VacantBed } from '@/hooks/useTenants';
+import { formatPaise, formatDate, shortRoomType, cn } from '@/lib/utils';
+import { useToast } from '@/hooks/useToast';
 import PropertySetupDialog from './PropertySetupDialog';
 
 type BedStatus = 'VACANT' | 'OCCUPIED' | 'RESERVED' | 'MAINTENANCE';
@@ -46,6 +56,24 @@ export default function PropertyDetailPage() {
   const { data: property, isLoading } = useProperty(id!);
   const { data: occupancy } = usePropertyOccupancy(id!);
   const { data: vacant } = useVacantBeds(id);
+  const { mutateAsync: updateStatus, isPending: statusPending } = useUpdateBedStatus();
+  const { toast } = useToast();
+
+  async function changeBedStatus(
+    bedId: string,
+    status: 'VACANT' | 'RESERVED' | 'MAINTENANCE',
+    description: string,
+  ) {
+    try {
+      await updateStatus({ bedId, status });
+      toast({ title: description });
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response
+          ?.data?.error?.message ?? 'Could not change bed status';
+      toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
 
   const floors: FloorEntry[] = occupancy?.floors ?? [];
 
@@ -86,9 +114,35 @@ export default function PropertyDetailPage() {
       b.room_number.toLowerCase().includes(s) ||
       b.bed_label.toLowerCase().includes(s) ||
       b.floor_name.toLowerCase().includes(s) ||
-      (b.room_type ?? '').toLowerCase().includes(s)
+      (b.room_type ?? '').toLowerCase().includes(s) ||
+      (b.current_tenant_name ?? '').toLowerCase().includes(s)
     );
   });
+
+  // Build the list of blocked beds (RESERVED / MAINTENANCE) from occupancy.
+  interface BlockedBed {
+    id: string;
+    bed_label: string;
+    room_number: string;
+    floor_name: string;
+    status: BedStatus;
+  }
+  const blockedBeds: BlockedBed[] = [];
+  for (const f of floors) {
+    for (const r of f.rooms) {
+      for (const bd of r.beds) {
+        if (bd.status === 'RESERVED' || bd.status === 'MAINTENANCE') {
+          blockedBeds.push({
+            id: bd.id,
+            bed_label: bd.bed_label,
+            room_number: r.room_number,
+            floor_name: f.display_name,
+            status: bd.status,
+          });
+        }
+      }
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -147,77 +201,122 @@ export default function PropertyDetailPage() {
       <Tabs defaultValue="vacant">
         <TabsList>
           <TabsTrigger value="vacant">
-            Vacant beds ({vacant?.total ?? 0})
+            Available ({vacant?.total ?? 0})
+          </TabsTrigger>
+          <TabsTrigger value="blocked">
+            Blocked ({blockedBeds.length})
           </TabsTrigger>
           <TabsTrigger value="grid">Floor grid</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="vacant" className="mt-4 space-y-3">
+        <TabsContent value="vacant" className="mt-4 space-y-4">
           {(vacant?.items.length ?? 0) === 0 ? (
             <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
-              No vacant beds — your property is fully occupied. 🎉
+              No vacancies — currently full, and no upcoming vacate dates in the next 60 days.
+              <p className="mt-1 text-xs">
+                Set a tenant's <strong>expected move-out date</strong> from the Edit tenant
+                dialog to surface upcoming vacancies here.
+              </p>
             </div>
           ) : (
             <>
-              <Input
-                placeholder="Search vacant beds by room, floor, or type..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="max-w-sm"
-              />
-              <div className="overflow-hidden rounded-lg border bg-card">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                        Floor
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                        Room
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                        Bed
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                        Type
-                      </th>
-                      <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                        Base Rent
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {filteredVacant.map((b) => (
-                      <tr key={b.id} className="hover:bg-muted/30">
-                        <td className="px-4 py-3 text-muted-foreground">{b.floor_name}</td>
-                        <td className="px-4 py-3 font-medium tabular-nums">{b.room_number}</td>
-                        <td className="px-4 py-3 tabular-nums">{b.bed_label}</td>
-                        <td className="px-4 py-3">
-                          {b.room_type ? (
-                            <Badge variant="outline" className="text-[10px]">
-                              {shortRoomType(b.room_type)}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground/40">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium tabular-nums">
-                          {formatPaise(b.monthly_base_rent_paise)}
-                          <span className="text-muted-foreground">/mo</span>
-                        </td>
-                      </tr>
-                    ))}
-                    {filteredVacant.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                          No matches.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Input
+                  placeholder="Search by room, floor, type, or tenant..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="max-w-sm"
+                />
+                <div className="text-xs text-muted-foreground flex items-center gap-3">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Available now ({vacant?.vacant_count ?? 0})
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-amber-500" />
+                    Upcoming ({vacant?.upcoming_count ?? 0})
+                  </span>
+                </div>
               </div>
+              {filteredVacant.length === 0 ? (
+                <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+                  No matches.
+                </div>
+              ) : (
+                <VacancyFloors beds={filteredVacant} onHold={changeBedStatus} statusPending={statusPending} />
+              )}
             </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="blocked" className="mt-4 space-y-3">
+          {blockedBeds.length === 0 ? (
+            <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+              No blocked beds. Use the <strong>Hold</strong> action on a vacant bed to mark it
+              as held for single-occupancy, or as out-of-service.
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-lg border bg-card">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Floor
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Room
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Bed
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Status
+                    </th>
+                    <th className="px-4 py-3" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {blockedBeds.map((b) => (
+                    <tr key={b.id} className="hover:bg-muted/30">
+                      <td className="px-4 py-3 text-muted-foreground">{b.floor_name}</td>
+                      <td className="px-4 py-3 font-medium tabular-nums">{b.room_number}</td>
+                      <td className="px-4 py-3 tabular-nums">{b.bed_label}</td>
+                      <td className="px-4 py-3">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-[10px]',
+                            b.status === 'RESERVED'
+                              ? 'border-amber-300 text-amber-800'
+                              : 'border-rose-300 text-rose-800',
+                          )}
+                        >
+                          {b.status === 'RESERVED' ? 'Held' : 'Maintenance'}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 text-xs"
+                          disabled={statusPending}
+                          onClick={() =>
+                            changeBedStatus(
+                              b.id,
+                              'VACANT',
+                              `${b.room_number}·${b.bed_label} released`,
+                            )
+                          }
+                        >
+                          <Unlock className="h-3 w-3" />
+                          Release
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </TabsContent>
 
@@ -282,5 +381,169 @@ function StatCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function VacancyFloors({
+  beds,
+  onHold,
+  statusPending,
+}: {
+  beds: VacantBed[];
+  onHold: (
+    bedId: string,
+    status: 'VACANT' | 'RESERVED' | 'MAINTENANCE',
+    description: string,
+  ) => void;
+  statusPending: boolean;
+}) {
+  // Group by floor preserving original floor order
+  const byFloor: Record<string, { floor_name: string; floor_number: number; beds: VacantBed[] }> = {};
+  for (const b of beds) {
+    const key = b.floor_id || String(b.floor_number);
+    if (!byFloor[key]) {
+      byFloor[key] = { floor_name: b.floor_name, floor_number: b.floor_number, beds: [] };
+    }
+    byFloor[key].beds.push(b);
+  }
+  const floors = Object.values(byFloor).sort((a, b) => a.floor_number - b.floor_number);
+
+  return (
+    <div className="space-y-5">
+      {floors.map((f) => (
+        <div key={f.floor_name}>
+          <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{f.floor_name}</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {f.beds.map((b) => (
+              <VacancyCard
+                key={`${b.id}-${b.status}`}
+                bed={b}
+                onHold={onHold}
+                statusPending={statusPending}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function VacancyCard({
+  bed,
+  onHold,
+  statusPending,
+}: {
+  bed: VacantBed;
+  onHold: (
+    bedId: string,
+    status: 'VACANT' | 'RESERVED' | 'MAINTENANCE',
+    description: string,
+  ) => void;
+  statusPending: boolean;
+}) {
+  const isUpcoming = bed.status === 'UPCOMING';
+  return (
+    <div
+      className={cn(
+        'rounded-lg border p-3 transition-colors',
+        isUpcoming
+          ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50'
+          : 'border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-1.5">
+            <p className="text-base font-semibold tabular-nums">
+              {bed.room_number}
+              <span className="text-muted-foreground">·</span>
+              {bed.bed_label}
+            </p>
+            {bed.room_type && (
+              <Badge variant="outline" className="text-[10px]">
+                {shortRoomType(bed.room_type)}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {formatPaise(bed.monthly_base_rent_paise)}/mo
+          </p>
+        </div>
+        <Badge
+          variant="outline"
+          className={cn(
+            'text-[10px] shrink-0',
+            isUpcoming
+              ? 'border-amber-300 text-amber-800'
+              : 'border-emerald-300 text-emerald-800',
+          )}
+        >
+          {isUpcoming ? 'Upcoming' : 'Available now'}
+        </Badge>
+      </div>
+
+      {isUpcoming && bed.available_from && (
+        <div className="mt-2 space-y-0.5 text-xs">
+          <p className="flex items-center gap-1 text-amber-800">
+            <Calendar className="h-3 w-3" />
+            Vacates {formatDate(bed.available_from)}
+          </p>
+          {bed.current_tenant_name && (
+            <p className="flex items-center gap-1 text-muted-foreground">
+              <User className="h-3 w-3" />
+              {bed.current_tenant_id ? (
+                <Link
+                  to={`/tenants/${bed.current_tenant_id}`}
+                  className="hover:underline"
+                >
+                  {bed.current_tenant_name}
+                </Link>
+              ) : (
+                bed.current_tenant_name
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!isUpcoming && (
+        <div className="mt-3 flex gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 text-xs"
+            disabled={statusPending}
+            onClick={() =>
+              onHold(
+                bed.id,
+                'RESERVED',
+                `${bed.room_number}·${bed.bed_label} held (single occupancy)`,
+              )
+            }
+            title="Hold this bed (e.g. tenant took whole room)"
+          >
+            <Lock className="h-3 w-3" />
+            Hold
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 text-xs text-amber-700"
+            disabled={statusPending}
+            onClick={() =>
+              onHold(
+                bed.id,
+                'MAINTENANCE',
+                `${bed.room_number}·${bed.bed_label} marked for maintenance`,
+              )
+            }
+            title="Out of service for maintenance"
+          >
+            <Wrench className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

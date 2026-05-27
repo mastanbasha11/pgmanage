@@ -27,6 +27,8 @@ from app.core.security import (
 )
 from app.models.platform import Organisation, SubscriptionPlan
 from app.models.user import User
+from app.services.audit_constants import Event
+from app.services.audit_service import log_event
 
 router = APIRouter(prefix="/auth")
 
@@ -148,9 +150,9 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     org_id_result = await db.execute(
         text("""
             INSERT INTO public.organisations
-                (name, slug, owner_email, owner_phone, plan_id, trial_ends_at, plan_expires_at, schema_name, is_active)
+                (name, slug, owner_email, owner_phone, plan_id, trial_ends_at, plan_expires_at, schema_name, is_active, website_lead_token, website_lead_notify_email)
             VALUES
-                (:name, :slug, :email, :phone, :plan_id, :trial_end, :plan_expires_at, :schema_name, false)
+                (:name, :slug, :email, :phone, :plan_id, :trial_end, :plan_expires_at, :schema_name, false, :website_token, :email)
             RETURNING id, schema_name
         """),
         {
@@ -162,6 +164,8 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
             "trial_end": trial_end,
             "plan_expires_at": trial_end,
             "schema_name": "",  # will update
+            # Public site key for the owner's website booking form (not a secret).
+            "website_token": generate_invite_token(),
         },
     )
     row = org_id_result.fetchone()
@@ -251,7 +255,7 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", summary="Login with email and password")
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     # Step 1 — fast path: org owner whose `owner_email` matches.
     org_result = await db.execute(
         text("""
@@ -333,6 +337,19 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     await db.execute(
         text("UPDATE users SET last_login_at = NOW() WHERE id = :id"),
         {"id": user.id},
+    )
+
+    await log_event(
+        db,
+        Event.USER_LOGIN,
+        description=f"{user.name} logged in",
+        actor_user_id=user.id,
+        actor_role=user.role,
+        actor_name=user.name,
+        actor_ip=request.client.host if request.client else None,
+        entity_type="user",
+        entity_id=user.id,
+        entity_name=user.name,
     )
     await db.commit()
 
@@ -491,6 +508,161 @@ async def refresh_tokens(body: RefreshRequest, db: AsyncSession = Depends(get_db
         "refresh_token": create_refresh_token({"sub": str(user.id), "org_id": str(org_id)}),
         "token_type": "bearer",
     }
+
+
+# ── Password reset ──────────────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password", summary="Request a password-reset email")
+async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Always returns 200 (don't leak account existence). Sends a reset email
+    only if we find a matching user. Token is a JWT signed with SECRET_KEY,
+    expires in 1 hour.
+    """
+    email = body.email.lower().strip()
+
+    # Find which org schema this user belongs to (matches login logic).
+    org_result = await db.execute(
+        text("""
+            SELECT id, schema_name
+            FROM public.organisations
+            WHERE owner_email = :email AND is_active = true AND approved_at IS NOT NULL
+            LIMIT 1
+        """),
+        {"email": email},
+    )
+    org_row = org_result.fetchone()
+
+    if not org_row:
+        all_orgs = await db.execute(
+            text("""
+                SELECT id, schema_name
+                FROM public.organisations
+                WHERE is_active = true AND approved_at IS NOT NULL
+                ORDER BY created_at DESC
+            """)
+        )
+        for cand in all_orgs.fetchall():
+            _, schema = cand
+            await set_schema(db, schema)
+            hit = await db.execute(
+                text("SELECT id, name FROM users WHERE email = :email AND is_active = true LIMIT 1"),
+                {"email": email},
+            )
+            row = hit.fetchone()
+            if row:
+                org_row = cand
+                break
+
+    if not org_row:
+        # Pretend success
+        return {"status": "ok", "message": "If that email is registered, a reset link has been sent."}
+
+    org_id, schema_name = org_row
+    await set_schema(db, schema_name)
+    user_result = await db.execute(
+        text("SELECT id, name FROM users WHERE email = :email AND is_active = true LIMIT 1"),
+        {"email": email},
+    )
+    user = user_result.fetchone()
+    if not user:
+        return {"status": "ok", "message": "If that email is registered, a reset link has been sent."}
+
+    # Build a signed token. JWT-only — no DB row needed; the token IS the state.
+    from datetime import timedelta
+    from jose import jwt as _jwt
+    payload = {
+        "sub": str(user.id),
+        "org_id": str(org_id),
+        "email": email,
+        "type": "password_reset",
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        "iat": datetime.now(timezone.utc),
+    }
+    token = _jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+
+    base = settings.APP_BASE_URL.rstrip("/")
+    reset_url = f"{base}/auth/reset-password?token={token}"
+
+    try:
+        from app.services.email_service import send_password_reset_email
+        send_password_reset_email(
+            to_email=email,
+            user_name=user.name,
+            reset_url=reset_url,
+            expires_in_hours=1,
+        )
+    except Exception:
+        import logging
+        logging.exception("Failed to send password reset email")
+
+    return {"status": "ok", "message": "If that email is registered, a reset link has been sent."}
+
+
+@router.post("/reset-password", summary="Set a new password using a reset token")
+async def reset_password(body: ResetPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    if len(body.new_password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    # Reset tokens are signed with HS256 + SECRET_KEY (same as the org-approval
+    # token), NOT the RS256 access-token key — so decode them the same way.
+    from jose import jwt as _jwt
+    try:
+        payload = _jwt.decode(body.token, settings.SECRET_KEY, algorithms=["HS256"])
+    except Exception:
+        raise AuthenticationError("Invalid or expired reset link")
+
+    if payload.get("type") != "password_reset":
+        raise AuthenticationError("Invalid reset token")
+
+    org_id = payload.get("org_id")
+    user_id = payload.get("sub")
+    if not org_id or not user_id:
+        raise AuthenticationError("Malformed reset token")
+
+    # Resolve schema
+    org_result = await db.execute(
+        text("SELECT schema_name FROM public.organisations WHERE id = :id AND is_active = true"),
+        {"id": org_id},
+    )
+    schema_name = org_result.scalar_one_or_none()
+    if not schema_name:
+        raise AuthenticationError("Organisation not found")
+    await set_schema(db, schema_name)
+
+    new_hash = get_password_hash(body.new_password)
+    result = await db.execute(
+        text(
+            "UPDATE users SET password_hash = :pw, updated_at = NOW() "
+            "WHERE id = :id AND is_active = true RETURNING email"
+        ),
+        {"pw": new_hash, "id": user_id},
+    )
+    row = result.fetchone()
+    if not row:
+        raise AuthenticationError("User not found")
+
+    await log_event(
+        db,
+        Event.PASSWORD_RESET,
+        description=f"Password reset for {row[0]}",
+        actor_user_id=user_id,
+        actor_name=row[0],
+        actor_ip=request.client.host if request.client else None,
+        entity_type="user",
+        entity_id=user_id,
+        entity_name=row[0],
+    )
+    await db.commit()
+    return {"status": "ok", "message": "Password updated. You can now sign in."}
 
 
 @router.get("/me", summary="Get current user profile")

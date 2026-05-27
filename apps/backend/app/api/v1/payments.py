@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import ConflictError, IdempotencyError, NotFoundError
+from app.services.audit_constants import Event
+from app.services.audit_service import log_event
 
 router = APIRouter()
 
@@ -164,6 +166,33 @@ async def record_payment(
         },
     )
 
+    _is_advance = body.payment_type == "ADVANCE"
+    _rupees = f"₹{body.amount_paise / 100:,.0f}"
+    await log_event(
+        db,
+        Event.ADVANCE_RECORDED if _is_advance else Event.PAYMENT_RECORDED,
+        description=(
+            f"{ctx.name} recorded {_rupees} "
+            f"{'advance' if _is_advance else body.payment_type.lower() + ' payment'} "
+            f"for {tenant['name']}"
+        ),
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="payment",
+        entity_id=payment_id,
+        entity_name=tenant["name"],
+        property_id=property_id,
+        tenant_id=body.tenant_id,
+        metadata={
+            "amount_paise": body.amount_paise,
+            "payment_type": body.payment_type,
+            "payment_mode": body.payment_mode,
+            "for_month": body.for_month,
+            "for_year": body.for_year,
+        },
+    )
+
     await db.commit()
     return {"payment_id": str(payment_id), "idempotency_key": idempotency_key, "message": "Payment recorded"}
 
@@ -304,31 +333,45 @@ async def rent_ledger(
     settled = total_paid + total_discount
 
     # Per-collector breakdown using the fiscal period (collected_at in [start, end]).
-    # Splits Rent vs Advance/Deposit per person.
+    # Splits Rent vs Advance/Deposit per person — and FOLDS bookings in:
+    #   bookings.kind='DAILY'   → rent bucket  (short-stay rent income)
+    #   bookings.kind='ADVANCE' → advance bucket (advance for a future move-in)
     by_collector = await db.execute(
         text("""
+            WITH unioned AS (
+                SELECT
+                    COALESCE(NULLIF(p.paid_to, ''), u.name, 'Unattributed') AS collector,
+                    p.amount_paise,
+                    CASE WHEN p.payment_type = 'RENT' THEN 'rent' ELSE 'advance' END AS bucket
+                FROM payments p
+                LEFT JOIN users u ON u.id = p.collected_by
+                WHERE p.property_id = :pid
+                  AND p.is_deleted = false
+                  AND p.amount_paise > 0
+                  AND p.payment_type IN ('RENT', 'ADVANCE', 'DEPOSIT')
+                  AND (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
+                UNION ALL
+                SELECT
+                    COALESCE(NULLIF(b.paid_to, ''), u.name, 'Unattributed') AS collector,
+                    b.amount_paise,
+                    CASE WHEN b.kind = 'DAILY' THEN 'rent' ELSE 'advance' END AS bucket
+                FROM bookings b
+                LEFT JOIN users u ON u.id = b.collected_by
+                WHERE b.property_id = :pid
+                  AND b.is_deleted = false
+                  AND b.amount_paise > 0
+                  AND b.collected_at BETWEEN :start AND :end
+            )
             SELECT
-                COALESCE(NULLIF(p.paid_to, ''), u.name, 'Unattributed') AS collector,
-                SUM(p.amount_paise) FILTER (WHERE p.payment_type = 'RENT') AS rent_paise,
-                SUM(p.amount_paise) FILTER (
-                    WHERE p.payment_type IN ('ADVANCE', 'DEPOSIT')
-                ) AS advance_paise,
-                COUNT(*) FILTER (WHERE p.payment_type = 'RENT') AS rent_payments,
-                COUNT(*) FILTER (
-                    WHERE p.payment_type IN ('ADVANCE', 'DEPOSIT')
-                ) AS advance_payments
-            FROM payments p
-            LEFT JOIN users u ON u.id = p.collected_by
-            WHERE p.property_id = :pid
-              AND p.is_deleted = false
-              AND p.amount_paise > 0
-              AND p.payment_type IN ('RENT', 'ADVANCE', 'DEPOSIT')
-              AND (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
-            GROUP BY 1
-            HAVING COALESCE(SUM(p.amount_paise), 0) > 0
-            ORDER BY (COALESCE(SUM(p.amount_paise) FILTER (WHERE p.payment_type='RENT'),0)
-                    + COALESCE(SUM(p.amount_paise) FILTER (
-                        WHERE p.payment_type IN ('ADVANCE','DEPOSIT')),0)) DESC
+                collector,
+                COALESCE(SUM(amount_paise) FILTER (WHERE bucket = 'rent'), 0) AS rent_paise,
+                COALESCE(SUM(amount_paise) FILTER (WHERE bucket = 'advance'), 0) AS advance_paise,
+                COUNT(*) FILTER (WHERE bucket = 'rent') AS rent_payments,
+                COUNT(*) FILTER (WHERE bucket = 'advance') AS advance_payments
+            FROM unioned
+            GROUP BY collector
+            HAVING COALESCE(SUM(amount_paise), 0) > 0
+            ORDER BY SUM(amount_paise) DESC
         """),
         {"pid": str(property_id), "start": period_start, "end": period_end},
     )
@@ -346,7 +389,9 @@ async def rent_ledger(
         })
 
     # Property-wide advance & refund + period-bound rent collected, for the
-    # KPI cards. All filtered by collected_at falling in the fiscal period.
+    # KPI cards. Bookings are folded in:
+    #   DAILY    → rent_collected_in_period
+    #   ADVANCE  → advance_received
     adv_refund = await db.execute(
         text("""
             SELECT
@@ -370,6 +415,22 @@ async def rent_ledger(
     advance_received = ar.get("advance_paise", 0) or 0
     refunds_given = ar.get("refund_paise", 0) or 0
     rent_collected_in_period = ar.get("rent_collected_in_period_paise", 0) or 0
+
+    book_split = await db.execute(
+        text("""
+            SELECT
+                COALESCE(SUM(amount_paise) FILTER (WHERE kind = 'ADVANCE'), 0) AS advance_paise,
+                COALESCE(SUM(amount_paise) FILTER (WHERE kind = 'DAILY'), 0) AS daily_paise
+            FROM bookings
+            WHERE property_id = :pid
+              AND is_deleted = false
+              AND collected_at BETWEEN :start AND :end
+        """),
+        {"pid": str(property_id), "start": period_start, "end": period_end},
+    )
+    bs = book_split.mappings().fetchone() or {}
+    advance_received += bs.get("advance_paise", 0) or 0
+    rent_collected_in_period += bs.get("daily_paise", 0) or 0
 
     return {
         "property_id": str(property_id),

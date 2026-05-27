@@ -16,7 +16,12 @@ from app.core.exceptions import (
     pgmanage_exception_handler,
     validation_exception_handler,
 )
-from app.core.middleware import RequestIDMiddleware, RequestLoggingMiddleware, RateLimitMiddleware
+from app.core.middleware import (
+    RateLimitMiddleware,
+    RequestIDMiddleware,
+    RequestLoggingMiddleware,
+    WebsiteLeadCorsMiddleware,
+)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 from app.api.v1 import (
@@ -32,6 +37,9 @@ from app.api.v1 import (
     dashboard,
     tenant_portal,
     webhooks,
+    bookings,
+    audit_logs,
+    public_leads,
 )
 from app.api.platform import admin as platform_admin
 from fastapi import HTTPException
@@ -82,6 +90,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Runs before CORSMiddleware on incoming requests so external PG-site origins pass preflight.
+app.add_middleware(WebsiteLeadCorsMiddleware)
 if settings.is_production:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
 
@@ -103,6 +113,9 @@ app.include_router(leads.router, prefix=V1, tags=["leads"])
 app.include_router(announcements.router, prefix=V1, tags=["announcements"])
 app.include_router(complaints.router, prefix=V1, tags=["complaints"])
 app.include_router(dashboard.router, prefix=V1, tags=["dashboard"])
+app.include_router(bookings.router, prefix=V1, tags=["bookings"])
+app.include_router(audit_logs.router, prefix=V1, tags=["audit-logs"])
+app.include_router(public_leads.router, prefix=V1, tags=["public-leads"])
 app.include_router(tenant_portal.router, prefix=V1, tags=["tenant-portal"])
 app.include_router(webhooks.router, prefix=V1, tags=["webhooks"])
 app.include_router(platform_admin.router, prefix="/api/platform", tags=["platform-admin"])

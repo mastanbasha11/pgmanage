@@ -9,6 +9,9 @@ import {
   ImagePlus,
   Image as ImageIcon,
   Eye,
+  Users,
+  Repeat,
+  Search,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -426,25 +429,68 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
 const NOW = new Date().getFullYear();
 const YEARS = [NOW - 1, NOW, NOW + 1];
 
+type StatusFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
+type ModeFilter = 'ALL' | 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE';
+
 export default function ExpensesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<string | null>(null);
-  const { selectedPropertyId, canApproveExpenses } = useAuthStore();
+  const { selectedPropertyId, canApproveExpenses, user } = useAuthStore();
+  const isOwnerOrPartner = user?.role === 'OWNER' || user?.role === 'PARTNER';
   const cmy = currentMonthYear();
   const [month, setMonth] = useState(cmy.month);
   const [year, setYear] = useState(cmy.year);
 
+  // Filter / search state
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [paidByFilter, setPaidByFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const [modeFilter, setModeFilter] = useState<ModeFilter>('ALL');
+
+  // 300ms debounce on free-text search
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
+    return () => clearTimeout(id);
+  }, [searchInput]);
+
+  const { data: filterCats } = useExpenseCategories(selectedPropertyId ?? undefined);
   const { data: expenses, isLoading } = useExpenses({
     property_id: selectedPropertyId ?? undefined,
     month,
     year,
+    approval_status: statusFilter === 'ALL' ? undefined : statusFilter,
+    category_id: categoryFilter === 'ALL' ? undefined : categoryFilter,
+    paid_by: paidByFilter === 'ALL' ? undefined : paidByFilter,
+    payment_mode: modeFilter === 'ALL' ? undefined : modeFilter,
+    q: debouncedSearch || undefined,
   });
+  // Summary card aggregates the whole period (unfiltered) — keeping it that
+  // way means the by-person and recurring-items panels stay useful as a
+  // reference even when the table is filtered down.
   const { data: summary } = useExpenseSummary({
     property_id: selectedPropertyId ?? undefined,
     month,
     year,
   });
+
+  const hasActiveFilters =
+    debouncedSearch !== '' ||
+    categoryFilter !== 'ALL' ||
+    paidByFilter !== 'ALL' ||
+    statusFilter !== 'ALL' ||
+    modeFilter !== 'ALL';
+
+  function clearFilters() {
+    setSearchInput('');
+    setDebouncedSearch('');
+    setCategoryFilter('ALL');
+    setPaidByFilter('ALL');
+    setStatusFilter('ALL');
+    setModeFilter('ALL');
+  }
 
   const { mutateAsync: approve } = useApproveExpense();
   const { mutateAsync: del } = useDeleteExpense();
@@ -532,6 +578,85 @@ export default function ExpensesPage() {
           </div>
         </div>
 
+        {/* Search + filter row */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[220px] max-w-md">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search description, vendor, paid by, UTR..."
+              className="h-9 pl-8"
+            />
+          </div>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-40 h-9">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All categories</SelectItem>
+              {filterCats?.items?.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {isOwnerOrPartner && (
+            <Select value={paidByFilter} onValueChange={setPaidByFilter}>
+              <SelectTrigger className="w-36 h-9">
+                <SelectValue placeholder="Paid by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All payers</SelectItem>
+                {(summary?.by_person ?? [])
+                  .filter((p) => p.person && p.person !== 'Unattributed')
+                  .map((p) => (
+                    <SelectItem key={p.person} value={p.person}>
+                      {p.person}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as StatusFilter)}
+          >
+            <SelectTrigger className="w-32 h-9">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All status</SelectItem>
+              <SelectItem value="PENDING">Pending</SelectItem>
+              <SelectItem value="APPROVED">Approved</SelectItem>
+              <SelectItem value="REJECTED">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={modeFilter}
+            onValueChange={(v) => setModeFilter(v as ModeFilter)}
+          >
+            <SelectTrigger className="w-32 h-9">
+              <SelectValue placeholder="Mode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All modes</SelectItem>
+              <SelectItem value="CASH">Cash</SelectItem>
+              <SelectItem value="UPI">UPI</SelectItem>
+              <SelectItem value="BANK_TRANSFER">Bank transfer</SelectItem>
+              <SelectItem value="CARD">Card</SelectItem>
+              <SelectItem value="CHEQUE">Cheque</SelectItem>
+            </SelectContent>
+          </Select>
+          {hasActiveFilters && (
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 gap-1">
+              <X className="h-3.5 w-3.5" />
+              Clear
+            </Button>
+          )}
+        </div>
+
         {(summary?.items?.length ?? 0) > 0 && (
           <Card>
             <CardHeader>
@@ -539,6 +664,79 @@ export default function ExpensesPage() {
             </CardHeader>
             <CardContent>
               <ExpenseDonut data={summary!.items} />
+            </CardContent>
+          </Card>
+        )}
+
+        {isOwnerOrPartner && (summary?.by_person?.length ?? 0) > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Users className="h-4 w-4 text-accent" />
+                Spend by person
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {summary!.by_person!.map((p) => {
+                  const pct =
+                    (summary!.total_paise ?? 0) > 0
+                      ? Math.round((p.total_paise / summary!.total_paise) * 100)
+                      : 0;
+                  return (
+                    <div
+                      key={p.person}
+                      className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{p.person}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {p.count} {p.count === 1 ? 'expense' : 'expenses'} · {pct}%
+                        </p>
+                      </div>
+                      <p className="font-semibold tabular-nums">
+                        {formatPaise(p.total_paise)}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {(summary?.recurring_items?.length ?? 0) > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Repeat className="h-4 w-4 text-accent" />
+                Recurring items
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Spend on common items (matched against the description). One expense can
+                count toward multiple buckets, so totals here can exceed the period total.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {summary!.recurring_items!.map((r) => (
+                  <div
+                    key={r.item}
+                    className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{r.item}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {r.count}{' '}
+                        {r.count === 1 ? 'entry' : 'entries'}
+                      </p>
+                    </div>
+                    <p className="font-semibold tabular-nums">
+                      {formatPaise(r.total_paise)}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}
@@ -555,12 +753,21 @@ export default function ExpensesPage() {
               <Wallet className="h-6 w-6 text-muted-foreground" />
             </div>
             <p className="font-medium">
-              No expenses for {MONTHS.find((mm) => mm.value === month)?.label} {year}
+              {hasActiveFilters
+                ? 'No expenses match the current filters.'
+                : `No expenses for ${MONTHS.find((mm) => mm.value === month)?.label} ${year}`}
             </p>
-            <Button className="mt-4 gap-2" onClick={() => setShowAdd(true)}>
-              <Plus className="h-4 w-4" />
-              Record your first expense
-            </Button>
+            {hasActiveFilters ? (
+              <Button variant="outline" className="mt-4 gap-2" onClick={clearFilters}>
+                <X className="h-4 w-4" />
+                Clear filters
+              </Button>
+            ) : (
+              <Button className="mt-4 gap-2" onClick={() => setShowAdd(true)}>
+                <Plus className="h-4 w-4" />
+                Record your first expense
+              </Button>
+            )}
           </div>
         ) : (
           <div className="overflow-hidden rounded-lg border bg-card">

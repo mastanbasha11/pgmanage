@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { ChevronRight, ChevronLeft, Check, BedDouble } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Check, BedDouble, FileUp, FileText, Image as ImageIcon, X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useCheckin, useVacantBeds } from '@/hooks/useTenants';
+import { useCheckin, useVacantBeds, useUploadIdProof } from '@/hooks/useTenants';
 import { useProperties } from '@/hooks/useProperties';
 import { useToast } from '@/hooks/useToast';
 import { rupeesToPaise, formatPaise, cn, normaliseIndianPhone, PHONE_HELP } from '@/lib/utils';
@@ -44,6 +44,7 @@ const schema = z.object({
   monthly_rent_rupees: z.coerce.number().positive('Rent required'),
   security_deposit_rupees: z.coerce.number().min(0).default(0),
   advance_rupees: z.coerce.number().min(0).default(0),
+  non_refundable_advance_rupees: z.coerce.number().min(0).default(0),
   billing_day: z.coerce.number().int().min(1).max(28).default(1),
   food_included: z.boolean().default(false),
   food_charges_rupees: z.coerce.number().min(0).default(0),
@@ -58,8 +59,10 @@ interface Props {
 
 export default function CheckinWizard({ open, onClose }: Props) {
   const [step, setStep] = useState(0);
+  const [idProofFile, setIdProofFile] = useState<File | null>(null);
   const { toast } = useToast();
   const { mutateAsync: checkin, isPending } = useCheckin();
+  const { mutateAsync: uploadIdProof } = useUploadIdProof();
   const { data: propertiesData } = useProperties();
 
   const {
@@ -77,6 +80,7 @@ export default function CheckinWizard({ open, onClose }: Props) {
       billing_day: 1,
       security_deposit_rupees: 0,
       advance_rupees: 0,
+      non_refundable_advance_rupees: 0,
       food_included: false,
       food_charges_rupees: 0,
       move_in_date: new Date().toISOString().slice(0, 10),
@@ -87,7 +91,9 @@ export default function CheckinWizard({ open, onClose }: Props) {
   const selectedBedId = watch('bed_id');
   const monthlyRent = watch('monthly_rent_rupees');
 
-  const { data: vacantBeds, isLoading: loadingBeds } = useVacantBeds(selectedPropertyId);
+  const { data: vacantBeds, isLoading: loadingBeds } = useVacantBeds(selectedPropertyId, {
+    includeUpcoming: false,
+  });
 
   // Pre-fill rent from selected bed's room base rent
   useEffect(() => {
@@ -108,7 +114,7 @@ export default function CheckinWizard({ open, onClose }: Props) {
       const phone = normaliseIndianPhone(data.phone) ?? data.phone;
       const ecPhone =
         normaliseIndianPhone(data.emergency_contact_phone) ?? data.emergency_contact_phone;
-      await checkin({
+      const checkinRes = await checkin({
         name: data.name,
         phone,
         email: data.email || undefined,
@@ -123,6 +129,9 @@ export default function CheckinWizard({ open, onClose }: Props) {
           monthly_rent_paise: rupeesToPaise(data.monthly_rent_rupees),
           security_deposit_paise: rupeesToPaise(data.security_deposit_rupees ?? 0),
           advance_paid_paise: rupeesToPaise(data.advance_rupees ?? 0),
+          non_refundable_advance_paise: rupeesToPaise(
+            data.non_refundable_advance_rupees ?? 0,
+          ),
           food_included: data.food_included,
           food_charges_paise: data.food_included
             ? rupeesToPaise(data.food_charges_rupees ?? 0)
@@ -131,10 +140,28 @@ export default function CheckinWizard({ open, onClose }: Props) {
           effective_from: data.move_in_date,
         },
       });
+      // Best-effort: upload ID proof if attached. Failure here doesn't roll
+      // back the check-in — the tenant exists; the user can retry from the
+      // tenant detail page.
+      const newTenantId: string | undefined =
+        (checkinRes as { tenant_id?: string; id?: string } | undefined)?.tenant_id ??
+        (checkinRes as { tenant_id?: string; id?: string } | undefined)?.id;
+      if (idProofFile && newTenantId) {
+        try {
+          await uploadIdProof({ id: newTenantId, file: idProofFile });
+        } catch {
+          toast({
+            title: 'Check-in saved, but ID proof upload failed',
+            description: 'You can retry uploading from the tenant page.',
+            variant: 'destructive',
+          });
+        }
+      }
       toast({
         title: 'Tenant checked in',
         description: `${data.name} has been checked in successfully.`,
       });
+      setIdProofFile(null);
       onClose();
       reset_form();
     } catch (err: unknown) {
@@ -269,6 +296,50 @@ export default function CheckinWizard({ open, onClose }: Props) {
                   <p className="text-xs text-destructive mt-1">{errors.id_number.message}</p>
                 )}
               </div>
+              <div>
+                <Label>ID proof (optional)</Label>
+                <label
+                  htmlFor="id-proof-input"
+                  className="flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-sm cursor-pointer hover:bg-muted/50"
+                >
+                  {idProofFile ? (
+                    idProofFile.type === 'application/pdf' ? (
+                      <FileText className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                    )
+                  ) : (
+                    <FileUp className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <span className="flex-1 truncate">
+                    {idProofFile?.name ?? 'Choose image or PDF'}
+                  </span>
+                  {idProofFile && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setIdProofFile(null);
+                      }}
+                      className="rounded p-0.5 hover:bg-muted"
+                      aria-label="Clear file"
+                    >
+                      <X className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  )}
+                  <input
+                    id="id-proof-input"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    className="hidden"
+                    onChange={(e) => setIdProofFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Aadhar / passport / address proof — image or PDF, max 15 MB.
+                  Auto-compressed for images.
+                </p>
+              </div>
             </div>
           )}
 
@@ -360,11 +431,26 @@ export default function CheckinWizard({ open, onClose }: Props) {
                     type="number"
                     placeholder="0"
                   />
+                  <p className="mt-1 text-[11px] text-muted-foreground">Refundable</p>
                 </div>
                 <div>
-                  <Label>Advance Paid (₹)</Label>
+                  <Label>Refundable Advance (₹)</Label>
                   <Input {...register('advance_rupees')} type="number" placeholder="0" />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Refundable; adjusted against unpaid rent
+                  </p>
                 </div>
+              </div>
+              <div>
+                <Label>Non-refundable Advance (₹)</Label>
+                <Input
+                  {...register('non_refundable_advance_rupees')}
+                  type="number"
+                  placeholder="0"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Joining fee / one-time charge — not returned at checkout
+                </p>
               </div>
               <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
                 <label className="flex items-center gap-2 text-sm">

@@ -5,6 +5,8 @@ import { Toaster } from '@/components/ui/toaster';
 
 import LoginPage from '@/pages/auth/LoginPage';
 import SignupPage from '@/pages/auth/SignupPage';
+import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from '@/pages/auth/ResetPasswordPage';
 import Layout from './Layout';
 import DashboardPage from '@/pages/dashboard/DashboardPage';
 import PropertiesPage from '@/pages/properties/PropertiesPage';
@@ -13,8 +15,11 @@ import TenantsPage from '@/pages/tenants/TenantsPage';
 import TenantDetailPage from '@/pages/tenants/TenantDetailPage';
 import RentDashboardPage from '@/pages/rent/RentDashboardPage';
 import ExpensesPage from '@/pages/expenses/ExpensesPage';
+import BookingsPage from '@/pages/bookings/BookingsPage';
 import LeadsPage from '@/pages/leads/LeadsPage';
 import TeamPage from '@/pages/settings/TeamPage';
+import AuditLogsPage from '@/pages/audit-logs/AuditLogsPage';
+import WebsiteIntegrationPage from '@/pages/settings/WebsiteIntegrationPage';
 import TenantPortalApp from '@/pages/tenant-portal/TenantPortalApp';
 
 function PrivateRoute({ children }: { children: ReactNode }) {
@@ -111,6 +116,15 @@ export default function App() {
               </PublicOnlyRoute>
             }
           />
+          <Route
+            path="/auth/forgot-password"
+            element={
+              <PublicOnlyRoute>
+                <ForgotPasswordPage />
+              </PublicOnlyRoute>
+            }
+          />
+          <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
 
           {/* Tenant self-service portal (separate auth) */}
           <Route path="/portal/*" element={<TenantPortalApp />} />
@@ -128,9 +142,12 @@ export default function App() {
                     <Route path="tenants" element={<TenantsPage />} />
                     <Route path="tenants/:id" element={<TenantDetailPage />} />
                     <Route path="rent" element={<RentDashboardPage />} />
+                    <Route path="bookings" element={<BookingsPage />} />
                     <Route path="expenses" element={<ExpensesPage />} />
                     <Route path="leads" element={<LeadsPage />} />
                     <Route path="settings/team" element={<TeamPage />} />
+                    <Route path="settings/website-integration" element={<WebsiteIntegrationPage />} />
+                    <Route path="audit-logs" element={<AuditLogsPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Layout>

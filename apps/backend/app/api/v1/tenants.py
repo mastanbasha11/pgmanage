@@ -4,13 +4,15 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import ConflictError, NotFoundError
+from app.services.audit_constants import Event
+from app.services.audit_service import diff_changes, log_event
 from app.services.s3_service import generate_presigned_upload_url
 
 
@@ -36,6 +40,15 @@ def _normalise_phone(raw: str) -> str | None:
 
 router = APIRouter()
 
+UPLOAD_ROOT = Path(os.getenv("UPLOAD_ROOT", "/app/uploads"))
+ID_PROOF_DIR = "tenants"
+_ALLOWED_ID_PROOF_EXT = {"jpg", "jpeg", "png", "webp", "pdf", "heic", "heif"}
+
+
+def _id_proof_target(org_id: UUID, tenant_id: UUID, ext: str) -> Path:
+    """`/app/uploads/{org_id}/tenants/{tenant_id}.{ext}` — flat per tenant."""
+    return UPLOAD_ROOT / str(org_id) / ID_PROOF_DIR / f"{tenant_id}.{ext}"
+
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +61,9 @@ class RentPlanCreate(BaseModel):
     monthly_rent_paise: int
     security_deposit_paise: int = 0
     advance_paid_paise: int = 0
+    """Refundable advance — combined with security_deposit_paise at checkout for refund calc."""
+    non_refundable_advance_paise: int = 0
+    """Non-refundable advance / joining fee — kept by the PG, not refunded at checkout."""
     discount_amount_paise: int = 0
     discount_reason: str | None = None
     food_included: bool = False
@@ -153,12 +169,13 @@ async def checkin_tenant(
         text("""
             INSERT INTO rent_plans (
                 tenant_id, property_id, monthly_rent_paise, security_deposit_paise,
-                advance_paid_paise, discount_amount_paise, discount_reason,
+                advance_paid_paise, non_refundable_advance_paise,
+                discount_amount_paise, discount_reason,
                 food_included, food_charges_paise, other_charges_json,
                 billing_day, effective_from, is_active, created_by
             )
             VALUES (
-                :tenant_id, :pid, :monthly_rent, :deposit, :advance,
+                :tenant_id, :pid, :monthly_rent, :deposit, :advance, :non_refund_advance,
                 :discount, :discount_reason, :food_included, :food_charges,
                 CAST(:other_charges AS jsonb), :billing_day, :effective_from, true, :creator
             )
@@ -166,7 +183,9 @@ async def checkin_tenant(
         {
             "tenant_id": str(tenant_id), "pid": str(property_id),
             "monthly_rent": rp.monthly_rent_paise, "deposit": rp.security_deposit_paise,
-            "advance": rp.advance_paid_paise, "discount": rp.discount_amount_paise,
+            "advance": rp.advance_paid_paise,
+            "non_refund_advance": rp.non_refundable_advance_paise,
+            "discount": rp.discount_amount_paise,
             "discount_reason": rp.discount_reason, "food_included": rp.food_included,
             "food_charges": rp.food_charges_paise, "other_charges": other_charges_json,
             "billing_day": rp.billing_day, "effective_from": rp.effective_from,
@@ -191,6 +210,26 @@ async def checkin_tenant(
             "actor": str(ctx.user_id), "role": ctx.role,
             "record_id": str(tenant_id),
             "new_vals": json.dumps({"name": body.name, "phone": body.phone, "bed_id": str(body.bed_id)}),
+        },
+    )
+
+    await log_event(
+        db,
+        Event.TENANT_CHECKIN,
+        description=f"{ctx.name} checked in {body.name}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        entity_name=body.name,
+        property_id=property_id,
+        tenant_id=tenant_id,
+        metadata={
+            "bed_id": str(body.bed_id),
+            "move_in_date": str(body.move_in_date),
+            "monthly_rent_paise": rp.monthly_rent_paise,
+            "advance_paid_paise": rp.advance_paid_paise,
         },
     )
 
@@ -310,6 +349,21 @@ class TenantUpdate(BaseModel):
     permanent_address: str | None = None
     expected_move_out_date: date | None = None
     notes: str | None = None
+    # Rent-plan fields editable after check-in. They land on the active rent_plan
+    # row, not on the tenants row.
+    security_deposit_paise: int | None = None
+    advance_paid_paise: int | None = None
+    non_refundable_advance_paise: int | None = None
+
+
+class RefundUpdate(BaseModel):
+    """Payload to record (or correct) a refund after the tenant has checked out."""
+    refund_amount_paise: int
+    refund_paid_by: str | None = None
+    refund_date: date
+    notes: str | None = None
+    payment_mode: str = "CASH"
+    reference_number: str | None = None
 
 
 @router.patch("/tenants/{tenant_id}", summary="Update tenant profile")
@@ -323,6 +377,55 @@ async def update_tenant(
     if not updates:
         from fastapi import HTTPException
         raise HTTPException(400, "No fields to update")
+
+    # Pull rent-plan fields out — they update rent_plans, not tenants.
+    rent_plan_updates: dict[str, Any] = {}
+    for k in (
+        "security_deposit_paise",
+        "advance_paid_paise",
+        "non_refundable_advance_paise",
+    ):
+        if k in updates:
+            rent_plan_updates[k] = int(updates.pop(k))
+
+    rent_plan_changes: dict[str, dict] = {}
+    if rent_plan_updates:
+        rp_cols = ", ".join(rent_plan_updates.keys())
+        old_rp = (await db.execute(
+            text(f"SELECT {rp_cols} FROM rent_plans WHERE tenant_id = :tid AND is_active = true"),
+            {"tid": str(tenant_id)},
+        )).mappings().fetchone()
+        rp_set = ", ".join(f"{k} = :{k}" for k in rent_plan_updates)
+        result = await db.execute(
+            text(
+                f"UPDATE rent_plans SET {rp_set}, updated_at = NOW() "
+                f"WHERE tenant_id = :tid AND is_active = true"
+            ),
+            {**rent_plan_updates, "tid": str(tenant_id)},
+        )
+        if result.rowcount == 0:
+            from fastapi import HTTPException
+            raise HTTPException(
+                400,
+                "No active rent plan for this tenant; cannot update deposit/advance.",
+            )
+        rent_plan_changes = diff_changes(dict(old_rp) if old_rp else {}, rent_plan_updates)
+
+    if not updates:
+        await log_event(
+            db,
+            Event.TENANT_PROFILE_UPDATED,
+            description=f"{ctx.name} updated deposit/advance",
+            actor_user_id=ctx.user_id,
+            actor_role=ctx.role,
+            actor_name=ctx.name,
+            entity_type="tenant",
+            entity_id=tenant_id,
+            tenant_id=tenant_id,
+            metadata={"changes": rent_plan_changes},
+        )
+        await db.commit()
+        return {"message": "Tenant updated"}
 
     # Phone normalisation if provided
     if "phone" in updates:
@@ -349,6 +452,14 @@ async def update_tenant(
             raise HTTPException(400, "Invalid emergency contact phone")
         updates["emergency_contact_phone"] = normalised
 
+    # Capture old values BEFORE the update for a precise before/after diff.
+    tenant_cols = ", ".join(updates.keys())
+    old_tenant = (await db.execute(
+        text(f"SELECT {tenant_cols} FROM tenants WHERE id = :id AND org_id = :org_id"),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    tenant_changes = diff_changes(dict(old_tenant) if old_tenant else {}, updates)
+
     set_parts = []
     for k in updates:
         if k == "id_type":
@@ -364,6 +475,19 @@ async def update_tenant(
             f"WHERE id = :id AND org_id = :org_id AND is_deleted = false"
         ),
         updates,
+    )
+
+    await log_event(
+        db,
+        Event.TENANT_PROFILE_UPDATED,
+        description=f"{ctx.name} updated tenant profile",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        tenant_id=tenant_id,
+        metadata={"changes": {**tenant_changes, **rent_plan_changes}},
     )
     await db.commit()
     return {"message": "Tenant updated"}
@@ -392,14 +516,32 @@ async def get_tenant(
     if not tenant:
         raise NotFoundError("Tenant", tenant_id)
 
-    # Active rent plan
+    # Latest rent plan — return even if inactive (after checkout) so the UI can
+    # still display deposit/advance for refund reconciliation.
     rp_result = await db.execute(
-        text("SELECT * FROM rent_plans WHERE tenant_id = :id AND is_active = true ORDER BY effective_from DESC LIMIT 1"),
+        text(
+            "SELECT * FROM rent_plans WHERE tenant_id = :id "
+            "ORDER BY is_active DESC, effective_from DESC LIMIT 1"
+        ),
         {"id": str(tenant_id)},
     )
     rent_plan = rp_result.mappings().fetchone()
 
-    return {**dict(tenant), "active_rent_plan": dict(rent_plan) if rent_plan else None}
+    # Refund total paid so far (REFUND payments)
+    refund_result = await db.execute(
+        text(
+            "SELECT COALESCE(SUM(amount_paise), 0) AS refunded "
+            "FROM payments WHERE tenant_id = :id AND payment_type = 'REFUND'::payment_type_enum"
+        ),
+        {"id": str(tenant_id)},
+    )
+    refunded = refund_result.scalar_one() or 0
+
+    return {
+        **dict(tenant),
+        "active_rent_plan": dict(rent_plan) if rent_plan else None,
+        "refunded_paise": int(refunded),
+    }
 
 
 @router.post("/tenants/{tenant_id}/checkout", summary="Check out tenant")
@@ -499,6 +641,25 @@ async def checkout_tenant(
         },
     )
 
+    await log_event(
+        db,
+        Event.TENANT_CHECKOUT,
+        description=f"{ctx.name} checked out {tenant['name']}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        entity_name=tenant["name"],
+        property_id=tenant["property_id"],
+        tenant_id=tenant_id,
+        metadata={
+            "move_out_date": str(body.actual_move_out_date),
+            "outstanding_paise": int(total_outstanding),
+            "refund_amount_paise": int(body.refund_amount_paise or 0),
+        },
+    )
+
     await db.commit()
 
     return {
@@ -507,6 +668,268 @@ async def checkout_tenant(
         "refund_amount_paise": body.refund_amount_paise,
         "actual_move_out_date": str(body.actual_move_out_date),
     }
+
+
+@router.post("/tenants/{tenant_id}/refund", summary="Record a refund post-checkout")
+async def record_refund(
+    tenant_id: UUID,
+    body: RefundUpdate,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    For tenants already checked out: record (or top up) the deposit refund as a
+    REFUND payment row. Multiple calls append more rows — they don't overwrite,
+    so the partner can split a refund across days/modes if needed.
+    """
+    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER"):
+        raise HTTPException(403, "Only owners/managers can record refunds")
+    if (body.refund_amount_paise or 0) <= 0:
+        raise HTTPException(400, "Refund amount must be positive")
+
+    tenant_result = await db.execute(
+        text("SELECT id, property_id, name, status FROM tenants WHERE id = :id AND org_id = :org_id AND is_deleted = false"),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )
+    tenant = tenant_result.mappings().fetchone()
+    if not tenant:
+        raise NotFoundError("Tenant", tenant_id)
+    if tenant["status"] != "CHECKED_OUT":
+        raise ConflictError("Tenant must be checked out before recording a refund")
+
+    from uuid import uuid4 as _uuid4
+    await db.execute(
+        text("""
+            INSERT INTO payments (
+                org_id, property_id, tenant_id, amount_paise,
+                payment_type, payment_mode,
+                paid_to, for_month, for_year, collected_by, collected_at,
+                notes, reference_number, idempotency_key
+            ) VALUES (
+                :org_id, :pid, :tenant_id, :amount,
+                'REFUND'::payment_type_enum, CAST(:mode AS payment_mode_enum),
+                :paid_by, :month, :year, :user, :collected_at,
+                :notes, :ref, :ikey
+            )
+        """),
+        {
+            "org_id": str(ctx.org_id),
+            "pid": str(tenant["property_id"]),
+            "tenant_id": str(tenant_id),
+            "amount": int(body.refund_amount_paise),
+            "mode": body.payment_mode or "CASH",
+            "paid_by": (body.refund_paid_by or "").strip() or None,
+            "month": body.refund_date.month,
+            "year": body.refund_date.year,
+            "user": str(ctx.user_id),
+            "collected_at": body.refund_date,
+            "notes": (body.notes or "").strip() or "Refund recorded after checkout",
+            "ref": (body.reference_number or "").strip() or None,
+            "ikey": str(_uuid4()),
+        },
+    )
+
+    await db.execute(
+        text("""
+            INSERT INTO audit_log (org_id, property_id, actor_id, actor_role, action, table_name, record_id, new_values)
+            VALUES (:org_id, :pid, :actor, :role, 'INSERT'::audit_action_enum, 'payments', :record_id, CAST(:new_vals AS jsonb))
+        """),
+        {
+            "org_id": str(ctx.org_id), "pid": str(tenant["property_id"]),
+            "actor": str(ctx.user_id), "role": ctx.role,
+            "record_id": str(tenant_id),
+            "new_vals": json.dumps({
+                "type": "REFUND",
+                "amount_paise": int(body.refund_amount_paise),
+                "refund_date": str(body.refund_date),
+            }),
+        },
+    )
+
+    await log_event(
+        db,
+        Event.REFUND_ISSUED,
+        description=f"{ctx.name} refunded ₹{int(body.refund_amount_paise) / 100:,.0f} to {tenant['name']}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        entity_name=tenant["name"],
+        property_id=tenant["property_id"],
+        tenant_id=tenant_id,
+        metadata={
+            "refund_amount_paise": int(body.refund_amount_paise),
+            "refund_date": str(body.refund_date),
+            "payment_mode": body.payment_mode or "CASH",
+        },
+    )
+
+    await db.commit()
+    return {
+        "message": "Refund recorded",
+        "refund_amount_paise": int(body.refund_amount_paise),
+    }
+
+
+@router.post("/tenants/{tenant_id}/id-proof", summary="Upload Aadhar / address-proof (image or PDF)")
+async def upload_id_proof(
+    tenant_id: UUID,
+    file: UploadFile = File(...),
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Accepts an image (jpg/png/webp/heic) or a PDF. Images are compressed to
+    JPEG (max 1600px wide, q85). PDFs are stored as-is. Stored under
+    /app/uploads/{org_id}/tenants/{tenant_id}.{ext}.
+    """
+    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER", "SUPERVISOR"):
+        raise HTTPException(403, "Insufficient permission to upload ID proofs")
+
+    own = await db.execute(
+        text("SELECT id FROM tenants WHERE id = :id AND org_id = :org_id AND is_deleted = false"),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )
+    if not own.scalar_one_or_none():
+        raise NotFoundError("Tenant", tenant_id)
+
+    filename = (file.filename or "").lower()
+    suffix = filename.rsplit(".", 1)[-1] if "." in filename else ""
+    if suffix not in _ALLOWED_ID_PROOF_EXT:
+        # Fall back to content-type sniff
+        ct = (file.content_type or "").lower()
+        if ct.startswith("image/"):
+            suffix = "jpg"
+        elif ct == "application/pdf":
+            suffix = "pdf"
+        else:
+            raise HTTPException(400, "Upload must be an image or PDF")
+
+    raw = await file.read()
+    if len(raw) > 15 * 1024 * 1024:  # 15 MB hard cap
+        raise HTTPException(413, "File too large (max 15 MB)")
+
+    org_dir = UPLOAD_ROOT / str(ctx.org_id) / ID_PROOF_DIR
+    try:
+        org_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(500, f"Could not create upload directory: {e}")
+
+    if suffix == "pdf":
+        target = _id_proof_target(ctx.org_id, tenant_id, "pdf")
+        for ext in ("jpg", "jpeg", "png", "webp", "heic", "heif"):
+            _id_proof_target(ctx.org_id, tenant_id, ext).unlink(missing_ok=True)
+        try:
+            target.write_bytes(raw)
+        except OSError as e:
+            raise HTTPException(500, f"Could not write file to disk: {e}")
+        ext_saved = "pdf"
+    else:
+        try:
+            from PIL import Image, ImageOps
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(500, f"Image processing not available: {e}")
+        try:
+            with Image.open(io.BytesIO(raw)) as img:
+                img = ImageOps.exif_transpose(img).convert("RGB")
+                if img.width > 1600:
+                    ratio = 1600 / img.width
+                    img = img.resize((1600, int(img.height * ratio)))
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85, optimize=True)
+                jpg_bytes = buf.getvalue()
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, f"Could not read image: {e}")
+        target = _id_proof_target(ctx.org_id, tenant_id, "jpg")
+        for ext in ("pdf", "jpeg", "png", "webp", "heic", "heif"):
+            _id_proof_target(ctx.org_id, tenant_id, ext).unlink(missing_ok=True)
+        try:
+            target.write_bytes(jpg_bytes)
+        except OSError as e:
+            raise HTTPException(500, f"Could not write file to disk: {e}")
+        ext_saved = "jpg"
+
+    rel_path = f"{ctx.org_id}/{ID_PROOF_DIR}/{tenant_id}.{ext_saved}"
+    try:
+        await db.execute(
+            text("""
+                UPDATE tenants SET id_proof_path = :path, updated_at = NOW()
+                WHERE id = :id AND org_id = :org_id
+            """),
+            {"id": str(tenant_id), "org_id": str(ctx.org_id), "path": rel_path},
+        )
+        await log_event(
+            db,
+            Event.TENANT_ID_UPLOADED,
+            description=f"{ctx.name} uploaded ID proof",
+            actor_user_id=ctx.user_id,
+            actor_role=ctx.role,
+            actor_name=ctx.name,
+            entity_type="tenant",
+            entity_id=tenant_id,
+            tenant_id=tenant_id,
+            metadata={"file_type": ext_saved},
+        )
+        await db.commit()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Could not save ID proof path: {e}")
+    return {"id_proof_path": rel_path, "size_bytes": target.stat().st_size}
+
+
+@router.get(
+    "/tenants/{tenant_id}/id-proof",
+    summary="Stream the tenant ID proof (auth-checked)",
+)
+async def get_id_proof(
+    tenant_id: UUID,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await db.execute(
+        text("""
+            SELECT id_proof_path FROM tenants
+            WHERE id = :id AND org_id = :org_id AND is_deleted = false
+        """),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )
+    rel = row.scalar_one_or_none()
+    if not rel:
+        raise NotFoundError("ID proof", tenant_id)
+    full = UPLOAD_ROOT / rel
+    if not full.exists():
+        raise NotFoundError("ID proof", tenant_id)
+    media = "application/pdf" if rel.lower().endswith(".pdf") else "image/jpeg"
+    return FileResponse(str(full), media_type=media, filename=full.name)
+
+
+@router.delete("/tenants/{tenant_id}/id-proof", summary="Remove the tenant ID proof")
+async def delete_id_proof(
+    tenant_id: UUID,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER"):
+        raise HTTPException(403, "Insufficient permission")
+    row = await db.execute(
+        text("SELECT id_proof_path FROM tenants WHERE id = :id AND org_id = :org_id"),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )
+    rel = row.scalar_one_or_none()
+    if rel:
+        try:
+            (UPLOAD_ROOT / rel).unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+    await db.execute(
+        text(
+            "UPDATE tenants SET id_proof_path = NULL, updated_at = NOW() "
+            "WHERE id = :id AND org_id = :org_id"
+        ),
+        {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+    )
+    await db.commit()
+    return {"message": "ID proof removed"}
 
 
 @router.get("/tenants/{tenant_id}/ledger", summary="Tenant rent ledger")

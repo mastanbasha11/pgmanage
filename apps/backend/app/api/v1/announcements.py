@@ -12,6 +12,8 @@ from typing import Any
 from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import NotFoundError
+from app.services.audit_constants import Event
+from app.services.audit_service import diff_changes, log_event
 
 router = APIRouter()
 
@@ -63,6 +65,20 @@ async def create_announcement(
         },
     )
     row = result.mappings().fetchone()
+
+    await log_event(
+        db,
+        Event.ANNOUNCEMENT_POSTED,
+        description=f"{ctx.name} posted announcement “{body.title}”",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="announcement",
+        entity_id=row["id"],
+        entity_name=body.title,
+        property_id=body.property_id,
+        metadata={"status": ann_status},
+    )
     await db.commit()
     return dict(row)
 
@@ -149,6 +165,15 @@ async def update_complaint(
         from fastapi import HTTPException
         raise HTTPException(400, "No fields to update")
 
+    # Old values for the before/after diff (real columns only, before we inject
+    # the synthetic resolved_at = NOW() marker).
+    comp_cols = ", ".join(updates.keys())
+    old_comp = (await db.execute(
+        text(f"SELECT {comp_cols} FROM complaints WHERE id = :id AND org_id = :org_id"),
+        {"id": str(complaint_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    changes = diff_changes(dict(old_comp) if old_comp else {}, updates)
+
     if updates.get("status") == "RESOLVED":
         updates["resolved_at"] = "NOW()"
 
@@ -168,6 +193,19 @@ async def update_complaint(
     await db.execute(
         text(f"UPDATE complaints SET {', '.join(set_clauses)}, updated_at = NOW() WHERE id = :complaint_id AND org_id = :org_id"),
         {**params, "org_id": str(ctx.org_id)},
+    )
+
+    await log_event(
+        db,
+        Event.COMPLAINT_UPDATED,
+        description=f"{ctx.name} updated a complaint"
+        + (f" → {updates['status']}" if "status" in updates else ""),
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="complaint",
+        entity_id=complaint_id,
+        metadata={"changes": changes},
     )
     await db.commit()
     return {"message": "Complaint updated"}

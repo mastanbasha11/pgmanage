@@ -146,6 +146,174 @@ These links expire in 7 days. Until you approve, the user will see a
     )
 
 
+def send_password_reset_email(
+    *,
+    to_email: str,
+    user_name: str,
+    reset_url: str,
+    expires_in_hours: int = 1,
+) -> bool:
+    subject = "Reset your PGManage password"
+    body_text = f"""
+Hi {user_name},
+
+We received a request to reset your PGManage password. Click the link below
+to choose a new one. This link expires in {expires_in_hours} hour(s).
+
+  {reset_url}
+
+If you didn't request this, you can safely ignore this email — your password
+will stay unchanged.
+
+— PGManage
+""".strip()
+    body_html = f"""
+<!DOCTYPE html>
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                   color:#0F172A;background:#f8fafc;padding:24px;">
+  <div style="max-width:520px;margin:auto;background:white;border-radius:12px;
+              padding:32px;border:1px solid #e2e8f0;">
+    <h2 style="margin:0 0 12px 0;">Reset your password</h2>
+    <p style="color:#475569;margin:0 0 20px 0;">
+      Hi {user_name}, we got a request to reset your PGManage password. Click the
+      button below to choose a new one.
+    </p>
+    <p style="margin:24px 0;">
+      <a href="{reset_url}" style="background:#0D9488;color:white;text-decoration:none;
+         padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">
+        Set a new password
+      </a>
+    </p>
+    <p style="color:#94a3b8;font-size:12px;margin-top:24px;">
+      This link expires in {expires_in_hours} hour(s).<br>
+      Didn't request this? You can ignore this email — your password stays unchanged.
+    </p>
+  </div>
+</body></html>
+""".strip()
+    return send_email(to=to_email, subject=subject, body_text=body_text, body_html=body_html)
+
+
+def send_website_lead_email(
+    *,
+    to_email: str,
+    org_name: str,
+    property_name: str | None,
+    lead_name: str,
+    lead_email: str | None,
+    lead_phone: str,
+    room_type: str | None,
+    move_in_date: str | None,
+    message: str | None,
+    leads_url: str,
+) -> bool:
+    """Notify the PG owner of a new booking enquiry from their website form."""
+    subject = f"New booking enquiry from {lead_name} — {org_name}"
+
+    # Plain-text fallback
+    lines = [
+        f"New booking enquiry on your website ({org_name}).",
+        "",
+        f"  Name:        {lead_name}",
+        f"  Phone:       {lead_phone}",
+    ]
+    if lead_email:
+        lines.append(f"  Email:       {lead_email}")
+    if room_type:
+        lines.append(f"  Room type:   {room_type}")
+    if move_in_date:
+        lines.append(f"  Move-in:     {move_in_date}")
+    if property_name:
+        lines.append(f"  Property:    {property_name}")
+    if message:
+        lines += ["", "  Message:", f"  {message}"]
+    lines += ["", f"View in PGManage: {leads_url}"]
+    body_text = "\n".join(lines)
+
+    def _row(label: str, value: str, *, link: str | None = None) -> str:
+        cell = (
+            f'<a href="{link}" style="color:#0D9488;text-decoration:none;">{value}</a>'
+            if link
+            else value
+        )
+        return (
+            '<tr>'
+            '<td style="padding:10px 0;color:#64748b;font-size:13px;width:120px;'
+            'vertical-align:top;border-bottom:1px solid #f1f5f9;">' + label + '</td>'
+            '<td style="padding:10px 0;font-weight:500;font-size:14px;color:#0F172A;'
+            'border-bottom:1px solid #f1f5f9;">' + cell + '</td>'
+            '</tr>'
+        )
+
+    rows = _row("Name", lead_name)
+    rows += _row("Phone", lead_phone, link=f"tel:{lead_phone}")
+    if lead_email:
+        rows += _row("Email", lead_email, link=f"mailto:{lead_email}")
+    if room_type:
+        rows += _row("Room type", room_type)
+    if move_in_date:
+        rows += _row("Move-in date", move_in_date)
+    if property_name:
+        rows += _row("Property", property_name)
+
+    message_block = (
+        f'''
+      <div style="margin-top:20px;padding:16px;background:#f8fafc;border-radius:10px;
+                  border:1px solid #e2e8f0;">
+        <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;text-transform:uppercase;
+                  letter-spacing:.04em;">Message</p>
+        <p style="margin:0;color:#0F172A;font-size:14px;line-height:1.5;">{message}</p>
+      </div>'''
+        if message
+        else ""
+    )
+
+    body_html = f"""
+<!DOCTYPE html>
+<html>
+<body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+             background:#f1f5f9;padding:24px;">
+  <div style="max-width:560px;margin:auto;background:#ffffff;border-radius:16px;overflow:hidden;
+              border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(15,23,42,.06);">
+
+    <!-- Header -->
+    <div style="background:#0F172A;padding:28px 32px;">
+      <p style="margin:0;color:#5eead4;font-size:12px;font-weight:600;letter-spacing:.08em;
+                text-transform:uppercase;">New booking enquiry</p>
+      <h1 style="margin:6px 0 0 0;color:#ffffff;font-size:22px;font-weight:700;">{lead_name}</h1>
+      <p style="margin:6px 0 0 0;color:#94a3b8;font-size:13px;">
+        via your website booking form &middot; {org_name}
+      </p>
+    </div>
+
+    <!-- Details -->
+    <div style="padding:28px 32px;">
+      <table style="width:100%;border-collapse:collapse;">{rows}</table>
+      {message_block}
+
+      <a href="{leads_url}"
+         style="display:inline-block;margin-top:24px;background:#0D9488;color:#ffffff;
+                text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;
+                font-size:14px;">
+        View in PGManage &rarr;
+      </a>
+    </div>
+
+    <!-- Footer -->
+    <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+      <p style="margin:0;color:#94a3b8;font-size:12px;">
+        You're receiving this because new website leads are routed to this address.
+        Change it under Settings &rarr; Website Integration in PGManage.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+""".strip()
+
+    return send_email(to=to_email, subject=subject, body_text=body_text, body_html=body_html)
+
+
 def send_signup_approved_email(*, owner_email: str, owner_name: str, login_url: str) -> bool:
     subject = "Your PGManage account is approved"
     body_text = f"""

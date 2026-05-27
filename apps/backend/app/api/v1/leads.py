@@ -5,16 +5,107 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.dependencies import OrgContext, get_org_context
+from app.core.dependencies import OrgContext, get_org_context, require_roles
 from app.core.exceptions import NotFoundError
+from app.services.audit_constants import Event
+from app.services.audit_service import diff_changes, log_event
 
 router = APIRouter()
+
+
+@router.get(
+    "/website/integration",
+    summary="Website-lead integration details (public token, webhook URL, embed snippet)",
+)
+async def website_integration(
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns the org's website-lead integration config for the
+    Settings → Website Integration page: the public site token, the webhook URL
+    to POST to, the configured CORS allowlist, and a ready-to-paste JS snippet.
+    """
+    row = (
+        await db.execute(
+            text(
+                "SELECT website_lead_token, website_allowed_origins, website_lead_notify_email "
+                "FROM public.organisations WHERE id = :id"
+            ),
+            {"id": str(ctx.org_id)},
+        )
+    ).fetchone()
+    token = row[0] if row else None
+    allowed_origins = row[1] if row else None
+    notify_email = row[2] if row else None
+
+    base = settings.APP_BASE_URL.rstrip("/")
+    webhook_url = f"{base}/api/v1/leads/website?token={token}" if token else None
+
+    snippet = (
+        "<script>\n"
+        "async function submitBooking(form) {\n"
+        f'  const res = await fetch("{webhook_url}", {{\n'
+        '    method: "POST",\n'
+        '    headers: { "Content-Type": "application/json" },\n'
+        "    body: JSON.stringify({\n"
+        "      name: form.name.value,\n"
+        "      email: form.email.value,\n"
+        "      phone: form.phone.value,\n"
+        "      roomType: form.roomType.value,\n"
+        "      moveInDate: form.moveInDate.value,\n"
+        "      message: form.message.value,\n"
+        "    }),\n"
+        "  });\n"
+        "  return res.json(); // { success: true, leadId: \"...\" }\n"
+        "}\n"
+        "</script>"
+    )
+
+    return {
+        "token": token,
+        "webhook_url": webhook_url,
+        "allowed_origins": allowed_origins,
+        "notify_email": notify_email,
+        "snippet": snippet,
+        "rate_limit_per_hour": 10,
+    }
+
+
+class WebsiteIntegrationUpdate(BaseModel):
+    notify_email: EmailStr | None = None
+    allowed_origins: str | None = None
+
+
+@router.patch("/website/integration", summary="Update website-lead integration settings")
+async def update_website_integration(
+    body: WebsiteIntegrationUpdate,
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set where new-website-lead emails go (notify_email) and/or the CORS allowlist."""
+    sets: list[str] = []
+    params: dict[str, Any] = {"id": str(ctx.org_id)}
+    if body.notify_email is not None:
+        sets.append("website_lead_notify_email = :email")
+        params["email"] = str(body.notify_email)
+    if body.allowed_origins is not None:
+        sets.append("website_allowed_origins = :origins")
+        params["origins"] = body.allowed_origins.strip() or None
+    if not sets:
+        raise HTTPException(400, "No fields to update")
+    await db.execute(
+        text(f"UPDATE public.organisations SET {', '.join(sets)} WHERE id = :id"), params
+    )
+    await db.commit()
+    return {"message": "Website integration updated"}
 
 
 class LeadCreate(BaseModel):
@@ -78,6 +169,20 @@ async def create_lead(
         },
     )
     lead_id = result.scalar_one()
+
+    await log_event(
+        db,
+        Event.LEAD_CREATED,
+        description=f"{ctx.name} added lead {body.name}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="lead",
+        entity_id=lead_id,
+        entity_name=body.name,
+        property_id=body.property_id,
+        metadata={"source": body.source},
+    )
     await db.commit()
     return {"lead_id": str(lead_id), "status": "NEW"}
 
@@ -111,7 +216,7 @@ async def list_leads(
     where = " AND ".join(conditions)
     result = await db.execute(
         text(f"""
-            SELECT l.id, l.name, l.phone, l.source, l.status, l.notes,
+            SELECT l.id, l.name, l.phone, l.email, l.source, l.status, l.notes,
                    l.budget_min_paise, l.budget_max_paise, l.interested_room_type,
                    l.expected_move_in_date, l.next_followup_at, l.last_contacted_at,
                    l.created_at, l.assigned_to,
@@ -215,6 +320,14 @@ async def update_lead(
         from fastapi import HTTPException
         raise HTTPException(400, "No fields to update")
 
+    # Old values BEFORE the update, for the before/after diff.
+    lead_cols = ", ".join(updates.keys())
+    old_lead = (await db.execute(
+        text(f"SELECT {lead_cols} FROM leads WHERE id = :id AND org_id = :org_id"),
+        {"id": str(lead_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    changes = diff_changes(dict(old_lead) if old_lead else {}, updates)
+
     lead_enum_columns = {"status": "lead_status_enum"}
     set_clauses = ", ".join(
         f"{k} = CAST(:{k} AS {lead_enum_columns[k]})" if k in lead_enum_columns else f"{k} = :{k}"
@@ -227,6 +340,24 @@ async def update_lead(
         text(f"UPDATE leads SET {set_clauses}, updated_at = NOW() WHERE id = :lead_id AND org_id = :org_id"),
         updates,
     )
+
+    if changes:
+        status_changed = "status" in changes
+        await log_event(
+            db,
+            Event.LEAD_STATUS_CHANGED if status_changed else Event.LEAD_UPDATED,
+            description=(
+                f"{ctx.name} moved a lead to {changes['status']['new']}"
+                if status_changed
+                else f"{ctx.name} updated a lead"
+            ),
+            actor_user_id=ctx.user_id,
+            actor_role=ctx.role,
+            actor_name=ctx.name,
+            entity_type="lead",
+            entity_id=lead_id,
+            metadata={"changes": changes},
+        )
     await db.commit()
     return {"message": "Lead updated"}
 
@@ -279,6 +410,19 @@ async def convert_lead(
     await db.execute(
         text("UPDATE leads SET status = 'CONVERTED'::lead_status_enum, updated_at = NOW() WHERE id = :id"),
         {"id": str(lead_id)},
+    )
+
+    await log_event(
+        db,
+        Event.LEAD_CONVERTED,
+        description=f"{ctx.name} converted lead {lead['name']}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="lead",
+        entity_id=lead_id,
+        entity_name=lead["name"],
+        property_id=lead["property_id"],
     )
     await db.commit()
 

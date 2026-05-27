@@ -29,6 +29,18 @@ export interface ExpenseSummaryItem {
   percentage: number;
 }
 
+export interface ExpenseByPerson {
+  person: string;
+  total_paise: number;
+  count: number;
+}
+
+export interface RecurringItem {
+  item: string;
+  total_paise: number;
+  count: number;
+}
+
 export interface ExpenseCategory {
   id: string;
   name: string;
@@ -42,10 +54,23 @@ export function useExpenses(params?: {
   month?: number;
   year?: number;
   approval_status?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  category_id?: string;
+  paid_by?: string;
+  payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE';
+  q?: string;
 }) {
   return useQuery<{ items: Expense[]; total: number }>({
     queryKey: ['expenses', params],
-    queryFn: () => api.get('/expenses', { params }).then((r) => r.data),
+    queryFn: () =>
+      api
+        .get('/expenses', {
+          params: Object.fromEntries(
+            Object.entries(params ?? {}).filter(
+              ([, v]) => v !== undefined && v !== '' && v !== null,
+            ),
+          ),
+        })
+        .then((r) => r.data),
   });
 }
 
@@ -54,7 +79,14 @@ export function useExpenseSummary(params?: {
   month?: number;
   year?: number;
 }) {
-  return useQuery<{ items: ExpenseSummaryItem[]; total_paise: number }>({
+  return useQuery<{
+    items: ExpenseSummaryItem[];
+    total_paise: number;
+    by_person?: ExpenseByPerson[];
+    recurring_items?: RecurringItem[];
+    period_start?: string;
+    period_end?: string;
+  }>({
     queryKey: ['expense-summary', params],
     queryFn: () => api.get('/expenses/summary', { params }).then((r) => r.data),
   });

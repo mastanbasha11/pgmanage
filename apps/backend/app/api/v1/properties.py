@@ -282,19 +282,35 @@ async def property_occupancy(
     return {"property_id": str(property_id), "floors": occupancy}
 
 
-@router.get("/properties/{property_id}/vacant-beds", summary="List all vacant beds")
+@router.get("/properties/{property_id}/vacant-beds", summary="List all vacant beds (+ upcoming vacancies)")
 async def vacant_beds(
     property_id: UUID,
     ctx: OrgContext = Depends(get_org_context),
     db: AsyncSession = Depends(get_db),
+    include_upcoming: bool = Query(True),
+    upcoming_within_days: int = Query(60, ge=0, le=180),
 ):
-    result = await db.execute(
+    """
+    Returns currently-vacant beds AND (by default) upcoming vacancies — beds
+    currently OCCUPIED by a tenant with an `expected_move_out_date` falling
+    within the next ``upcoming_within_days`` days.
+
+    Each row carries an ``available_from`` date and ``status`` ∈
+    {"VACANT", "UPCOMING"} so the UI can render them in one chronological list.
+    """
+    rows: list[dict[str, Any]] = []
+
+    cur_res = await db.execute(
         text("""
             SELECT b.id, b.bed_label,
                    r.id AS room_id, r.room_number, r.display_name AS room_name,
                    f.id AS floor_id, f.floor_number, f.display_name AS floor_name,
                    rt.name AS room_type,
-                   r.monthly_base_rent_paise
+                   r.monthly_base_rent_paise,
+                   'VACANT' AS status,
+                   CURRENT_DATE AS available_from,
+                   NULL::text AS current_tenant_name,
+                   NULL::uuid AS current_tenant_id
             FROM beds b
             JOIN rooms r ON r.id = b.room_id
             JOIN floors f ON f.id = r.floor_id
@@ -304,8 +320,45 @@ async def vacant_beds(
         """),
         {"pid": str(property_id)},
     )
-    rows = result.mappings().fetchall()
-    return {"items": [dict(r) for r in rows], "total": len(rows)}
+    rows.extend(dict(r) for r in cur_res.mappings().fetchall())
+
+    if include_upcoming:
+        from datetime import date as _date, timedelta as _td
+        cutoff = _date.today() + _td(days=upcoming_within_days)
+        up_res = await db.execute(
+            text("""
+                SELECT b.id, b.bed_label,
+                       r.id AS room_id, r.room_number, r.display_name AS room_name,
+                       f.id AS floor_id, f.floor_number, f.display_name AS floor_name,
+                       rt.name AS room_type,
+                       r.monthly_base_rent_paise,
+                       'UPCOMING' AS status,
+                       t.expected_move_out_date AS available_from,
+                       t.name AS current_tenant_name,
+                       t.id AS current_tenant_id
+                FROM beds b
+                JOIN rooms r ON r.id = b.room_id
+                JOIN floors f ON f.id = r.floor_id
+                LEFT JOIN room_types rt ON rt.id = r.room_type_id
+                JOIN tenants t ON t.bed_id = b.id AND t.status = 'ACTIVE'
+                WHERE b.property_id = :pid
+                  AND b.status = 'OCCUPIED'
+                  AND r.status = 'ACTIVE'
+                  AND t.expected_move_out_date IS NOT NULL
+                  AND t.expected_move_out_date >= CURRENT_DATE
+                  AND t.expected_move_out_date <= :cutoff
+                ORDER BY t.expected_move_out_date, f.floor_number, r.room_number, b.bed_label
+            """),
+            {"pid": str(property_id), "cutoff": cutoff},
+        )
+        rows.extend(dict(r) for r in up_res.mappings().fetchall())
+
+    return {
+        "items": rows,
+        "total": len(rows),
+        "vacant_count": sum(1 for r in rows if r["status"] == "VACANT"),
+        "upcoming_count": sum(1 for r in rows if r["status"] == "UPCOMING"),
+    }
 
 
 # ── Floors ────────────────────────────────────────────────────────────────────

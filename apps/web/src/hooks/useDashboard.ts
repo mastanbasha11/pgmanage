@@ -14,9 +14,11 @@ export interface DashboardSummary {
   collection_rate: number;       // 0..1 fraction
   total_expenses_paise: number;
   advance_received_paise?: number;
+  bookings_revenue_paise?: number;
   refunds_given_paise?: number;
   net_income_paise: number;
   expenses_by_person?: ExpenseByPerson[];
+  cash_in_by_person?: ExpenseByPerson[];
   occupancy_rate: number;        // 0..1 fraction
   total_tenants: number;
   overdue_tenants: number;
@@ -41,12 +43,22 @@ export interface OccupancyPoint {
   rate: number;
 }
 
-export function useDashboardSummary(propertyId?: string) {
+export function useDashboardSummary(
+  propertyId?: string,
+  month?: number,
+  year?: number,
+) {
   return useQuery<DashboardSummary>({
-    queryKey: ['dashboard', 'summary', propertyId],
+    queryKey: ['dashboard', 'summary', propertyId, month, year],
     queryFn: () =>
       api
-        .get('/dashboard/summary', { params: { property_id: propertyId } })
+        .get('/dashboard/summary', {
+          params: {
+            property_id: propertyId,
+            month: month || undefined,
+            year: year || undefined,
+          },
+        })
         .then((r) => r.data),
     enabled: !!propertyId,
   });

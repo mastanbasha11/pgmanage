@@ -40,33 +40,36 @@ TEMPLATES = {
 }
 
 
-async def _get_org_whatsapp_credentials(org_id: UUID, db) -> dict | None:
+async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | None:
     """
-    Fetch WhatsApp credentials for an org from Secrets Manager (prod)
-    or directly from the DB (dev/staging).
-    Returns: {phone_number_id, access_token} or None
+    WhatsApp creds for a PROPERTY (each property has its own number). Reads the
+    current org schema's `properties` row, so the caller must have set the org
+    search_path. Token comes from Secrets Manager in prod, a dev placeholder
+    otherwise. Returns {phone_number_id, access_token} or None if not connected.
     """
     from sqlalchemy import text
-    result = await db.execute(
-        text("SELECT whatsapp_phone_number_id, whatsapp_access_token_secret_arn FROM public.organisations WHERE id = :id"),
-        {"id": str(org_id)},
-    )
-    org = result.mappings().fetchone()
-    if not org or not org["whatsapp_phone_number_id"]:
+    row = (
+        await db.execute(
+            text(
+                "SELECT whatsapp_phone_number_id, whatsapp_access_token_secret_arn "
+                "FROM properties WHERE id = :id"
+            ),
+            {"id": str(property_id)},
+        )
+    ).mappings().fetchone()
+    if not row or not row["whatsapp_phone_number_id"]:
         return None
 
-    # In production, fetch token from Secrets Manager
-    if settings.is_production and org["whatsapp_access_token_secret_arn"]:
+    if settings.is_production and row["whatsapp_access_token_secret_arn"]:
         import boto3
         client = boto3.client("secretsmanager", region_name=settings.AWS_REGION)
-        secret = client.get_secret_value(SecretId=org["whatsapp_access_token_secret_arn"])
+        secret = client.get_secret_value(SecretId=row["whatsapp_access_token_secret_arn"])
         token = json.loads(secret["SecretString"])["access_token"]
     else:
-        # For dev: use a placeholder or env var
         token = "DEV_WHATSAPP_TOKEN"
 
     return {
-        "phone_number_id": org["whatsapp_phone_number_id"],
+        "phone_number_id": row["whatsapp_phone_number_id"],
         "access_token": token,
     }
 
@@ -75,11 +78,11 @@ async def send_whatsapp_template(
     to_phone: str,
     template_name: str,
     template_params: list[str],
-    org_id: UUID,
+    property_id: UUID,
     db,
 ) -> dict:
-    """Send a pre-approved WhatsApp template message."""
-    creds = await _get_org_whatsapp_credentials(org_id, db)
+    """Send a pre-approved WhatsApp template message from a property's number."""
+    creds = await _get_property_whatsapp_credentials(property_id, db)
     if not creds:
         return {"success": False, "error": "WhatsApp not configured for this org"}
 
@@ -153,7 +156,7 @@ async def log_notification(
             )
             VALUES (
                 :org_id, :pid, :recipient_type, :recipient_id,
-                :channel, :template_name, :message_body, :status,
+                :channel, :template_name, :message_body, CAST(:status AS notif_status_enum),
                 :ext_id, :error, CASE WHEN :status = 'SENT' THEN NOW() ELSE NULL END
             )
         """),
@@ -165,6 +168,54 @@ async def log_notification(
             "ext_id": external_message_id, "error": error_message,
         },
     )
+
+
+async def send_whatsapp_to_tenant(
+    db,
+    tenant_id: UUID,
+    template_name: str,
+    params: list,
+) -> dict:
+    """
+    The notification abstraction any module calls: sendWhatsApp(tenantId, template, params).
+
+    Resolves the tenant → phone + their property's WhatsApp number + org, sends the
+    approved template, and records a notification_log row. Never raises — returns
+    {"success": bool, ...}. Caller must have the org search_path set (every
+    request/task already does).
+    """
+    from sqlalchemy import text
+    row = (
+        await db.execute(
+            text("SELECT phone, property_id, org_id FROM tenants WHERE id = :id"),
+            {"id": str(tenant_id)},
+        )
+    ).mappings().fetchone()
+    if not row:
+        return {"success": False, "error": "tenant not found"}
+
+    str_params = [str(p) for p in params]
+    result = await send_whatsapp_template(
+        to_phone=row["phone"],
+        template_name=template_name,
+        template_params=str_params,
+        property_id=row["property_id"],
+        db=db,
+    )
+    await log_notification(
+        org_id=row["org_id"],
+        property_id=row["property_id"],
+        recipient_type="TENANT",
+        recipient_id=tenant_id,
+        channel="WHATSAPP",
+        template_name=template_name,
+        message_body=" | ".join(str_params),
+        status="SENT" if result.get("success") else "FAILED",
+        external_message_id=result.get("message_id"),
+        error_message=result.get("error"),
+        db=db,
+    )
+    return result
 
 
 async def send_welcome_checkin(
@@ -183,7 +234,7 @@ async def send_welcome_checkin(
         to_phone=tenant_phone,
         template_name="welcome_checkin",
         template_params=[tenant_name, property_name, room_number, bed_label, move_in_date],
-        org_id=org_id,
+        property_id=property_id,
         db=db,
     )
     status = "SENT" if result["success"] else "FAILED"
@@ -219,7 +270,7 @@ async def send_rent_reminder(
         to_phone=tenant_phone,
         template_name="rent_reminder",
         template_params=[tenant_name, amount_rupees, month_name, due_date, upi_id],
-        org_id=org_id,
+        property_id=property_id,
         db=db,
     )
     status = "SENT" if result["success"] else "FAILED"
@@ -249,7 +300,7 @@ async def send_rent_overdue(
         to_phone=tenant_phone,
         template_name="rent_overdue",
         template_params=[tenant_name, amount_rupees, month_name, manager_phone],
-        org_id=org_id,
+        property_id=property_id,
         db=db,
     )
     status = "SENT" if result["success"] else "FAILED"

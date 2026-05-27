@@ -10,16 +10,33 @@ import {
   ArrowUpFromLine,
   Receipt,
   Users,
+  CalendarCheck,
+  Wallet,
 } from 'lucide-react';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { CashflowChart } from '@/components/charts/CashflowChart';
 import { ExpenseDonut } from '@/components/charts/ExpenseDonut';
 import { useDashboardSummary, useCashflow } from '@/hooks/useDashboard';
 import { useExpenseSummary } from '@/hooks/useExpenses';
 import { useProperties } from '@/hooks/useProperties';
 import { useAuthStore } from '@/store/auth';
-import { formatPaise } from '@/lib/utils';
+import { formatPaise, currentMonthYear, monthName } from '@/lib/utils';
+
+const MONTHS = Array.from({ length: 12 }, (_, i) => ({
+  value: i + 1,
+  label: monthName(i + 1),
+}));
+const NOW_YEAR = new Date().getFullYear();
+const YEARS = [NOW_YEAR - 1, NOW_YEAR, NOW_YEAR + 1];
 import { Link, Navigate } from 'react-router-dom';
 
 function KPICard({
@@ -55,14 +72,23 @@ function KPICard({
 
 export default function DashboardPage() {
   const { selectedPropertyId, canAccessFinancials } = useAuthStore();
+  const cmy = currentMonthYear();
+  const [month, setMonth] = useState(cmy.month);
+  const [year, setYear] = useState(cmy.year);
 
   if (!canAccessFinancials()) return <Navigate to="/tenants" replace />;
 
   const { data: propertiesData, isLoading: loadingProps } = useProperties();
-  const { data: summary, isLoading } = useDashboardSummary(selectedPropertyId ?? undefined);
+  const { data: summary, isLoading } = useDashboardSummary(
+    selectedPropertyId ?? undefined,
+    month,
+    year,
+  );
   const { data: cashflow } = useCashflow(selectedPropertyId ?? undefined);
   const { data: expenseSummary } = useExpenseSummary({
     property_id: selectedPropertyId ?? undefined,
+    month,
+    year,
   });
 
   // No properties yet → push owner to create one.
@@ -115,9 +141,39 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Financial overview for this month</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
+            Financial overview for {MONTHS.find((m) => m.value === month)?.label} {year}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
+            <SelectTrigger className="w-32 h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MONTHS.map((m) => (
+                <SelectItem key={m.value} value={String(m.value)}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+            <SelectTrigger className="w-24 h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {YEARS.map((y) => (
+                <SelectItem key={y} value={String(y)}>
+                  {y}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Row 1: cash in/out KPIs */}
@@ -142,8 +198,14 @@ export default function DashboardPage() {
         <KPICard
           title="Advance Received"
           value={formatPaise(summary.advance_received_paise ?? 0)}
-          sub="Maintenance + Security deposits"
+          sub="Deposits + advance bookings"
           icon={ArrowDownToLine}
+        />
+        <KPICard
+          title="Bookings Revenue"
+          value={formatPaise(summary.bookings_revenue_paise ?? 0)}
+          sub="Already counted in Rent + Advance"
+          icon={CalendarCheck}
         />
         <KPICard
           title="Net Income"
@@ -216,6 +278,41 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Cash in by person */}
+      {(summary.cash_in_by_person?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-accent" />
+              Cash collected by person
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Rent, advance, and booking payments — by who actually received the money.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {summary.cash_in_by_person!.map((p) => (
+                <div
+                  key={p.person}
+                  className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{p.person}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {p.count} {p.count === 1 ? 'collection' : 'collections'}
+                    </p>
+                  </div>
+                  <p className="font-semibold tabular-nums">
+                    {formatPaise(p.total_paise)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Expenses by person panel */}
       {(summary.expenses_by_person?.length ?? 0) > 0 && (

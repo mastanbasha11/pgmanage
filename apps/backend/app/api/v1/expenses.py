@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import NotFoundError
+from app.services.audit_constants import Event
+from app.services.audit_service import diff_changes, log_event
 from app.services.s3_service import generate_presigned_upload_url
 
 router = APIRouter()
@@ -97,6 +99,28 @@ async def create_expense(
         },
     )
     expense_id = result.scalar_one()
+
+    await log_event(
+        db,
+        Event.EXPENSE_CREATED,
+        description=(
+            f"{ctx.name} added a ₹{body.amount_paise / 100:,.0f} expense"
+            + (f" — {body.description}" if body.description else "")
+        ),
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="expense",
+        entity_id=expense_id,
+        entity_name=body.vendor_name or body.description,
+        property_id=body.property_id,
+        metadata={
+            "amount_paise": body.amount_paise,
+            "category_id": str(body.category_id),
+            "approval_status": approval_status,
+        },
+    )
+
     await db.commit()
     return {"expense_id": str(expense_id), "approval_status": approval_status}
 
@@ -114,6 +138,14 @@ async def update_expense(
     updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     if not updates:
         raise HTTPException(400, "No fields to update")
+
+    # Old values BEFORE the update, for the before/after diff.
+    exp_cols = ", ".join(updates.keys())
+    old_expense = (await db.execute(
+        text(f"SELECT {exp_cols} FROM expenses WHERE id = :id AND org_id = :org_id AND is_deleted = false"),
+        {"id": str(expense_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    changes = diff_changes(dict(old_expense) if old_expense else {}, updates)
 
     set_parts = []
     params: dict[str, Any] = {"id": str(expense_id), "org_id": str(ctx.org_id)}
@@ -139,6 +171,18 @@ async def update_expense(
         ),
         params,
     )
+
+    await log_event(
+        db,
+        Event.EXPENSE_UPDATED,
+        description=f"{ctx.name} edited an expense",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="expense",
+        entity_id=expense_id,
+        metadata={"changes": changes},
+    )
     await db.commit()
     return {"message": "Expense updated"}
 
@@ -157,6 +201,17 @@ async def delete_expense(
             WHERE id = :id AND org_id = :org_id
         """),
         {"id": str(expense_id), "org_id": str(ctx.org_id)},
+    )
+
+    await log_event(
+        db,
+        Event.EXPENSE_DELETED,
+        description=f"{ctx.name} deleted an expense",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="expense",
+        entity_id=expense_id,
     )
     await db.commit()
     return {"message": "Expense removed"}
@@ -208,19 +263,29 @@ async def upload_receipt(
         raise HTTPException(400, f"Could not read image: {e}")
 
     org_dir = UPLOAD_ROOT / str(ctx.org_id)
-    org_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        org_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(500, f"Could not create upload directory: {e}")
+
     target = org_dir / f"{expense_id}.jpg"
-    target.write_bytes(jpg_bytes)
+    try:
+        target.write_bytes(jpg_bytes)
+    except OSError as e:
+        raise HTTPException(500, f"Could not write receipt to disk: {e}")
     rel_path = f"{ctx.org_id}/{expense_id}.jpg"
 
-    await db.execute(
-        text("""
-            UPDATE expenses SET receipt_path = :path, updated_at = NOW()
-            WHERE id = :id AND org_id = :org_id
-        """),
-        {"id": str(expense_id), "org_id": str(ctx.org_id), "path": rel_path},
-    )
-    await db.commit()
+    try:
+        await db.execute(
+            text("""
+                UPDATE expenses SET receipt_path = :path, updated_at = NOW()
+                WHERE id = :id AND org_id = :org_id
+            """),
+            {"id": str(expense_id), "org_id": str(ctx.org_id), "path": rel_path},
+        )
+        await db.commit()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Could not save receipt path: {e}")
 
     return {"receipt_path": rel_path, "size_bytes": len(jpg_bytes)}
 
@@ -293,6 +358,9 @@ async def list_expenses(
     month: int | None = Query(None),
     year: int | None = Query(None),
     category_id: UUID | None = Query(None),
+    paid_by: str | None = Query(None, description="Case-insensitive match on paid_by"),
+    payment_mode: str | None = Query(None),
+    q: str | None = Query(None, description="Free-text search across description / vendor / paid_by / reference"),
     limit: int = Query(50, le=200),
 ):
     conditions = ["e.org_id = :org_id", "e.is_deleted = false"]
@@ -325,6 +393,28 @@ async def list_expenses(
     if category_id:
         conditions.append("e.category_id = :cat_id")
         params["cat_id"] = str(category_id)
+    if paid_by:
+        conditions.append("TRIM(LOWER(e.paid_by)) = TRIM(LOWER(:paid_by))")
+        params["paid_by"] = paid_by
+    if payment_mode:
+        conditions.append("e.payment_mode = CAST(:payment_mode AS payment_mode_enum)")
+        params["payment_mode"] = payment_mode
+    if q and q.strip():
+        conditions.append(
+            "(e.description ILIKE :q OR e.vendor_name ILIKE :q "
+            "OR e.paid_by ILIKE :q OR e.reference_number ILIKE :q)"
+        )
+        params["q"] = f"%{q.strip()}%"
+
+    # Non-owner/partner roles only see their own expenses (created by them or
+    # tagged with their name in paid_by). Owners/partners see everything.
+    if ctx.role not in ("OWNER", "PARTNER"):
+        conditions.append(
+            "(e.created_by = :ctx_uid "
+            "OR LOWER(TRIM(COALESCE(e.paid_by, ''))) = LOWER(TRIM(:ctx_name)))"
+        )
+        params["ctx_uid"] = str(ctx.user_id)
+        params["ctx_name"] = ctx.name or ""
 
     where = " AND ".join(conditions)
     result = await db.execute(
@@ -392,6 +482,15 @@ async def expense_summary(
         conditions.append("e.property_id = :pid")
         params["pid"] = str(property_id)
 
+    # Same scoping as /expenses list — non-owner/partner roles see only their own.
+    if ctx.role not in ("OWNER", "PARTNER"):
+        conditions.append(
+            "(e.created_by = :ctx_uid "
+            "OR LOWER(TRIM(COALESCE(e.paid_by, ''))) = LOWER(TRIM(:ctx_name)))"
+        )
+        params["ctx_uid"] = str(ctx.user_id)
+        params["ctx_name"] = ctx.name or ""
+
     where = " AND ".join(conditions)
     result = await db.execute(
         text(f"""
@@ -411,7 +510,69 @@ async def expense_summary(
     for r in rows:
         r["percentage"] = round(r["total_paise"] / total * 100, 1) if total > 0 else 0
 
-    return {"items": rows, "total_paise": total, "period_start": str(start_date), "period_end": str(end_date)}
+    # Spend by person (paid_by, falling back to creator's name)
+    by_person_res = await db.execute(
+        text(f"""
+            SELECT COALESCE(NULLIF(TRIM(e.paid_by), ''), u.name, 'Unattributed') AS person,
+                   SUM(e.amount_paise) AS total_paise,
+                   COUNT(e.id) AS count
+            FROM expenses e
+            LEFT JOIN users u ON u.id = e.created_by
+            WHERE {where}
+            GROUP BY 1
+            ORDER BY total_paise DESC
+        """),
+        params,
+    )
+    by_person = [dict(r) for r in by_person_res.mappings().fetchall()]
+
+    # Recurring items — keyword buckets matched against description.
+    # A single expense can fall into multiple buckets (e.g. "Curd, Milk").
+    recurring_res = await db.execute(
+        text(f"""
+            WITH keywords(label, pattern) AS (VALUES
+                ('Vegetables', '%vegetable%'),
+                ('Kirana',     '%kirana%'),
+                ('Zepto',      '%zepto%'),
+                ('Insta Mart', '%insta mart%'),
+                ('Milk',       '%milk%'),
+                ('Curd',       '%curd%'),
+                ('Chicken',    '%chicken%'),
+                ('Mutton',     '%mutton%'),
+                ('Eggs',       '%egg%'),
+                ('Mushroom',   '%mushroom%'),
+                ('Tomato',     '%tomato%'),
+                ('Tomato',     '%tamota%'),
+                ('Onion',      '%onion%'),
+                ('Petrol',     '%petrol%'),
+                ('Diesel',     '%diesel%'),
+                ('Oil',        '%oil%'),
+                ('Masala',     '%masala%'),
+                ('Cleaning',   '%cleaning%'),
+                ('Water cans', '%water bottle%')
+            )
+            SELECT k.label AS item,
+                   SUM(e.amount_paise) AS total_paise,
+                   COUNT(e.id) AS count
+            FROM keywords k
+            JOIN expenses e ON e.description ILIKE k.pattern
+            WHERE {where}
+            GROUP BY k.label
+            HAVING COUNT(e.id) >= 1
+            ORDER BY total_paise DESC
+        """),
+        params,
+    )
+    recurring_items = [dict(r) for r in recurring_res.mappings().fetchall()]
+
+    return {
+        "items": rows,
+        "total_paise": total,
+        "by_person": by_person,
+        "recurring_items": recurring_items,
+        "period_start": str(start_date),
+        "period_end": str(end_date),
+    }
 
 
 @router.patch("/expenses/{expense_id}/approve", summary="Approve or reject expense")

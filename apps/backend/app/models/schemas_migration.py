@@ -43,7 +43,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         ("payment_mode_enum", "'CASH','UPI','BANK_TRANSFER','CARD','CHEQUE'"),
         ("rent_status_enum", "'PAID','PARTIAL','UNPAID','WAIVED'"),
         ("expense_approval_enum", "'PENDING','APPROVED','REJECTED'"),
-        ("lead_source_enum", "'META_AD','INSTAGRAM','REFERRAL','WALKIN','JUSTDIAL','OTHER'"),
+        ("lead_source_enum", "'META_AD','INSTAGRAM','REFERRAL','WALKIN','JUSTDIAL','WEBSITE','OTHER'"),
         ("lead_status_enum", "'NEW','CONTACTED','SITE_VISITED','NEGOTIATING','CONVERTED','LOST'"),
         ("lead_activity_type_enum", "'NOTE','CALL','VISIT','WA_MESSAGE'"),
         ("announcement_target_enum", "'ALL_TENANTS','FLOOR','ROOM','INDIVIDUAL'"),
@@ -54,6 +54,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         ("notif_channel_enum", "'WHATSAPP','EMAIL','PUSH','SMS'"),
         ("notif_status_enum", "'SENT','FAILED','PENDING'"),
         ("audit_action_enum", "'INSERT','UPDATE','DELETE'"),
+        ("booking_kind_enum", "'DAILY','ADVANCE'"),
     ]
 
     for type_name, values in enum_types:
@@ -92,6 +93,9 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             amenities_json JSONB NOT NULL DEFAULT '[]',
             logo_url TEXT,
             settlement_day INTEGER NOT NULL DEFAULT 10,
+            whatsapp_phone_number_id VARCHAR(100),
+            whatsapp_access_token_secret_arn VARCHAR(500),
+            whatsapp_number VARCHAR(20),
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -187,6 +191,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             monthly_rent_paise INTEGER NOT NULL,
             security_deposit_paise INTEGER NOT NULL DEFAULT 0,
             advance_paid_paise INTEGER NOT NULL DEFAULT 0,
+            non_refundable_advance_paise INTEGER NOT NULL DEFAULT 0,
             discount_amount_paise INTEGER NOT NULL DEFAULT 0,
             discount_reason TEXT,
             food_included BOOLEAN NOT NULL DEFAULT false,
@@ -197,7 +202,8 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             effective_to DATE,
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".payments (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -271,6 +277,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             org_id UUID NOT NULL, property_id UUID NOT NULL,
             name VARCHAR(200) NOT NULL, phone VARCHAR(20) NOT NULL,
+            email VARCHAR(255),
             whatsapp_number VARCHAR(20),
             source lead_source_enum NOT NULL DEFAULT 'OTHER',
             source_campaign_name VARCHAR(200),
@@ -332,6 +339,47 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             table_name VARCHAR(100) NOT NULL, record_id UUID NOT NULL,
             old_values JSONB, new_values JSONB, ip_address VARCHAR(45),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        # High-level semantic activity feed (audit dashboard + tenant timeline).
+        # Distinct from audit_log above, which stores low-level row diffs.
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".activity_log (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            actor_user_id UUID, actor_role VARCHAR(20),
+            actor_name VARCHAR(200), actor_ip VARCHAR(45),
+            event_type VARCHAR(80) NOT NULL, event_category VARCHAR(40) NOT NULL,
+            description TEXT NOT NULL,
+            entity_type VARCHAR(40), entity_id UUID, entity_name VARCHAR(200),
+            property_id UUID, property_name VARCHAR(200),
+            tenant_id UUID,
+            metadata JSONB DEFAULT '{{}}'
+        )""",
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_actor_user_id ON "{schema}".activity_log(actor_user_id, created_at DESC)',
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_tenant_id ON "{schema}".activity_log(tenant_id, created_at DESC)',
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_event_type ON "{schema}".activity_log(event_type, created_at DESC)',
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_event_category ON "{schema}".activity_log(event_category, created_at DESC)',
+        f'CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON "{schema}".activity_log(created_at DESC)',
+        # Bookings (daily stays + advance/future bookings). Mirrors migrations 007/008.
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".bookings (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id UUID NOT NULL,
+            property_id UUID NOT NULL REFERENCES "{schema}".properties(id) ON DELETE CASCADE,
+            guest_name TEXT NOT NULL,
+            guest_phone TEXT,
+            room_label TEXT NOT NULL,
+            kind booking_kind_enum NOT NULL,
+            amount_paise INTEGER NOT NULL,
+            check_in_date DATE NOT NULL,
+            check_out_date DATE,
+            payment_mode payment_mode_enum NOT NULL DEFAULT 'CASH',
+            reference_number TEXT,
+            collected_at DATE NOT NULL,
+            collected_by UUID,
+            paid_to TEXT,
+            notes TEXT,
+            is_deleted BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
     ]
 

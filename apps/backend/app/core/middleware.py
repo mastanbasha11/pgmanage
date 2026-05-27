@@ -10,6 +10,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.website_lead_cors import (
+    WEBSITE_LEAD_PATH,
+    build_cors_headers,
+    fetch_allowlist_for_token,
+    resolve_allowed_origin,
+)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -70,7 +76,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return any(path.startswith(p) for p in self.STRICT_PATHS)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        client_ip = request.client.host if request.client else "unknown"
+        # Behind Caddy: request.client.host is the proxy container's IP, so
+        # without this every user shares one rate-limit bucket. Caddy sets
+        # X-Forwarded-For; take the first hop (the actual end user).
+        fwd = request.headers.get("x-forwarded-for", "")
+        client_ip = (
+            fwd.split(",")[0].strip()
+            or (request.client.host if request.client else "unknown")
+        )
         path = request.url.path
         limit = self.STRICT_LIMIT if self._is_strict(path) else settings.RATE_LIMIT_PER_MINUTE
         key = f"rate:{client_ip}:{path if self._is_strict(path) else 'global'}"
@@ -91,3 +104,31 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             pass
 
         return await call_next(request)
+
+
+class WebsiteLeadCorsMiddleware(BaseHTTPMiddleware):
+    """
+    Handle CORS for POST /api/v1/leads/website before the global CORSMiddleware.
+
+    The global middleware only allows app origins (localhost, pgmanage.in). PG owners
+    embed the booking form on their own domains, so preflight must reflect each org's
+    website_allowed_origins (or any origin when not configured yet).
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.url.path != WEBSITE_LEAD_PATH:
+            return await call_next(request)
+
+        origin = request.headers.get("origin")
+        token = request.query_params.get("token")
+        allowlist = await fetch_allowlist_for_token(token)
+        allowed = resolve_allowed_origin(origin, allowlist)
+        headers = build_cors_headers(allowed)
+
+        if request.method == "OPTIONS":
+            return Response(status_code=204, headers=headers)
+
+        response = await call_next(request)
+        for key, value in headers.items():
+            response.headers[key] = value
+        return response
