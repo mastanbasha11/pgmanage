@@ -24,6 +24,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // Don't let the SPA's navigate-fallback hijack backend URLs.
+        // Without this, the SW serves the cached index.html for /api/docs,
+        // /api/redoc, /api/static/*, and /health, which then 404 inside the
+        // React router and bounce the user back to /.
+        navigateFallbackDenylist: [/^\/api(\/|$)/, /^\/health$/],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/api\./,
