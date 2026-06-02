@@ -95,7 +95,9 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             settlement_day INTEGER NOT NULL DEFAULT 10,
             whatsapp_phone_number_id VARCHAR(100),
             whatsapp_access_token_secret_arn VARCHAR(500),
+            whatsapp_access_token TEXT,  -- plaintext fallback when no Secrets Manager
             whatsapp_number VARCHAR(20),
+            upi_vpa VARCHAR(100),        -- UPI handle for {{5}} in rent_reminder
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

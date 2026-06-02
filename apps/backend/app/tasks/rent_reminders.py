@@ -35,14 +35,17 @@ async def _generate_and_remind(event: dict, context) -> dict:
             try:
                 await set_schema(db, schema_name)
 
-                # Get all active tenants with rent plans
+                # Get all active tenants with rent plans (incl. their property's UPI).
                 tenants_result = await db.execute(
                     text("""
-                        SELECT t.id, t.name, t.phone, t.property_id,
+                        SELECT t.id AS tenant_id, t.name, t.phone, t.property_id,
                                rp.monthly_rent_paise, rp.food_charges_paise,
-                               rp.other_charges_json, rp.billing_day, rp.discount_amount_paise
+                               rp.other_charges_json, rp.billing_day,
+                               rp.discount_amount_paise,
+                               p.upi_vpa
                         FROM tenants t
                         JOIN rent_plans rp ON rp.tenant_id = t.id AND rp.is_active = true
+                        JOIN properties p ON p.id = t.property_id
                         WHERE t.status = 'ACTIVE' AND t.is_deleted = false
                     """)
                 )
@@ -79,22 +82,23 @@ async def _generate_and_remind(event: dict, context) -> dict:
                     )
                     results["ledger_entries_created"] += 1
 
-                    # Send rent reminder WhatsApp
-                    from app.services.notification_service import send_rent_reminder
-                    month_name = calendar.month_name[month]
-                    await send_rent_reminder(
-                        tenant_id=tenant["tenant_id"],
-                        tenant_name=tenant["name"],
-                        tenant_phone=tenant["phone"],
-                        amount_paise=total_due,
-                        month_name=f"{month_name} {year}",
-                        due_date=due_date.strftime("%d %b %Y"),
-                        upi_id="",  # TODO: fetch org UPI
-                        org_id=org_id,
-                        property_id=tenant["property_id"],
-                        db=db,
-                    )
-                    results["reminders_sent"] += 1
+                    # Send rent reminder WhatsApp (skip silently if tenant has no phone).
+                    if tenant["phone"]:
+                        from app.services.notification_service import send_rent_reminder
+                        month_name = calendar.month_name[month]
+                        await send_rent_reminder(
+                            tenant_id=tenant["tenant_id"],
+                            tenant_name=tenant["name"],
+                            tenant_phone=tenant["phone"],
+                            amount_paise=total_due,
+                            month_name=f"{month_name} {year}",
+                            due_date=due_date.strftime("%d %b %Y"),
+                            upi_id=tenant["upi_vpa"] or "—",
+                            org_id=org_id,
+                            property_id=tenant["property_id"],
+                            db=db,
+                        )
+                        results["reminders_sent"] += 1
 
                 await db.commit()
                 results["orgs_processed"] += 1

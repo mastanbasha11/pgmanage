@@ -11,7 +11,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, get_org_schema_name, set_schema
-from app.core.dependencies import OrgContext, get_org_context, require_property_access
+from app.core.dependencies import (
+    OrgContext,
+    get_org_context,
+    require_property_access,
+    require_roles,
+)
 from app.core.exceptions import ConflictError, NotFoundError
 
 router = APIRouter()
@@ -831,3 +836,163 @@ async def clear_billing_period(
     )
     await db.commit()
     return {"message": "Override removed"}
+
+
+# ── WhatsApp settings (per-property) + test send ──────────────────────────────
+
+class WhatsAppSettings(BaseModel):
+    """
+    Per-property WhatsApp Cloud API config + payment handle.
+
+    `whatsapp_phone_number_id` is the long numeric id Meta shows in WhatsApp
+    Manager → Phone Numbers; `whatsapp_number` is the human-readable +91…
+    used for display + click-to-chat. `whatsapp_access_token` is a long-lived
+    System User token (kept plaintext here; future work can move it to
+    Secrets Manager — the service layer already prefers `..._secret_arn`
+    when present). `upi_vpa` lands in the {{5}} placeholder of the
+    `rent_reminder` template so tenants can tap to pay.
+
+    Pass `null` to clear a field; omit it to leave unchanged.
+    """
+
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_number: str | None = None
+    whatsapp_access_token: str | None = None
+    upi_vpa: str | None = None
+
+
+@router.get("/properties/{property_id}/whatsapp", summary="Read WhatsApp + UPI settings")
+async def get_whatsapp_settings(
+    property_id: UUID,
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    row = (
+        await db.execute(
+            text(
+                "SELECT whatsapp_phone_number_id, whatsapp_number, upi_vpa, "
+                "       (whatsapp_access_token IS NOT NULL OR "
+                "        whatsapp_access_token_secret_arn IS NOT NULL) AS has_token "
+                "FROM properties WHERE id = :id AND org_id = :org_id"
+            ),
+            {"id": str(property_id), "org_id": str(ctx.org_id)},
+        )
+    ).mappings().fetchone()
+    if not row:
+        raise NotFoundError("Property", str(property_id))
+    return {
+        "whatsapp_phone_number_id": row["whatsapp_phone_number_id"],
+        "whatsapp_number": row["whatsapp_number"],
+        "upi_vpa": row["upi_vpa"],
+        "has_access_token": bool(row["has_token"]),
+    }
+
+
+@router.patch("/properties/{property_id}/whatsapp", summary="Update WhatsApp + UPI settings")
+async def update_whatsapp_settings(
+    property_id: UUID,
+    body: WhatsAppSettings,
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+
+    # Verify the property belongs to this org (defence in depth on top of search_path).
+    exists = (
+        await db.execute(
+            text("SELECT 1 FROM properties WHERE id = :id AND org_id = :org"),
+            {"id": str(property_id), "org": str(ctx.org_id)},
+        )
+    ).scalar()
+    if not exists:
+        raise NotFoundError("Property", str(property_id))
+
+    set_clause = ", ".join(f"{k} = :{k}" for k in fields)
+    params = {**fields, "id": str(property_id)}
+    await db.execute(
+        text(f"UPDATE properties SET {set_clause}, updated_at = NOW() WHERE id = :id"),
+        params,
+    )
+
+    # Keep public.whatsapp_routing in sync so inbound webhooks know which
+    # org/property owns this phone_number_id.
+    if body.whatsapp_phone_number_id:
+        schema_name = get_org_schema_name(ctx.org_id)
+        await db.execute(
+            text(
+                """
+                INSERT INTO public.whatsapp_routing
+                    (phone_number_id, org_id, schema_name, property_id, whatsapp_number)
+                VALUES (:pnid, :org, :schema, :pid, :wa_num)
+                ON CONFLICT (phone_number_id) DO UPDATE SET
+                    org_id = EXCLUDED.org_id,
+                    schema_name = EXCLUDED.schema_name,
+                    property_id = EXCLUDED.property_id,
+                    whatsapp_number = COALESCE(EXCLUDED.whatsapp_number,
+                                               public.whatsapp_routing.whatsapp_number)
+                """
+            ),
+            {
+                "pnid": body.whatsapp_phone_number_id,
+                "org": str(ctx.org_id),
+                "schema": schema_name,
+                "pid": str(property_id),
+                "wa_num": body.whatsapp_number,
+            },
+        )
+    await db.commit()
+    return {"message": "WhatsApp settings saved"}
+
+
+class WhatsAppTestSend(BaseModel):
+    """Body for the manual smoke-test send (Settings → 'Send test')."""
+
+    to_phone: str            # any number you want to ping
+    template_name: str = "rent_reminder"
+
+
+@router.post("/properties/{property_id}/whatsapp/test-send", summary="Send a one-off test message")
+async def whatsapp_test_send(
+    property_id: UUID,
+    body: WhatsAppTestSend,
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fires a single template message to verify Meta credentials + template
+    approval before the scheduler runs. Uses harmless placeholder params for
+    the well-known templates; for anything else, params default to ["Test"].
+    Returns the Meta response so the owner can see why it failed (template not
+    approved, phone not in test list, etc.).
+    """
+    from app.services.notification_service import send_whatsapp_template
+
+    # Confirm property is in this org.
+    exists = (
+        await db.execute(
+            text("SELECT 1 FROM properties WHERE id = :id AND org_id = :org"),
+            {"id": str(property_id), "org": str(ctx.org_id)},
+        )
+    ).scalar()
+    if not exists:
+        raise NotFoundError("Property", str(property_id))
+
+    if body.template_name == "rent_reminder":
+        params = ["Test Tenant", "₹1,000", "June 2026", "10 Jun 2026", "demo@upi"]
+    elif body.template_name == "rent_overdue":
+        params = ["Test Tenant", "₹1,000", "June 2026", "+919999999999"]
+    elif body.template_name == "welcome_checkin":
+        params = ["Test Tenant", "Demo Property", "101", "A", "01 Jun 2026"]
+    else:
+        params = ["Test"]
+
+    result = await send_whatsapp_template(
+        to_phone=body.to_phone,
+        template_name=body.template_name,
+        template_params=params,
+        property_id=property_id,
+        db=db,
+    )
+    return result

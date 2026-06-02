@@ -66,9 +66,51 @@ async def lifespan(app: FastAPI):
     await r.aclose()
     print("Redis connection OK")
 
+    # In-process cron — rent reminders + overdue notices. Only runs when
+    # SCHEDULER_ENABLED=true (so dev boxes don't spam tenants). Safe today
+    # because prod is a single backend replica; if we ever scale out, swap
+    # this for an external scheduler (EventBridge / k8s CronJob) or add a
+    # Redis-backed distributed lock around each fire.
+    scheduler = None
+    if settings.SCHEDULER_ENABLED:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        from pytz import timezone as _tz
+
+        from app.tasks.rent_reminders import _generate_and_remind, _send_overdue_reminders
+
+        ist = _tz("Asia/Kolkata")
+        scheduler = AsyncIOScheduler(timezone=ist)
+        # 1st of every month at 10:00 IST — create ledger + send `rent_reminder`.
+        scheduler.add_job(
+            _generate_and_remind,
+            CronTrigger(day=1, hour=10, minute=0, timezone=ist),
+            args=[{}, None],
+            id="rent_reminders_monthly",
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+        # Daily at 10:00 IST — chase anyone still UNPAID/PARTIAL for the month.
+        scheduler.add_job(
+            _send_overdue_reminders,
+            CronTrigger(hour=10, minute=0, timezone=ist),
+            args=[{}, None],
+            id="rent_overdue_daily",
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+        scheduler.start()
+        print(
+            "Scheduler started — rent_reminders_monthly (1st 10:00 IST), "
+            "rent_overdue_daily (10:00 IST)"
+        )
+
     yield
 
     # Shutdown
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
+        print("Scheduler stopped")
     await engine.dispose()
     print("PGManage API shutdown complete")
 

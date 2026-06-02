@@ -20,6 +20,7 @@ import LeadsPage from '@/pages/leads/LeadsPage';
 import TeamPage from '@/pages/settings/TeamPage';
 import AuditLogsPage from '@/pages/audit-logs/AuditLogsPage';
 import WebsiteIntegrationPage from '@/pages/settings/WebsiteIntegrationPage';
+import WhatsAppPage from '@/pages/settings/WhatsAppPage';
 import TenantPortalApp from '@/pages/tenant-portal/TenantPortalApp';
 
 function PrivateRoute({ children }: { children: ReactNode }) {
@@ -147,6 +148,7 @@ export default function App() {
                     <Route path="leads" element={<LeadsPage />} />
                     <Route path="settings/team" element={<TeamPage />} />
                     <Route path="settings/website-integration" element={<WebsiteIntegrationPage />} />
+                    <Route path="settings/whatsapp" element={<WhatsAppPage />} />
                     <Route path="audit-logs" element={<AuditLogsPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>

@@ -44,14 +44,20 @@ async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | No
     """
     WhatsApp creds for a PROPERTY (each property has its own number). Reads the
     current org schema's `properties` row, so the caller must have set the org
-    search_path. Token comes from Secrets Manager in prod, a dev placeholder
-    otherwise. Returns {phone_number_id, access_token} or None if not connected.
+    search_path. Token resolution order:
+      1. Secrets Manager (via `whatsapp_access_token_secret_arn`) — preferred
+         in prod.
+      2. Plaintext `whatsapp_access_token` column — fallback when SM isn't set
+         up (dev, staging, small deploys). DB is encrypted at rest.
+      3. Dev placeholder so local boxes can dry-run without a real token.
+    Returns {phone_number_id, access_token} or None if not connected.
     """
     from sqlalchemy import text
     row = (
         await db.execute(
             text(
-                "SELECT whatsapp_phone_number_id, whatsapp_access_token_secret_arn "
+                "SELECT whatsapp_phone_number_id, whatsapp_access_token_secret_arn, "
+                "       whatsapp_access_token "
                 "FROM properties WHERE id = :id"
             ),
             {"id": str(property_id)},
@@ -60,12 +66,23 @@ async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | No
     if not row or not row["whatsapp_phone_number_id"]:
         return None
 
-    if settings.is_production and row["whatsapp_access_token_secret_arn"]:
-        import boto3
-        client = boto3.client("secretsmanager", region_name=settings.AWS_REGION)
-        secret = client.get_secret_value(SecretId=row["whatsapp_access_token_secret_arn"])
-        token = json.loads(secret["SecretString"])["access_token"]
-    else:
+    token: str | None = None
+    if row["whatsapp_access_token_secret_arn"]:
+        try:
+            import boto3
+            client = boto3.client("secretsmanager", region_name=settings.AWS_REGION)
+            secret = client.get_secret_value(
+                SecretId=row["whatsapp_access_token_secret_arn"]
+            )
+            token = json.loads(secret["SecretString"])["access_token"]
+        except Exception:
+            # Fall through to plaintext / dev rather than failing the whole send.
+            token = None
+    if not token and row["whatsapp_access_token"]:
+        token = row["whatsapp_access_token"]
+    if not token:
+        if settings.is_production:
+            return None
         token = "DEV_WHATSAPP_TOKEN"
 
     return {

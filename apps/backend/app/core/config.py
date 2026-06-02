@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     WHATSAPP_VERIFY_TOKEN: str = ""   # echoed back during webhook subscribe verification
     WHATSAPP_APP_SECRET: str = ""     # validates X-Hub-Signature-256 on inbound messages
 
+    # ── In-process scheduler (APScheduler) ───────────────────────────────────
+    # Off by default so local dev / tests don't fire crons. Set to "true" on
+    # exactly one prod replica (we currently run a single backend container).
+    SCHEDULER_ENABLED: bool = False
+
     # ── CORS / Trusted hosts ─────────────────────────────────────────────────
     # Accepts either a JSON array string or a comma-separated list.
     CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:3001"]'
