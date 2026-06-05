@@ -31,6 +31,37 @@ async def test_get_whatsapp_settings_returns_empty_for_new_property(
     assert body["whatsapp_number"] is None
     assert body["upi_vpa"] is None
     assert body["has_access_token"] is False
+    # Template overrides default to NULL (service falls back to TEMPLATES defaults).
+    assert body["wa_rent_reminder_template_name"] is None
+    assert body["wa_rent_reminder_template_language"] is None
+    assert body["wa_rent_overdue_template_name"] is None
+    assert body["wa_rent_overdue_template_language"] is None
+
+
+@pytest.mark.asyncio
+async def test_patch_template_overrides_round_trip(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    r = await client.patch(
+        f"/api/v1/properties/{test_property['property_id']}/whatsapp",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "wa_rent_reminder_template_name": "rent_payment_harshi_upi",
+            "wa_rent_reminder_template_language": "en",
+            "wa_rent_overdue_template_name": "rent_overdue_harshi_upi",
+            "wa_rent_overdue_template_language": "en",
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    got = (await client.get(
+        f"/api/v1/properties/{test_property['property_id']}/whatsapp",
+        headers=auth_headers(test_owner["token"]),
+    )).json()
+    assert got["wa_rent_reminder_template_name"] == "rent_payment_harshi_upi"
+    assert got["wa_rent_reminder_template_language"] == "en"
+    assert got["wa_rent_overdue_template_name"] == "rent_overdue_harshi_upi"
+    assert got["wa_rent_overdue_template_language"] == "en"
 
 
 @pytest.mark.asyncio

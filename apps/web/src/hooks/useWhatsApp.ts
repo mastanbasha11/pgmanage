@@ -16,6 +16,12 @@ export interface WhatsAppSettings {
   whatsapp_number: string | null;
   upi_vpa: string | null;
   has_access_token: boolean;
+  /** Template-override columns. NULL → use server defaults
+   *  (rent_reminder/rent_overdue in en_US). */
+  wa_rent_reminder_template_name: string | null;
+  wa_rent_reminder_template_language: string | null;
+  wa_rent_overdue_template_name: string | null;
+  wa_rent_overdue_template_language: string | null;
 }
 
 export interface WhatsAppSettingsUpdate {
@@ -23,6 +29,10 @@ export interface WhatsAppSettingsUpdate {
   whatsapp_number?: string | null;
   whatsapp_access_token?: string | null;
   upi_vpa?: string | null;
+  wa_rent_reminder_template_name?: string | null;
+  wa_rent_reminder_template_language?: string | null;
+  wa_rent_overdue_template_name?: string | null;
+  wa_rent_overdue_template_language?: string | null;
 }
 
 export interface WhatsAppTestSendResult {

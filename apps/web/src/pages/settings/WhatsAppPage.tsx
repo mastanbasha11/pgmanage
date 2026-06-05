@@ -51,12 +51,20 @@ export default function WhatsAppPage() {
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [upiVpa, setUpiVpa] = useState('');
+  const [reminderTplName, setReminderTplName] = useState('');
+  const [reminderTplLang, setReminderTplLang] = useState('');
+  const [overdueTplName, setOverdueTplName] = useState('');
+  const [overdueTplLang, setOverdueTplLang] = useState('');
   useEffect(() => {
     if (settings) {
       setPhoneNumberId(settings.whatsapp_phone_number_id ?? '');
       setWhatsappNumber(settings.whatsapp_number ?? '');
       setUpiVpa(settings.upi_vpa ?? '');
       setAccessToken(''); // never prefill — server only tells us whether one exists
+      setReminderTplName(settings.wa_rent_reminder_template_name ?? '');
+      setReminderTplLang(settings.wa_rent_reminder_template_language ?? '');
+      setOverdueTplName(settings.wa_rent_overdue_template_name ?? '');
+      setOverdueTplLang(settings.wa_rent_overdue_template_language ?? '');
     }
   }, [settings]);
 
@@ -70,6 +78,11 @@ export default function WhatsAppPage() {
         whatsapp_phone_number_id: phoneNumberId.trim() || null,
         whatsapp_number: whatsappNumber.trim() || null,
         upi_vpa: upiVpa.trim() || null,
+        // Empty string → NULL so we fall back to the server default.
+        wa_rent_reminder_template_name: reminderTplName.trim() || null,
+        wa_rent_reminder_template_language: reminderTplLang.trim() || null,
+        wa_rent_overdue_template_name: overdueTplName.trim() || null,
+        wa_rent_overdue_template_language: overdueTplLang.trim() || null,
       };
       // Only send the token if the user typed one — otherwise leave whatever's saved alone.
       if (accessToken.trim()) payload.whatsapp_access_token = accessToken.trim();
@@ -223,6 +236,63 @@ export default function WhatsAppPage() {
                 Goes into <span className="font-mono">{'{{5}}'}</span> of the{' '}
                 <span className="font-mono">rent_reminder</span> template — tenants tap to pay.
               </p>
+            </div>
+          </div>
+
+          <div className="border-t pt-4 space-y-3">
+            <div className="text-sm font-medium">
+              Approved Meta templates (per property)
+            </div>
+            <p className="text-xs text-muted-foreground -mt-2">
+              Leave blank to use defaults <span className="font-mono">rent_reminder</span> /{' '}
+              <span className="font-mono">rent_overdue</span> in language{' '}
+              <span className="font-mono">en_US</span>. Override here if Meta approved your
+              templates under different names or languages (e.g. plain <span className="font-mono">en</span>).
+              Find the exact values in Meta → WhatsApp Manager → Message Templates.
+            </p>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="reminderTplName">Rent-reminder template name</Label>
+                <Input
+                  id="reminderTplName"
+                  placeholder="rent_reminder"
+                  value={reminderTplName}
+                  onChange={(e) => setReminderTplName(e.target.value)}
+                  disabled={settingsLoading}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="reminderTplLang">Rent-reminder language code</Label>
+                <Input
+                  id="reminderTplLang"
+                  placeholder="en_US"
+                  value={reminderTplLang}
+                  onChange={(e) => setReminderTplLang(e.target.value)}
+                  disabled={settingsLoading}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="overdueTplName">Rent-overdue template name</Label>
+                <Input
+                  id="overdueTplName"
+                  placeholder="rent_overdue"
+                  value={overdueTplName}
+                  onChange={(e) => setOverdueTplName(e.target.value)}
+                  disabled={settingsLoading}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="overdueTplLang">Rent-overdue language code</Label>
+                <Input
+                  id="overdueTplLang"
+                  placeholder="en_US"
+                  value={overdueTplLang}
+                  onChange={(e) => setOverdueTplLang(e.target.value)}
+                  disabled={settingsLoading}
+                />
+              </div>
             </div>
           </div>
 

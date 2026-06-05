@@ -98,6 +98,11 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             whatsapp_access_token TEXT,  -- plaintext fallback when no Secrets Manager
             whatsapp_number VARCHAR(20),
             upi_vpa VARCHAR(100),        -- UPI handle for {{5}} in rent_reminder
+            -- Optional Meta template overrides; NULL → use defaults in notification_service.TEMPLATES.
+            wa_rent_reminder_template_name VARCHAR(200),
+            wa_rent_reminder_template_language VARCHAR(20),
+            wa_rent_overdue_template_name VARCHAR(200),
+            wa_rent_overdue_template_language VARCHAR(20),
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

@@ -25,28 +25,52 @@ TEMPLATES: dict[str, dict[str, str]] = {
 }
 
 
-def _template_language(template_name: str) -> str:
-    return TEMPLATES.get(template_name, {}).get("language", "en_US")
+# Maps logical key → DB columns holding the per-property override for that template.
+_OVERRIDE_COLUMNS: dict[str, tuple[str, str]] = {
+    "rent_reminder": ("wa_rent_reminder_template_name", "wa_rent_reminder_template_language"),
+    "rent_overdue":  ("wa_rent_overdue_template_name",  "wa_rent_overdue_template_language"),
+}
+
+
+def _resolve_template(template_name: str, overrides: dict) -> tuple[str, str]:
+    """
+    Pick the (meta_name, language) actually sent to Meta.
+
+    Priority: the property's saved override → the global TEMPLATES default →
+    the literal name the caller passed (language defaults to en_US).
+    """
+    cols = _OVERRIDE_COLUMNS.get(template_name)
+    if cols:
+        name_col, lang_col = cols
+        name = overrides.get(name_col)
+        lang = overrides.get(lang_col)
+        if name:
+            return name, lang or "en_US"
+    cfg = TEMPLATES.get(template_name, {})
+    return cfg.get("name", template_name), cfg.get("language", "en_US")
 
 
 async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | None:
     """
-    WhatsApp creds for a PROPERTY (each property has its own number). Reads the
-    current org schema's `properties` row, so the caller must have set the org
+    WhatsApp creds + per-template overrides for a PROPERTY. Reads the current
+    org schema's `properties` row, so the caller must have set the org
     search_path. Token resolution order:
       1. Secrets Manager (via `whatsapp_access_token_secret_arn`) — preferred
          in prod.
       2. Plaintext `whatsapp_access_token` column — fallback when SM isn't set
          up (dev, staging, small deploys). DB is encrypted at rest.
       3. Dev placeholder so local boxes can dry-run without a real token.
-    Returns {phone_number_id, access_token} or None if not connected.
+    Returns {phone_number_id, access_token, overrides: {…}} or None if the
+    property isn't connected.
     """
     from sqlalchemy import text
     row = (
         await db.execute(
             text(
                 "SELECT whatsapp_phone_number_id, whatsapp_access_token_secret_arn, "
-                "       whatsapp_access_token "
+                "       whatsapp_access_token, "
+                "       wa_rent_reminder_template_name, wa_rent_reminder_template_language, "
+                "       wa_rent_overdue_template_name,  wa_rent_overdue_template_language "
                 "FROM properties WHERE id = :id"
             ),
             {"id": str(property_id)},
@@ -77,6 +101,12 @@ async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | No
     return {
         "phone_number_id": row["whatsapp_phone_number_id"],
         "access_token": token,
+        "overrides": {
+            "wa_rent_reminder_template_name":     row["wa_rent_reminder_template_name"],
+            "wa_rent_reminder_template_language": row["wa_rent_reminder_template_language"],
+            "wa_rent_overdue_template_name":      row["wa_rent_overdue_template_name"],
+            "wa_rent_overdue_template_language":  row["wa_rent_overdue_template_language"],
+        },
     }
 
 
@@ -97,13 +127,14 @@ async def send_whatsapp_template(
     if not phone.startswith("+"):
         phone = "+91" + phone
 
+    meta_name, lang_code = _resolve_template(template_name, creds.get("overrides", {}))
     payload = {
         "messaging_product": "whatsapp",
         "to": phone,
         "type": "template",
         "template": {
-            "name": template_name,
-            "language": {"code": _template_language(template_name)},
+            "name": meta_name,
+            "language": {"code": lang_code},
             "components": [
                 {
                     "type": "body",

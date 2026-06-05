@@ -859,6 +859,12 @@ class WhatsAppSettings(BaseModel):
     whatsapp_number: str | None = None
     whatsapp_access_token: str | None = None
     upi_vpa: str | None = None
+    # Optional Meta template overrides. NULL/omitted → use defaults (template
+    # names "rent_reminder" / "rent_overdue", language "en_US").
+    wa_rent_reminder_template_name: str | None = None
+    wa_rent_reminder_template_language: str | None = None
+    wa_rent_overdue_template_name: str | None = None
+    wa_rent_overdue_template_language: str | None = None
 
 
 @router.get("/properties/{property_id}/whatsapp", summary="Read WhatsApp + UPI settings")
@@ -871,6 +877,8 @@ async def get_whatsapp_settings(
         await db.execute(
             text(
                 "SELECT whatsapp_phone_number_id, whatsapp_number, upi_vpa, "
+                "       wa_rent_reminder_template_name, wa_rent_reminder_template_language, "
+                "       wa_rent_overdue_template_name,  wa_rent_overdue_template_language, "
                 "       (whatsapp_access_token IS NOT NULL OR "
                 "        whatsapp_access_token_secret_arn IS NOT NULL) AS has_token "
                 "FROM properties WHERE id = :id AND org_id = :org_id"
@@ -885,6 +893,10 @@ async def get_whatsapp_settings(
         "whatsapp_number": row["whatsapp_number"],
         "upi_vpa": row["upi_vpa"],
         "has_access_token": bool(row["has_token"]),
+        "wa_rent_reminder_template_name":     row["wa_rent_reminder_template_name"],
+        "wa_rent_reminder_template_language": row["wa_rent_reminder_template_language"],
+        "wa_rent_overdue_template_name":      row["wa_rent_overdue_template_name"],
+        "wa_rent_overdue_template_language":  row["wa_rent_overdue_template_language"],
     }
 
 
