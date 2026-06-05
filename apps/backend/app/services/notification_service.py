@@ -142,12 +142,25 @@ async def send_whatsapp_template(
                 json=payload,
                 timeout=10.0,
             )
-            response.raise_for_status()
-            data = response.json()
-            message_id = data.get("messages", [{}])[0].get("id", "")
-            return {"success": True, "message_id": message_id}
+        if response.status_code >= 400:
+            # Surface Meta's actual error so callers (esp. the "Send test"
+            # button) see why it failed — code 132 = template not approved,
+            # 131030 = recipient not in test list, etc.
+            try:
+                err = response.json().get("error", {})
+                reason = (
+                    f"Meta {response.status_code} "
+                    f"(code={err.get('code')}, subcode={err.get('error_subcode')}): "
+                    f"{err.get('message')} — {err.get('error_user_msg') or err.get('error_user_title') or ''}"
+                ).strip(" —")
+            except Exception:
+                reason = f"Meta {response.status_code}: {response.text[:300]}"
+            return {"success": False, "error": reason}
+        data = response.json()
+        message_id = data.get("messages", [{}])[0].get("id", "")
+        return {"success": True, "message_id": message_id}
     except httpx.HTTPError as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"network error: {e}"}
 
 
 async def log_notification(
