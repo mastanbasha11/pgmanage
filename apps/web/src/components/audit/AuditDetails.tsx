@@ -58,12 +58,19 @@ function istFull(iso: string): string {
 
 /** For payment_recorded / advance_recorded, which metadata keys to show
  *  in the expanded audit detail and how to label / format them. Keep the
- *  order intentional — most important first. */
-const PAYMENT_ATTRS: Array<{ key: string; label: string; paise?: boolean }> = [
-  { key: 'amount_paise', label: 'Amount', paise: true },
-  { key: 'payment_type', label: 'Type' },
-  { key: 'payment_mode', label: 'Mode' },
-  { key: 'paid_to', label: 'Paid to' },
+ *  order intentional — most important first. `always: true` means the row
+ *  is rendered with "—" when the value is missing (so the slot is visible
+ *  and you notice when something wasn't recorded). */
+const PAYMENT_ATTRS: Array<{
+  key: string;
+  label: string;
+  paise?: boolean;
+  always?: boolean;
+}> = [
+  { key: 'amount_paise', label: 'Amount', paise: true, always: true },
+  { key: 'payment_type', label: 'Type', always: true },
+  { key: 'payment_mode', label: 'Mode', always: true },
+  { key: 'paid_to', label: 'Paid to / by', always: true },
   { key: 'reference_number', label: 'Reference #' },
   { key: 'upi_id', label: 'UPI id' },
   { key: 'discount_paise', label: 'Discount', paise: true },
@@ -90,12 +97,19 @@ export default function AuditDetails({
   const hasTenant =
     showTenant && !!entry.tenant_id && Boolean(entry.tenant_name || entry.tenant_phone);
 
-  // Payment-attribute rows we'll actually render — skip blanks.
+  // Payment-attribute rows we'll render. `always: true` fields show "—" when
+  // the metadata is missing so the user can see at a glance what wasn't
+  // captured at recording time (e.g. forgot to fill "Paid to / by").
   const paymentRows = isPayment
-    ? PAYMENT_ATTRS.flatMap(({ key, label, paise }) => {
+    ? PAYMENT_ATTRS.flatMap(({ key, label, paise, always }) => {
         const v = entry.metadata?.[key];
-        if (v === null || v === undefined || v === '') return [];
-        const display = paise && typeof v === 'number' ? formatPaise(v) : String(v);
+        const isBlank = v === null || v === undefined || v === '';
+        if (isBlank && !always) return [];
+        const display = isBlank
+          ? '—'
+          : paise && typeof v === 'number'
+            ? formatPaise(v)
+            : String(v);
         return [{ label, value: display }];
       })
     : [];
