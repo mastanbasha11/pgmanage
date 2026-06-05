@@ -43,11 +43,14 @@ import {
   useTenant,
   useTenantLedger,
   useCheckout,
+  useRecheckin,
   useUpdateTenant,
   useRecordRefund,
   useUploadIdProof,
   useDeleteIdProof,
+  type RecheckinPayload,
 } from '@/hooks/useTenants';
+import { useVacantBeds } from '@/hooks/useTenants';
 import { api } from '@/lib/api';
 import { usePayments } from '@/hooks/usePayments';
 import {
@@ -68,6 +71,7 @@ export default function TenantDetailPage() {
   const [showEdit, setShowEdit] = useState(false);
   const [showRefund, setShowRefund] = useState(false);
   const [showDepositEdit, setShowDepositEdit] = useState(false);
+  const [showRecheckin, setShowRecheckin] = useState(false);
 
   const { data: tenant, isLoading } = useTenant(id!);
   const { data: ledger } = useTenantLedger(id!);
@@ -111,6 +115,12 @@ export default function TenantDetailPage() {
             <Button variant="outline" onClick={() => setShowCheckout(true)} className="gap-2">
               <LogOut className="h-4 w-4" />
               Check Out
+            </Button>
+          )}
+          {!isActive && (
+            <Button variant="outline" onClick={() => setShowRecheckin(true)} className="gap-2">
+              <BedDouble className="h-4 w-4" />
+              Re-check in
             </Button>
           )}
           {!isActive && (
@@ -458,6 +468,14 @@ export default function TenantDetailPage() {
         tenantId={tenant.id}
         tenantName={tenant.name}
         current={tenant.active_rent_plan ?? null}
+      />
+      <RecheckinDialog
+        open={showRecheckin}
+        onClose={() => setShowRecheckin(false)}
+        tenantId={tenant.id}
+        tenantName={tenant.name}
+        previousPropertyId={tenant.property_id}
+        previousRent={tenant.active_rent_plan ?? null}
       />
     </div>
   );
@@ -1230,6 +1248,210 @@ function EditTenantDialog({
           </Button>
           <Button onClick={submit} disabled={update.isPending}>
             {update.isPending ? 'Saving...' : 'Save changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RecheckinDialog({
+  open,
+  onClose,
+  tenantId,
+  tenantName,
+  previousPropertyId,
+  previousRent,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantId: string;
+  tenantName: string;
+  previousPropertyId?: string;
+  previousRent: {
+    monthly_rent_paise?: number;
+    security_deposit_paise?: number;
+    advance_paid_paise?: number;
+    non_refundable_advance_paise?: number;
+    food_included?: boolean;
+    food_charges_paise?: number;
+    billing_day?: number;
+  } | null;
+}) {
+  // Suggest the same property the tenant left from. Owner can still pick a
+  // different bed in the same property; we don't show a property-switcher
+  // here yet — cross-property rejoin is rare and can be done later if needed.
+  // Only fetch vacant beds when the dialog is open — we leave the hook itself
+  // gated on propertyId; passing undefined when closed kills the request.
+  const { data: vacantData } = useVacantBeds(open ? previousPropertyId : undefined);
+  const vacantBeds = vacantData?.items?.filter((b) => b.status !== 'UPCOMING') ?? [];
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const [bedId, setBedId] = useState('');
+  const [moveInDate, setMoveInDate] = useState(todayISO);
+  const [expectedMoveOut, setExpectedMoveOut] = useState('');
+  // Carry over the tenant's previous rent terms by default — owner can override.
+  const [monthlyRent, setMonthlyRent] = useState(
+    previousRent?.monthly_rent_paise ? String(previousRent.monthly_rent_paise / 100) : '',
+  );
+  const [deposit, setDeposit] = useState(
+    previousRent?.security_deposit_paise ? String(previousRent.security_deposit_paise / 100) : '',
+  );
+  const [advance, setAdvance] = useState(
+    previousRent?.advance_paid_paise ? String(previousRent.advance_paid_paise / 100) : '0',
+  );
+  const [billingDay, setBillingDay] = useState(String(previousRent?.billing_day ?? 1));
+
+  // Reset form when re-opened.
+  useEffect(() => {
+    if (open) {
+      setBedId('');
+      setMoveInDate(todayISO);
+      setExpectedMoveOut('');
+      setMonthlyRent(
+        previousRent?.monthly_rent_paise ? String(previousRent.monthly_rent_paise / 100) : '',
+      );
+      setDeposit(
+        previousRent?.security_deposit_paise ? String(previousRent.security_deposit_paise / 100) : '',
+      );
+      setAdvance(
+        previousRent?.advance_paid_paise ? String(previousRent.advance_paid_paise / 100) : '0',
+      );
+      setBillingDay(String(previousRent?.billing_day ?? 1));
+    }
+  }, [open, previousRent, todayISO]);
+
+  const { mutateAsync, isPending } = useRecheckin(tenantId);
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  async function onSubmit() {
+    if (!bedId) {
+      toast({ title: 'Pick a bed', variant: 'destructive' });
+      return;
+    }
+    const rentNum = Number(monthlyRent);
+    if (!Number.isFinite(rentNum) || rentNum <= 0) {
+      toast({ title: 'Enter monthly rent', variant: 'destructive' });
+      return;
+    }
+    const payload: RecheckinPayload = {
+      bed_id: bedId,
+      move_in_date: moveInDate,
+      expected_move_out_date: expectedMoveOut || undefined,
+      rent_plan: {
+        monthly_rent_paise: Math.round(rentNum * 100),
+        security_deposit_paise: Math.round((Number(deposit) || 0) * 100),
+        advance_paid_paise: Math.round((Number(advance) || 0) * 100),
+        non_refundable_advance_paise: previousRent?.non_refundable_advance_paise ?? 0,
+        food_included: previousRent?.food_included ?? false,
+        food_charges_paise: previousRent?.food_charges_paise ?? 0,
+        billing_day: Number(billingDay) || 1,
+        effective_from: moveInDate,
+      },
+    };
+    try {
+      await mutateAsync(payload);
+      toast({ title: 'Re-checked in', description: `${tenantName} is back as ACTIVE.` });
+      onClose();
+      // The tenant page reloads fine on its own thanks to query invalidation;
+      // a refresh just shortens the perceived delay.
+      navigate(0);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to re-check in';
+      toast({ title: 'Could not re-check in', description: msg, variant: 'destructive' });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Re-check in {tenantName}</DialogTitle>
+          <DialogDescription>
+            Keeps the tenant's history (past payments, ledger, audit). Assigns a
+            new bed and starts a fresh rent plan from the move-in date below.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div>
+            <Label>Bed</Label>
+            <Select value={bedId} onValueChange={setBedId}>
+              <SelectTrigger>
+                <SelectValue placeholder={vacantBeds.length ? 'Choose a vacant bed' : 'No vacant beds'} />
+              </SelectTrigger>
+              <SelectContent>
+                {vacantBeds.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.floor_name} · Room {b.room_number} · Bed {b.bed_label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Move-in date</Label>
+              <Input type="date" value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />
+            </div>
+            <div>
+              <Label>Expected move-out (optional)</Label>
+              <Input
+                type="date"
+                value={expectedMoveOut}
+                onChange={(e) => setExpectedMoveOut(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Monthly rent (₹)</Label>
+              <Input
+                inputMode="numeric"
+                value={monthlyRent}
+                onChange={(e) => setMonthlyRent(e.target.value)}
+                placeholder="9000"
+              />
+            </div>
+            <div>
+              <Label>Billing day</Label>
+              <Input
+                inputMode="numeric"
+                value={billingDay}
+                onChange={(e) => setBillingDay(e.target.value)}
+                placeholder="1"
+              />
+            </div>
+            <div>
+              <Label>Security deposit (₹)</Label>
+              <Input
+                inputMode="numeric"
+                value={deposit}
+                onChange={(e) => setDeposit(e.target.value)}
+                placeholder="4500"
+              />
+            </div>
+            <div>
+              <Label>Refundable advance (₹)</Label>
+              <Input
+                inputMode="numeric"
+                value={advance}
+                onChange={(e) => setAdvance(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={onSubmit} disabled={isPending}>
+            {isPending ? 'Re-checking in…' : 'Confirm re-check in'}
           </Button>
         </DialogFooter>
       </DialogContent>

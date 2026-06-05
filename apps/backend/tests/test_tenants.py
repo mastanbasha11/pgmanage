@@ -345,6 +345,90 @@ async def test_checkout_nonexistent_tenant_404(
     assert response.status_code == 404
 
 
+# ── Re-check-in ────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_recheckin_after_checkout_restores_active(
+    client: AsyncClient, test_owner: dict, test_tenant: dict, db: AsyncSession
+):
+    """A CHECKED_OUT tenant can be brought back: same row, new bed + plan."""
+    tid = test_tenant["tenant_id"]
+    # Check out first.
+    co = await client.post(
+        f"/api/v1/tenants/{tid}/checkout",
+        headers=auth_headers(test_owner["token"]),
+        json={"actual_move_out_date": "2024-12-31"},
+    )
+    assert co.status_code == 200
+
+    # The same bed is now VACANT — we can re-check in onto it.
+    bed_id = test_tenant["bed_ids"][0]
+    response = await client.post(
+        f"/api/v1/tenants/{tid}/recheckin",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "bed_id": str(bed_id),
+            "move_in_date": "2025-01-15",
+            "rent_plan": {
+                "monthly_rent_paise": 1200000,
+                "security_deposit_paise": 500000,
+                "advance_paid_paise": 0,
+                "billing_day": 1,
+                "effective_from": "2025-01-15",
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["tenant_id"] == str(tid)
+
+    # Confirm DB state: tenant ACTIVE with new bed assigned + fresh active rent_plan.
+    schema = test_tenant["schema_name"]
+    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+    row = (
+        await db.execute(
+            text(
+                "SELECT t.status, t.bed_id, t.actual_move_out_date, b.status AS bed_status "
+                "FROM tenants t JOIN beds b ON b.id = t.bed_id WHERE t.id = :id"
+            ),
+            {"id": str(tid)},
+        )
+    ).mappings().fetchone()
+    assert row["status"] == "ACTIVE"
+    assert row["actual_move_out_date"] is None
+    assert row["bed_status"] == "OCCUPIED"
+    plans = (
+        await db.execute(
+            text("SELECT count(*) FROM rent_plans WHERE tenant_id = :id AND is_active = true"),
+            {"id": str(tid)},
+        )
+    ).scalar_one()
+    assert plans == 1
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_recheckin_rejects_active_tenant(
+    client: AsyncClient, test_owner: dict, test_tenant: dict
+):
+    """Only CHECKED_OUT tenants can be re-checked-in; ACTIVE → 409."""
+    response = await client.post(
+        f"/api/v1/tenants/{test_tenant['tenant_id']}/recheckin",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "bed_id": str(test_tenant["bed_ids"][0]),
+            "move_in_date": "2025-01-15",
+            "rent_plan": {
+                "monthly_rent_paise": 1000000,
+                "security_deposit_paise": 0,
+                "advance_paid_paise": 0,
+                "billing_day": 1,
+                "effective_from": "2025-01-15",
+            },
+        },
+    )
+    assert response.status_code == 409
+
+
 # ── Tenant ledger ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

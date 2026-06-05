@@ -101,6 +101,19 @@ class CheckoutRequest(BaseModel):
     notes: str | None = None
 
 
+class RecheckinRequest(BaseModel):
+    """
+    Re-check-in a previously checked-out tenant. Keeps the existing tenant row
+    (so prior payments, ledger, audit trail stay linked) but assigns a fresh
+    bed + rent plan and flips status back to ACTIVE.
+    """
+
+    bed_id: UUID
+    move_in_date: date
+    expected_move_out_date: date | None = None
+    rent_plan: RentPlanCreate
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/tenants", status_code=status.HTTP_201_CREATED, summary="Check in tenant")
@@ -668,6 +681,165 @@ async def checkout_tenant(
         "refund_amount_paise": body.refund_amount_paise,
         "actual_move_out_date": str(body.actual_move_out_date),
     }
+
+
+@router.post("/tenants/{tenant_id}/recheckin", summary="Re-check-in a previously checked-out tenant")
+async def recheckin_tenant(
+    tenant_id: UUID,
+    body: RecheckinRequest,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bring a tenant back: same tenant row (history preserved), new bed + rent
+    plan, status flips ACTIVE. Bed may belong to a different property than
+    before — we update tenant.property_id accordingly.
+    """
+    tenant_row = (
+        await db.execute(
+            text(
+                "SELECT id, status, property_id, name FROM tenants "
+                "WHERE id = :id AND org_id = :org_id AND is_deleted = false"
+            ),
+            {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+        )
+    ).mappings().fetchone()
+    if not tenant_row:
+        raise NotFoundError("Tenant", tenant_id)
+    if tenant_row["status"] != "CHECKED_OUT":
+        raise ConflictError(
+            f"Tenant is {tenant_row['status']}; only CHECKED_OUT tenants can be re-checked-in"
+        )
+
+    bed_row = (
+        await db.execute(
+            text("SELECT id, property_id, status FROM beds WHERE id = :id"),
+            {"id": str(body.bed_id)},
+        )
+    ).mappings().fetchone()
+    if not bed_row:
+        raise NotFoundError("Bed", body.bed_id)
+    if bed_row["status"] != "VACANT":
+        raise ConflictError(f"Bed is {bed_row['status']}, not available for check-in")
+
+    new_property_id = bed_row["property_id"]
+
+    # Flip tenant back to ACTIVE on the new bed (and possibly new property).
+    await db.execute(
+        text(
+            """
+            UPDATE tenants
+            SET status = 'ACTIVE'::tenant_status_enum,
+                bed_id = :bed_id,
+                property_id = :pid,
+                move_in_date = :move_in,
+                expected_move_out_date = :move_out,
+                actual_move_out_date = NULL,
+                updated_at = NOW()
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": str(tenant_id),
+            "bed_id": str(body.bed_id),
+            "pid": str(new_property_id),
+            "move_in": body.move_in_date,
+            "move_out": body.expected_move_out_date,
+        },
+    )
+
+    # Mark the new bed OCCUPIED.
+    await db.execute(
+        text("UPDATE beds SET status = 'OCCUPIED'::bed_status_enum, updated_at = NOW() WHERE id = :id"),
+        {"id": str(body.bed_id)},
+    )
+
+    # Belt-and-braces: deactivate any stray active rent_plan rows before
+    # writing the fresh one. The checkout flow already deactivates, so this
+    # is mostly defensive against partial states.
+    await db.execute(
+        text(
+            "UPDATE rent_plans SET is_active = false, effective_to = :date "
+            "WHERE tenant_id = :tid AND is_active = true"
+        ),
+        {"tid": str(tenant_id), "date": body.move_in_date},
+    )
+
+    rp = body.rent_plan
+    other_charges_json = json.dumps([c.model_dump() for c in rp.other_charges])
+    await db.execute(
+        text("""
+            INSERT INTO rent_plans (
+                tenant_id, property_id, monthly_rent_paise, security_deposit_paise,
+                advance_paid_paise, non_refundable_advance_paise,
+                discount_amount_paise, discount_reason,
+                food_included, food_charges_paise, other_charges_json,
+                billing_day, effective_from, is_active, created_by
+            )
+            VALUES (
+                :tenant_id, :pid, :monthly_rent, :deposit, :advance, :non_refund_advance,
+                :discount, :discount_reason, :food_included, :food_charges,
+                CAST(:other_charges AS jsonb), :billing_day, :effective_from, true, :creator
+            )
+        """),
+        {
+            "tenant_id": str(tenant_id),
+            "pid": str(new_property_id),
+            "monthly_rent": rp.monthly_rent_paise,
+            "deposit": rp.security_deposit_paise,
+            "advance": rp.advance_paid_paise,
+            "non_refund_advance": rp.non_refundable_advance_paise,
+            "discount": rp.discount_amount_paise,
+            "discount_reason": rp.discount_reason,
+            "food_included": rp.food_included,
+            "food_charges": rp.food_charges_paise,
+            "other_charges": other_charges_json,
+            "billing_day": rp.billing_day,
+            "effective_from": rp.effective_from,
+            "creator": str(ctx.user_id),
+        },
+    )
+
+    await db.execute(
+        text("""
+            INSERT INTO audit_log (org_id, property_id, actor_id, actor_role, action, table_name, record_id, new_values)
+            VALUES (:org_id, :pid, :actor, :role, 'UPDATE'::audit_action_enum, 'tenants', :record_id, CAST(:new_vals AS jsonb))
+        """),
+        {
+            "org_id": str(ctx.org_id), "pid": str(new_property_id),
+            "actor": str(ctx.user_id), "role": ctx.role,
+            "record_id": str(tenant_id),
+            "new_vals": json.dumps({
+                "status": "ACTIVE",
+                "bed_id": str(body.bed_id),
+                "move_in_date": str(body.move_in_date),
+            }),
+        },
+    )
+
+    await log_event(
+        db,
+        Event.TENANT_CHECKIN,
+        description=f"{ctx.name} re-checked in {tenant_row['name']}",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        entity_name=tenant_row["name"],
+        property_id=new_property_id,
+        tenant_id=tenant_id,
+        metadata={
+            "bed_id": str(body.bed_id),
+            "move_in_date": str(body.move_in_date),
+            "monthly_rent_paise": rp.monthly_rent_paise,
+            "advance_paid_paise": rp.advance_paid_paise,
+            "rejoin": True,
+        },
+    )
+
+    await db.commit()
+    return {"tenant_id": str(tenant_id), "message": "Tenant re-checked in"}
 
 
 @router.post("/tenants/{tenant_id}/refund", summary="Record a refund post-checkout")

@@ -185,11 +185,20 @@ async def record_payment(
         property_id=property_id,
         tenant_id=body.tenant_id,
         metadata={
+            # Full payment attributes so the audit feed reproduces what was
+            # entered (paid_to / mode / ref number) without needing to open
+            # the payment record. None-valued keys keep the schema stable.
             "amount_paise": body.amount_paise,
+            "discount_paise": max(int(body.discount_paise or 0), 0) or None,
             "payment_type": body.payment_type,
             "payment_mode": body.payment_mode,
+            "paid_to": (body.paid_to or "").strip() or None,
+            "reference_number": (body.reference_number or "").strip() or None,
+            "upi_id": (body.upi_id or "").strip() or None,
+            "for_days": body.for_days,
             "for_month": body.for_month,
             "for_year": body.for_year,
+            "notes": (body.notes or "").strip() or None,
         },
     )
 
@@ -230,7 +239,8 @@ async def list_payments(
     where = " AND ".join(conditions)
     result = await db.execute(
         text(f"""
-            SELECT p.id, p.amount_paise, p.payment_type, p.payment_mode,
+            SELECT p.id, p.amount_paise, p.discount_paise, p.payment_type, p.payment_mode,
+                   p.reference_number, p.upi_id, p.paid_to, p.for_days,
                    p.for_month, p.for_year, p.collected_at, p.notes,
                    t.name as tenant_name, t.phone as tenant_phone,
                    u.name as collected_by_name

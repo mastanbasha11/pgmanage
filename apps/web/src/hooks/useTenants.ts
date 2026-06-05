@@ -228,6 +228,27 @@ export function useCheckout(tenantId: string) {
   });
 }
 
+export interface RecheckinPayload {
+  bed_id: string;
+  move_in_date: string;
+  expected_move_out_date?: string;
+  rent_plan: CheckinPayload['rent_plan'];
+}
+
+export function useRecheckin(tenantId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: RecheckinPayload) =>
+      api.post(`/tenants/${tenantId}/recheckin`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenants'] });
+      qc.invalidateQueries({ queryKey: ['tenant', tenantId] });
+      qc.invalidateQueries({ queryKey: ['properties'] });
+      qc.invalidateQueries({ queryKey: ['rent-ledger'] });
+    },
+  });
+}
+
 export function useUploadIdProof() {
   const qc = useQueryClient();
   return useMutation({
