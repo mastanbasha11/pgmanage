@@ -165,13 +165,22 @@ async def send_whatsapp_template(
         if response.status_code >= 400:
             # Surface Meta's actual error so callers (esp. the "Send test"
             # button) see why it failed — code 132 = template not approved,
+            # 132001 = template/lang missing (often a WABA mismatch — Meta
+            # puts the smoking-gun detail in error_data.details),
             # 131030 = recipient not in test list, etc.
             try:
                 err = response.json().get("error", {})
+                detail = (err.get("error_data") or {}).get("details")
+                tail = (
+                    detail
+                    or err.get("error_user_msg")
+                    or err.get("error_user_title")
+                    or ""
+                )
                 reason = (
                     f"Meta {response.status_code} "
                     f"(code={err.get('code')}, subcode={err.get('error_subcode')}): "
-                    f"{err.get('message')} — {err.get('error_user_msg') or err.get('error_user_title') or ''}"
+                    f"{err.get('message')} — {tail}"
                 ).strip(" —")
             except Exception:
                 reason = f"Meta {response.status_code}: {response.text[:300]}"
