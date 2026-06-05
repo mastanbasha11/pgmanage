@@ -12,32 +12,21 @@ from app.core.config import settings
 
 # ── WhatsApp message templates ────────────────────────────────────────────────
 
-TEMPLATES = {
-    "welcome_checkin": {
-        "name": "welcome_checkin",
-        "language": "en",
-    },
-    "rent_reminder": {
-        "name": "rent_reminder",
-        "language": "en",
-    },
-    "rent_overdue": {
-        "name": "rent_overdue",
-        "language": "en",
-    },
-    "move_out_reminder": {
-        "name": "move_out_reminder",
-        "language": "en",
-    },
-    "complaint_update": {
-        "name": "complaint_update",
-        "language": "en",
-    },
-    "announcement": {
-        "name": "announcement",
-        "language": "en",
-    },
+# Meta language codes per template. en_US is the default Meta picks in its
+# UI, so it's the most common approval; override here if any one template
+# was approved under a different code (e.g. "en" plain English, "hi" Hindi).
+TEMPLATES: dict[str, dict[str, str]] = {
+    "welcome_checkin":    {"name": "welcome_checkin",    "language": "en_US"},
+    "rent_reminder":      {"name": "rent_reminder",      "language": "en_US"},
+    "rent_overdue":       {"name": "rent_overdue",       "language": "en_US"},
+    "move_out_reminder":  {"name": "move_out_reminder",  "language": "en_US"},
+    "complaint_update":   {"name": "complaint_update",   "language": "en_US"},
+    "announcement":       {"name": "announcement",       "language": "en_US"},
 }
+
+
+def _template_language(template_name: str) -> str:
+    return TEMPLATES.get(template_name, {}).get("language", "en_US")
 
 
 async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | None:
@@ -114,7 +103,7 @@ async def send_whatsapp_template(
         "type": "template",
         "template": {
             "name": template_name,
-            "language": {"code": "en"},
+            "language": {"code": _template_language(template_name)},
             "components": [
                 {
                     "type": "body",
