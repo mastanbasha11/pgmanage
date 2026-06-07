@@ -12,8 +12,13 @@
       "resizeMode": "contain",
       "backgroundColor": "#0F172A"
     },
-    "updates": { "fallbackToCacheTimeout": 0 },
-    "assetBundlePatterns": ["**/*"],
+    "updates": {
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/a7540728-ea84-46a5-9f60-fa0279206ed3"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.pgmanage.app",
@@ -48,9 +53,19 @@
         }
       ]
     ],
-    "experiments": { "typedRoutes": false },
+    "experiments": {
+      "typedRoutes": false
+    },
     "extra": {
-      "eas": { "projectId": "" }
+      "eas": {
+        "projectId": "a7540728-ea84-46a5-9f60-fa0279206ed3"
+      },
+      "router": {
+        "origin": false
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
     }
   }
 }
