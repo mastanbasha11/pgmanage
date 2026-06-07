@@ -1,7 +1,8 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.pgmanage.com/api/v1';
+// Override per-build with EXPO_PUBLIC_API_URL (e.g. http://<your-LAN-ip>:8000/api/v1 for local).
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://pgmanage.in/api/v1';
 
 export const api = axios.create({
   baseURL: BASE_URL,

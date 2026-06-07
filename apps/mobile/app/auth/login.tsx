@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { setAuth } = useAuthStore();
+  const { setAuth, setSelectedProperty } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -35,6 +35,15 @@ export default function LoginScreen() {
       await AsyncStorage.setItem('access_token', res.data.access_token);
       await AsyncStorage.setItem('refresh_token', res.data.refresh_token);
       setAuth(res.data.user, res.data.access_token);
+      // Auto-select the first property so the data screens have context to load
+      // (they're gated on selectedPropertyId). Matches the web Layout behaviour.
+      try {
+        const props = await api.get<{ items: { id: string }[] }>('/properties');
+        const first = props.data?.items?.[0]?.id;
+        if (first) setSelectedProperty(first);
+      } catch {
+        /* non-fatal — a property switcher can set it later */
+      }
       router.replace('/tabs/rooms');
     } catch (err) {
       setError(getApiError(err));

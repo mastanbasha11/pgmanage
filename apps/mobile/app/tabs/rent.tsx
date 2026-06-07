@@ -13,7 +13,9 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '../../lib/api';
 import { useAuthStore } from '../../lib/store';
-import { v4 as uuidv4 } from 'uuid';
+// Idempotency key generated inline below — avoids the 'uuid' dep, which needs a
+// crypto polyfill (react-native-get-random-values) to run in React Native.
+const newIdempotencyKey = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 interface LedgerEntry {
   id: string;
@@ -62,7 +64,7 @@ export default function RentScreen() {
   const { mutateAsync: record, isPending } = useMutation({
     mutationFn: (payload: object) =>
       api.post('/payments', payload, {
-        headers: { 'X-Idempotency-Key': uuidv4() },
+        headers: { 'X-Idempotency-Key': newIdempotencyKey() },
       }).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['rent-ledger-mobile'] });

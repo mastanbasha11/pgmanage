@@ -1,11 +1,17 @@
 import { Tabs } from 'expo-router';
-import { BedDouble, IndianRupee, Receipt, Users, MoreHorizontal } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+
+// @expo/vector-icons ships with Expo (no extra native dep / react-native-svg needed).
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 export default function TabsLayout() {
+  const icon = (name: IoniconName) =>
+    ({ color }: { color: string }) => <Ionicons name={name} size={22} color={color} />;
+
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#2563eb',
+        tabBarActiveTintColor: '#0D9488', // brand teal
         tabBarInactiveTintColor: '#94a3b8',
         tabBarStyle: {
           borderTopWidth: 1,
@@ -18,41 +24,11 @@ export default function TabsLayout() {
         headerTitleStyle: { fontWeight: '700' },
       }}
     >
-      <Tabs.Screen
-        name="rooms"
-        options={{
-          title: 'Rooms',
-          tabBarIcon: ({ color }) => <BedDouble size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="tenants"
-        options={{
-          title: 'Tenants',
-          tabBarIcon: ({ color }) => <Users size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="rent"
-        options={{
-          title: 'Rent',
-          tabBarIcon: ({ color }) => <IndianRupee size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="expenses"
-        options={{
-          title: 'Expenses',
-          tabBarIcon: ({ color }) => <Receipt size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="more"
-        options={{
-          title: 'More',
-          tabBarIcon: ({ color }) => <MoreHorizontal size={22} color={color} />,
-        }}
-      />
+      <Tabs.Screen name="rooms" options={{ title: 'Rooms', tabBarIcon: icon('bed-outline') }} />
+      <Tabs.Screen name="tenants" options={{ title: 'Tenants', tabBarIcon: icon('people-outline') }} />
+      <Tabs.Screen name="rent" options={{ title: 'Rent', tabBarIcon: icon('cash-outline') }} />
+      <Tabs.Screen name="expenses" options={{ title: 'Expenses', tabBarIcon: icon('receipt-outline') }} />
+      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: icon('ellipsis-horizontal') }} />
     </Tabs>
   );
 }
