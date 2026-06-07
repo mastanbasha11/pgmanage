@@ -27,5 +27,11 @@
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
   },
-  "packageManager": "npm@10.7.0"
+  "packageManager": "npm@10.7.0",
+  "overrides": {
+    "react-native": "0.74.5",
+    "metro": "~0.80.8",
+    "metro-resolver": "~0.80.8",
+    "metro-config": "~0.80.8"
+  }
 }
