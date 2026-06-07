@@ -37,6 +37,7 @@ class Event:
     # ── Tenant lifecycle ─────────────────────────────────────────────────────
     TENANT_CHECKIN = "tenant_checkin"
     TENANT_CHECKOUT = "tenant_checkout"
+    TENANT_NOTICE_GIVEN = "tenant_notice_given"
     TENANT_PROFILE_UPDATED = "tenant_profile_updated"
     TENANT_ID_UPLOADED = "tenant_id_uploaded"
 
@@ -83,6 +84,7 @@ EVENT_CATEGORY: dict[str, str] = {
     Event.PASSWORD_RESET: Category.AUTH,
     Event.TENANT_CHECKIN: Category.TENANT,
     Event.TENANT_CHECKOUT: Category.TENANT,
+    Event.TENANT_NOTICE_GIVEN: Category.TENANT,
     Event.TENANT_PROFILE_UPDATED: Category.TENANT,
     Event.TENANT_ID_UPLOADED: Category.TENANT,
     Event.PAYMENT_RECORDED: Category.PAYMENT,

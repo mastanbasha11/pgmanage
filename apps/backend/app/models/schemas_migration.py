@@ -183,6 +183,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             hometown VARCHAR(200), permanent_address TEXT,
             move_in_date DATE NOT NULL,
             expected_move_out_date DATE, actual_move_out_date DATE,
+            notice_given_date DATE,
             status tenant_status_enum NOT NULL DEFAULT 'ACTIVE',
             notes TEXT,
             created_by UUID,

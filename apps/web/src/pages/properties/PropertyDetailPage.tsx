@@ -220,30 +220,22 @@ export default function PropertyDetailPage() {
             </div>
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Input
-                  placeholder="Search by room, floor, type, or tenant..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="max-w-sm"
-                />
-                <div className="text-xs text-muted-foreground flex items-center gap-3">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                    Available now ({vacant?.vacant_count ?? 0})
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-amber-500" />
-                    Upcoming ({vacant?.upcoming_count ?? 0})
-                  </span>
-                </div>
-              </div>
+              <Input
+                placeholder="Search by room, floor, type, or tenant..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="max-w-sm"
+              />
               {filteredVacant.length === 0 ? (
                 <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
                   No matches.
                 </div>
               ) : (
-                <VacancyFloors beds={filteredVacant} onHold={changeBedStatus} statusPending={statusPending} />
+                <VacancySections
+                  beds={filteredVacant}
+                  onHold={changeBedStatus}
+                  statusPending={statusPending}
+                />
               )}
             </>
           )}
@@ -381,6 +373,209 @@ function StatCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Top-level vacancies layout:
+ *   1. "Available now" — green cards, grouped by floor (helps owners think
+ *      spatially about which rooms to fill first).
+ *   2. "Upcoming vacancies" — amber cards, grouped by *time bucket* (when
+ *      the bed frees up, not where it is) since the planning question for
+ *      future vacancies is "when can I sell the spot" rather than "where".
+ *
+ * This split also matches different mental models — current vacancies are
+ * actionable today (check in someone), upcoming are pipeline / leads.
+ */
+function VacancySections({
+  beds,
+  onHold,
+  statusPending,
+}: {
+  beds: VacantBed[];
+  onHold: (
+    bedId: string,
+    status: 'VACANT' | 'RESERVED' | 'MAINTENANCE',
+    description: string,
+  ) => void;
+  statusPending: boolean;
+}) {
+  const available = beds.filter((b) => b.status !== 'UPCOMING');
+  const upcoming = beds.filter((b) => b.status === 'UPCOMING');
+
+  return (
+    <div className="space-y-8">
+      {available.length > 0 && (
+        <section>
+          <SectionHeader
+            dotClass="bg-emerald-500"
+            title="Available now"
+            count={available.length}
+            hint="Ready to check a tenant into today."
+          />
+          <VacancyFloors beds={available} onHold={onHold} statusPending={statusPending} />
+        </section>
+      )}
+
+      {upcoming.length > 0 && (
+        <section>
+          <SectionHeader
+            dotClass="bg-amber-500"
+            title="Upcoming vacancies"
+            count={upcoming.length}
+            hint="Tenants who've given notice. Use these to plan replacements early."
+          />
+          <UpcomingByBucket beds={upcoming} />
+        </section>
+      )}
+    </div>
+  );
+}
+
+function SectionHeader({
+  dotClass,
+  title,
+  count,
+  hint,
+}: {
+  dotClass: string;
+  title: string;
+  count: number;
+  hint: string;
+}) {
+  return (
+    <div className="mb-3 flex items-baseline justify-between gap-3">
+      <div className="flex items-center gap-2">
+        <span className={cn('h-2 w-2 rounded-full', dotClass)} />
+        <h2 className="text-sm font-semibold tracking-tight">
+          {title} <span className="text-muted-foreground font-normal">({count})</span>
+        </h2>
+      </div>
+      <p className="text-xs text-muted-foreground hidden sm:block">{hint}</p>
+    </div>
+  );
+}
+
+/** Buckets future-vacating beds by *relative* time so the visual order maps
+ *  to how urgently a replacement should be lined up. */
+const BUCKET_ORDER = [
+  'This week',
+  'Next week',
+  'Later this month',
+  'Next month',
+  'Later',
+] as const;
+type BucketName = (typeof BUCKET_ORDER)[number];
+
+function bucketOf(iso: string): BucketName {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const when = new Date(iso);
+  when.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((when.getTime() - today.getTime()) / 86400000);
+  // Sunday-start week: how many days until next Sunday from "today".
+  const daysToWeekEnd = 6 - today.getDay();
+  if (diffDays <= daysToWeekEnd) return 'This week';
+  if (diffDays <= daysToWeekEnd + 7) return 'Next week';
+  if (when.getMonth() === today.getMonth() && when.getFullYear() === today.getFullYear())
+    return 'Later this month';
+  const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  if (
+    when.getMonth() === nextMonth.getMonth() &&
+    when.getFullYear() === nextMonth.getFullYear()
+  )
+    return 'Next month';
+  return 'Later';
+}
+
+function relativeDays(iso: string): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const when = new Date(iso);
+  when.setHours(0, 0, 0, 0);
+  const d = Math.round((when.getTime() - today.getTime()) / 86400000);
+  if (d === 0) return 'today';
+  if (d === 1) return 'tomorrow';
+  if (d < 0) return `${-d}d overdue`;
+  return `in ${d} days`;
+}
+
+function UpcomingByBucket({ beds }: { beds: VacantBed[] }) {
+  const groups = new Map<BucketName, VacantBed[]>();
+  for (const b of beds) {
+    if (!b.available_from) continue;
+    const k = bucketOf(b.available_from);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(b);
+  }
+  return (
+    <div className="space-y-5">
+      {BUCKET_ORDER.filter((k) => groups.has(k)).map((k) => (
+        <div key={k}>
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {k} <span className="lowercase">({groups.get(k)!.length})</span>
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {groups.get(k)!.map((b) => (
+              <UpcomingCard key={b.id} bed={b} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function UpcomingCard({ bed }: { bed: VacantBed }) {
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 hover:bg-amber-50 transition-colors">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-1.5">
+            <p className="text-base font-semibold tabular-nums">
+              {bed.room_number}
+              <span className="text-muted-foreground">·</span>
+              {bed.bed_label}
+            </p>
+            {bed.room_type && (
+              <Badge variant="outline" className="text-[10px]">
+                {shortRoomType(bed.room_type)}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {formatPaise(bed.monthly_base_rent_paise)}/mo · {bed.floor_name}
+          </p>
+        </div>
+        {bed.available_from && (
+          <div className="text-right shrink-0">
+            <div className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900 tabular-nums">
+              {formatDate(bed.available_from)}
+            </div>
+            <div className="mt-0.5 text-[10px] text-amber-800/80">
+              {relativeDays(bed.available_from)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {bed.current_tenant_name && (
+        <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+          <User className="h-3 w-3" />
+          {bed.current_tenant_id ? (
+            <Link
+              to={`/tenants/${bed.current_tenant_id}`}
+              className="hover:underline text-foreground"
+            >
+              {bed.current_tenant_name}
+            </Link>
+          ) : (
+            bed.current_tenant_name
+          )}{' '}
+          is vacating
+        </p>
+      )}
+    </div>
   );
 }
 

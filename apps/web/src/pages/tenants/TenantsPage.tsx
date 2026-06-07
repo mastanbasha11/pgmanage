@@ -200,9 +200,20 @@ export default function TenantsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Badge variant={t.is_active ? 'default' : 'secondary'}>
-                        {t.is_active ? 'Active' : t.status ?? 'Inactive'}
-                      </Badge>
+                      <div className="flex flex-wrap items-center justify-end gap-1">
+                        <Badge variant={t.is_active ? 'default' : 'secondary'}>
+                          {t.is_active ? 'Active' : t.status ?? 'Inactive'}
+                        </Badge>
+                        {t.is_active && t.notice_given_date && t.expected_move_out_date && (
+                          <Badge
+                            variant="outline"
+                            className="border-amber-300 bg-amber-50 text-amber-800 text-[10px]"
+                            title={`Notice given ${formatDate(t.notice_given_date)}`}
+                          >
+                            Notice · {formatDate(t.expected_move_out_date)}
+                          </Badge>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link to={`/tenants/${t.id}`}>

@@ -21,6 +21,8 @@ export interface Tenant {
   status: 'ACTIVE' | 'CHECKED_OUT' | 'RESERVED';
   move_in_date: string;
   expected_move_out_date?: string;
+  /** Date the tenant gave notice. NULL when no notice has been recorded. */
+  notice_given_date?: string;
   monthly_rent_paise: number;
   outstanding_paise?: number;
   rent_status?: string;
@@ -233,6 +235,26 @@ export interface RecheckinPayload {
   move_in_date: string;
   expected_move_out_date?: string;
   rent_plan: CheckinPayload['rent_plan'];
+}
+
+/** Notice to vacate. Set expected_move_out_date=null to clear a prior notice. */
+export interface NoticePayload {
+  expected_move_out_date: string | null;
+  notice_given_date?: string;
+  notes?: string;
+}
+
+export function useGiveNotice(tenantId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: NoticePayload) =>
+      api.post(`/tenants/${tenantId}/notice`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenants'] });
+      qc.invalidateQueries({ queryKey: ['tenants', tenantId] });
+      qc.invalidateQueries({ queryKey: ['properties'] });
+    },
+  });
 }
 
 export function useRecheckin(tenantId: string) {

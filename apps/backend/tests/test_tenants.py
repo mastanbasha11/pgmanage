@@ -345,6 +345,88 @@ async def test_checkout_nonexistent_tenant_404(
     assert response.status_code == 404
 
 
+# ── Notice to vacate ───────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_give_notice_sets_both_dates(
+    client: AsyncClient, test_owner: dict, test_tenant: dict, db: AsyncSession
+):
+    """POST /tenants/{id}/notice stores notice_given_date + expected_move_out_date."""
+    tid = test_tenant["tenant_id"]
+    response = await client.post(
+        f"/api/v1/tenants/{tid}/notice",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "expected_move_out_date": "2026-07-31",
+            "notice_given_date": "2026-06-30",
+            "notes": "Got a job in Bangalore",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["notice_given_date"] == "2026-06-30"
+    assert body["expected_move_out_date"] == "2026-07-31"
+
+    schema = test_tenant["schema_name"]
+    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+    row = (
+        await db.execute(
+            text(
+                "SELECT notice_given_date, expected_move_out_date FROM tenants WHERE id = :id"
+            ),
+            {"id": str(tid)},
+        )
+    ).mappings().fetchone()
+    assert str(row["notice_given_date"]) == "2026-06-30"
+    assert str(row["expected_move_out_date"]) == "2026-07-31"
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_give_notice_defaults_to_today_when_unspecified(
+    client: AsyncClient, test_owner: dict, test_tenant: dict
+):
+    """Omit notice_given_date → server stamps today; clearing is null=null."""
+    tid = test_tenant["tenant_id"]
+    response = await client.post(
+        f"/api/v1/tenants/{tid}/notice",
+        headers=auth_headers(test_owner["token"]),
+        json={"expected_move_out_date": "2026-08-15"},
+    )
+    assert response.status_code == 200
+    assert response.json()["notice_given_date"] is not None  # server-filled
+
+    # Clear by passing null vacate date.
+    clear = await client.post(
+        f"/api/v1/tenants/{tid}/notice",
+        headers=auth_headers(test_owner["token"]),
+        json={"expected_move_out_date": None},
+    )
+    assert clear.status_code == 200
+    cleared = clear.json()
+    assert cleared["notice_given_date"] is None
+    assert cleared["expected_move_out_date"] is None
+
+
+@pytest.mark.asyncio
+async def test_give_notice_rejects_non_active_tenant(
+    client: AsyncClient, test_owner: dict, test_tenant: dict
+):
+    # Check out first.
+    await client.post(
+        f"/api/v1/tenants/{test_tenant['tenant_id']}/checkout",
+        headers=auth_headers(test_owner["token"]),
+        json={"actual_move_out_date": "2024-12-31"},
+    )
+    # Notice on CHECKED_OUT → 409.
+    response = await client.post(
+        f"/api/v1/tenants/{test_tenant['tenant_id']}/notice",
+        headers=auth_headers(test_owner["token"]),
+        json={"expected_move_out_date": "2026-07-31"},
+    )
+    assert response.status_code == 409
+
+
 # ── Re-check-in ────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

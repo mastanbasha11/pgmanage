@@ -4,6 +4,7 @@ import {
   Phone,
   Mail,
   Calendar,
+  CalendarClock,
   IndianRupee,
   LogOut,
   ShieldAlert,
@@ -44,11 +45,13 @@ import {
   useTenantLedger,
   useCheckout,
   useRecheckin,
+  useGiveNotice,
   useUpdateTenant,
   useRecordRefund,
   useUploadIdProof,
   useDeleteIdProof,
   type RecheckinPayload,
+  type NoticePayload,
 } from '@/hooks/useTenants';
 import { useVacantBeds } from '@/hooks/useTenants';
 import { api } from '@/lib/api';
@@ -72,6 +75,7 @@ export default function TenantDetailPage() {
   const [showRefund, setShowRefund] = useState(false);
   const [showDepositEdit, setShowDepositEdit] = useState(false);
   const [showRecheckin, setShowRecheckin] = useState(false);
+  const [showNotice, setShowNotice] = useState(false);
 
   const { data: tenant, isLoading } = useTenant(id!);
   const { data: ledger } = useTenantLedger(id!);
@@ -111,6 +115,12 @@ export default function TenantDetailPage() {
             <Pencil className="h-4 w-4" />
             Edit
           </Button>
+          {isActive && (
+            <Button variant="outline" onClick={() => setShowNotice(true)} className="gap-2">
+              <CalendarClock className="h-4 w-4" />
+              {tenant.notice_given_date ? 'Edit notice' : 'Give notice'}
+            </Button>
+          )}
           {isActive && (
             <Button variant="outline" onClick={() => setShowCheckout(true)} className="gap-2">
               <LogOut className="h-4 w-4" />
@@ -176,6 +186,14 @@ export default function TenantDetailPage() {
               </Badge>
             )}
           </div>
+
+          {isActive && tenant.notice_given_date && tenant.expected_move_out_date && (
+            <NoticeBanner
+              noticeGivenDate={tenant.notice_given_date}
+              vacateDate={tenant.expected_move_out_date}
+              onEdit={() => setShowNotice(true)}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -476,6 +494,14 @@ export default function TenantDetailPage() {
         tenantName={tenant.name}
         previousPropertyId={tenant.property_id}
         previousRent={tenant.active_rent_plan ?? null}
+      />
+      <NoticeDialog
+        open={showNotice}
+        onClose={() => setShowNotice(false)}
+        tenantId={tenant.id}
+        tenantName={tenant.name}
+        existingNoticeDate={tenant.notice_given_date ?? null}
+        existingVacateDate={tenant.expected_move_out_date ?? null}
       />
     </div>
   );
@@ -1452,6 +1478,183 @@ function RecheckinDialog({
           </Button>
           <Button onClick={onSubmit} disabled={isPending}>
             {isPending ? 'Re-checking in…' : 'Confirm re-check in'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NoticeBanner({
+  noticeGivenDate,
+  vacateDate,
+  onEdit,
+}: {
+  noticeGivenDate: string;
+  vacateDate: string;
+  onEdit: () => void;
+}) {
+  // Days from now → vacate. Negative → already past (rare; just shown for safety).
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const vacate = new Date(vacateDate);
+  const daysToVacate = Math.round((vacate.getTime() - today.getTime()) / 86400000);
+  const noticeWindow = Math.round(
+    (vacate.getTime() - new Date(noticeGivenDate).getTime()) / 86400000,
+  );
+  const relative =
+    daysToVacate < 0
+      ? `${-daysToVacate}d overdue`
+      : daysToVacate === 0
+        ? 'today'
+        : daysToVacate === 1
+          ? 'tomorrow'
+          : `in ${daysToVacate} days`;
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 text-sm">
+      <CalendarClock className="h-4 w-4 text-amber-700 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-amber-900">
+          Notice to vacate · leaving {relative} ({formatDate(vacateDate)})
+        </div>
+        <div className="text-xs text-amber-800/80">
+          Notice given on {formatDate(noticeGivenDate)} · {noticeWindow}-day notice window
+        </div>
+      </div>
+      <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={onEdit}>
+        Edit notice
+      </Button>
+    </div>
+  );
+}
+
+function NoticeDialog({
+  open,
+  onClose,
+  tenantId,
+  tenantName,
+  existingNoticeDate,
+  existingVacateDate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantId: string;
+  tenantName: string;
+  existingNoticeDate: string | null;
+  existingVacateDate: string | null;
+}) {
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const [vacateDate, setVacateDate] = useState(existingVacateDate ?? '');
+  const [noticeDate, setNoticeDate] = useState(existingNoticeDate ?? todayISO);
+  const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setVacateDate(existingVacateDate ?? '');
+      setNoticeDate(existingNoticeDate ?? todayISO);
+      setNotes('');
+    }
+  }, [open, existingNoticeDate, existingVacateDate, todayISO]);
+
+  const { mutateAsync, isPending } = useGiveNotice(tenantId);
+  const { toast } = useToast();
+
+  async function onSubmit() {
+    if (!vacateDate) {
+      toast({ title: 'Pick the vacate date', variant: 'destructive' });
+      return;
+    }
+    const payload: NoticePayload = {
+      expected_move_out_date: vacateDate,
+      notice_given_date: noticeDate || undefined,
+      notes: notes.trim() || undefined,
+    };
+    try {
+      await mutateAsync(payload);
+      toast({
+        title: 'Notice recorded',
+        description: `${tenantName} vacating on ${vacateDate}.`,
+      });
+      onClose();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to record notice';
+      toast({ title: 'Could not record notice', description: msg, variant: 'destructive' });
+    }
+  }
+
+  async function onClear() {
+    try {
+      // expected_move_out_date=null → backend clears both fields.
+      await mutateAsync({ expected_move_out_date: null });
+      toast({
+        title: 'Notice cleared',
+        description: `${tenantName}'s notice removed.`,
+      });
+      onClose();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to clear notice';
+      toast({ title: 'Could not clear notice', description: msg, variant: 'destructive' });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {existingVacateDate ? 'Edit notice to vacate' : 'Record notice to vacate'}
+          </DialogTitle>
+          <DialogDescription>
+            Capture when {tenantName} told us they're leaving. The bed will appear under the
+            property's <em>Upcoming vacancies</em> automatically.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Notice given on</Label>
+            <Input
+              type="date"
+              value={noticeDate}
+              onChange={(e) => setNoticeDate(e.target.value)}
+              max={todayISO}
+            />
+          </div>
+          <div>
+            <Label>Vacating on</Label>
+            <Input
+              type="date"
+              value={vacateDate}
+              onChange={(e) => setVacateDate(e.target.value)}
+              min={todayISO}
+            />
+          </div>
+        </div>
+        <div>
+          <Label>Notes (optional)</Label>
+          <Input
+            placeholder="Reason / handover info"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
+        </div>
+
+        <DialogFooter className="flex-wrap gap-2">
+          {existingVacateDate && (
+            <Button
+              variant="outline"
+              onClick={onClear}
+              disabled={isPending}
+              className="mr-auto text-rose-700"
+            >
+              Clear notice
+            </Button>
+          )}
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={onSubmit} disabled={isPending}>
+            {isPending ? 'Saving…' : 'Save notice'}
           </Button>
         </DialogFooter>
       </DialogContent>

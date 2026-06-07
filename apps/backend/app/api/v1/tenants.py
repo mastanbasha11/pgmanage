@@ -101,6 +101,19 @@ class CheckoutRequest(BaseModel):
     notes: str | None = None
 
 
+class NoticeRequest(BaseModel):
+    """
+    Tenant has given notice to vacate. Sets both:
+      - notice_given_date (when they told us; default = today)
+      - expected_move_out_date (when they're leaving)
+    Pass expected_move_out_date=null to *clear* a previously-recorded notice.
+    """
+
+    expected_move_out_date: date | None
+    notice_given_date: date | None = None
+    notes: str | None = None
+
+
 class RecheckinRequest(BaseModel):
     """
     Re-check-in a previously checked-out tenant. Keeps the existing tenant row
@@ -306,7 +319,7 @@ async def list_tenants(
     result = await db.execute(
         text(rf"""
             SELECT t.id, t.name, t.phone, t.email, t.status,
-                   t.move_in_date, t.expected_move_out_date,
+                   t.move_in_date, t.expected_move_out_date, t.notice_given_date,
                    b.id as bed_id, b.bed_label,
                    r.id as room_id, r.room_number, r.display_name as room_name,
                    f.id as floor_id, f.floor_number, f.display_name as floor_name,
@@ -840,6 +853,113 @@ async def recheckin_tenant(
 
     await db.commit()
     return {"tenant_id": str(tenant_id), "message": "Tenant re-checked in"}
+
+
+@router.post("/tenants/{tenant_id}/notice", summary="Record notice to vacate")
+async def give_notice(
+    tenant_id: UUID,
+    body: NoticeRequest,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Capture that a tenant has told us they're leaving. Sets both
+    `notice_given_date` (when they told us) and `expected_move_out_date`
+    (when they're leaving). Pass `expected_move_out_date=null` to clear a
+    previously-recorded notice.
+
+    The bed automatically surfaces under the property's Upcoming vacancies
+    (vacant-beds endpoint already includes OCCUPIED beds whose tenant has a
+    future `expected_move_out_date`).
+    """
+    from datetime import date as _date
+
+    tenant_row = (
+        await db.execute(
+            text(
+                "SELECT id, status, property_id, name FROM tenants "
+                "WHERE id = :id AND org_id = :org_id AND is_deleted = false"
+            ),
+            {"id": str(tenant_id), "org_id": str(ctx.org_id)},
+        )
+    ).mappings().fetchone()
+    if not tenant_row:
+        raise NotFoundError("Tenant", tenant_id)
+    if tenant_row["status"] != "ACTIVE":
+        raise ConflictError(
+            f"Tenant is {tenant_row['status']}; notice only applies to ACTIVE tenants"
+        )
+
+    clearing = body.expected_move_out_date is None
+    notice_date = None if clearing else (body.notice_given_date or _date.today())
+
+    await db.execute(
+        text(
+            """
+            UPDATE tenants
+            SET expected_move_out_date = :vacate,
+                notice_given_date = :notice,
+                updated_at = NOW()
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": str(tenant_id),
+            "vacate": body.expected_move_out_date,
+            "notice": notice_date,
+        },
+    )
+
+    await db.execute(
+        text("""
+            INSERT INTO audit_log (org_id, property_id, actor_id, actor_role, action, table_name, record_id, new_values)
+            VALUES (:org_id, :pid, :actor, :role, 'UPDATE'::audit_action_enum, 'tenants', :record_id, CAST(:new_vals AS jsonb))
+        """),
+        {
+            "org_id": str(ctx.org_id), "pid": str(tenant_row["property_id"]),
+            "actor": str(ctx.user_id), "role": ctx.role,
+            "record_id": str(tenant_id),
+            "new_vals": json.dumps({
+                "notice_given_date": str(notice_date) if notice_date else None,
+                "expected_move_out_date": str(body.expected_move_out_date) if body.expected_move_out_date else None,
+            }),
+        },
+    )
+
+    description = (
+        f"{ctx.name} cleared notice for {tenant_row['name']}"
+        if clearing
+        else f"{ctx.name} recorded notice to vacate for {tenant_row['name']}"
+    )
+    await log_event(
+        db,
+        Event.TENANT_NOTICE_GIVEN,
+        description=description,
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        entity_name=tenant_row["name"],
+        property_id=tenant_row["property_id"],
+        tenant_id=tenant_id,
+        metadata={
+            "notice_given_date": str(notice_date) if notice_date else None,
+            "expected_move_out_date":
+                str(body.expected_move_out_date) if body.expected_move_out_date else None,
+            "notes": (body.notes or "").strip() or None,
+            "cleared": clearing,
+        },
+    )
+
+    await db.commit()
+    return {
+        "tenant_id": str(tenant_id),
+        "notice_given_date": str(notice_date) if notice_date else None,
+        "expected_move_out_date":
+            str(body.expected_move_out_date) if body.expected_move_out_date else None,
+        "message": "Notice cleared" if clearing else "Notice recorded",
+    }
 
 
 @router.post("/tenants/{tenant_id}/refund", summary="Record a refund post-checkout")
