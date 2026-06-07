@@ -1,6 +1,21 @@
+/**
+ * Owner/staff state store.
+ *
+ * Three slices:
+ *  - Auth: user + selectedPropertyId (persisted to AsyncStorage; tokens
+ *    themselves live in SecureStore via lib/storage.ts).
+ *  - Preferences: language (en/hi/te), simple-mode flag, voice-guidance flag.
+ *
+ * Tokens are passed through the storage helper rather than living in the
+ * store, so a SQL-injection / XSS-like RN exploit reading the JSON store
+ * never gets the bearer token.
+ */
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { secureStorage } from './storage';
+import { setLocale, type Lang } from './i18n';
 
 export type Role = 'OWNER' | 'PARTNER' | 'PROPERTY_MANAGER' | 'SUPERVISOR';
 
@@ -13,34 +28,52 @@ export interface AuthUser {
   property_ids: string[] | null;
 }
 
-interface AuthState {
+interface AppState {
+  // auth
   user: AuthUser | null;
-  accessToken: string | null;
   selectedPropertyId: string | null;
 
-  setAuth: (user: AuthUser, token: string) => void;
-  logout: () => void;
+  // preferences
+  lang: Lang;
+  simpleMode: boolean;
+  voiceGuidance: boolean;
+
+  setAuth: (user: AuthUser, access: string, refresh: string) => Promise<void>;
   setSelectedProperty: (id: string) => void;
+  setLang: (lang: Lang) => void;
+  setSimpleMode: (on: boolean) => void;
+  setVoiceGuidance: (on: boolean) => void;
+  logout: () => Promise<void>;
   canAccessFinancials: () => boolean;
 }
 
-export const useAuthStore = create<AuthState>()(
+export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       user: null,
-      accessToken: null,
       selectedPropertyId: null,
+      lang: 'en',
+      simpleMode: false,
+      voiceGuidance: false,
 
-      setAuth: (user, token) => {
-        set({ user, accessToken: token });
-      },
-
-      logout: () => {
-        AsyncStorage.multiRemove(['access_token', 'refresh_token']);
-        set({ user: null, accessToken: null, selectedPropertyId: null });
+      setAuth: async (user, access, refresh) => {
+        await secureStorage.setTokens(access, refresh);
+        set({ user });
       },
 
       setSelectedProperty: (id) => set({ selectedPropertyId: id }),
+
+      setLang: (lang) => {
+        setLocale(lang);
+        set({ lang });
+      },
+      setSimpleMode: (on) => set({ simpleMode: on }),
+      setVoiceGuidance: (on) => set({ voiceGuidance: on }),
+
+      logout: async () => {
+        await secureStorage.clear();
+        set({ user: null, selectedPropertyId: null });
+      },
 
       canAccessFinancials: () => {
         const role = get().user?.role;
@@ -48,8 +81,24 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name: 'pgmanage-auth-mobile',
+      name: 'pgmanage-app',
       storage: createJSONStorage(() => AsyncStorage),
+      // Don't persist transient fields; everything in this state is fine to persist.
+      partialize: (s) => ({
+        user: s.user,
+        selectedPropertyId: s.selectedPropertyId,
+        lang: s.lang,
+        simpleMode: s.simpleMode,
+        voiceGuidance: s.voiceGuidance,
+      }),
+      onRehydrateStorage: () => (state) => {
+        // Re-apply locale when the store rehydrates so the first render
+        // already speaks the chosen language.
+        if (state?.lang) setLocale(state.lang);
+      },
     },
   ),
 );
+
+// Backward-compat name for any screens still importing the old hook.
+export const useAuthStore = useAppStore;

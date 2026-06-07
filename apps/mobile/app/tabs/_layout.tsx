@@ -1,34 +1,53 @@
+/**
+ * Bottom tab bar. 5 destinations:
+ *   - index    Home (Dashboard)
+ *   - tenants  Residents
+ *   - rent     Rent + payment collection
+ *   - rooms    Vacancies (available + upcoming)
+ *   - more     Settings (Simple Mode, language, sign out)
+ *
+ * Labels are translated via i18n.t() so the bar adapts to Hindi/Telugu
+ * the moment the user changes language.
+ */
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-// @expo/vector-icons ships with Expo (no extra native dep / react-native-svg needed).
+import { t } from '../../lib/i18n';
+import { colors, TOUCH_TARGET } from '../../lib/theme';
+
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 export default function TabsLayout() {
   const icon = (name: IoniconName) =>
-    ({ color }: { color: string }) => <Ionicons name={name} size={22} color={color} />;
+    ({ color, size }: { color: string; size: number }) => (
+      <Ionicons name={name} size={size} color={color} />
+    );
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#0D9488', // brand teal
-        tabBarInactiveTintColor: '#94a3b8',
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textDim,
         tabBarStyle: {
           borderTopWidth: 1,
-          borderTopColor: '#e2e8f0',
-          backgroundColor: '#fff',
-          paddingBottom: 4,
+          borderTopColor: colors.border,
+          backgroundColor: colors.surface,
+          height: TOUCH_TARGET + 16,
+          paddingTop: 4,
+          paddingBottom: 8,
         },
-        headerStyle: { backgroundColor: '#0f172a' },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: '700' },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
+        headerShown: false,
       }}
     >
-      <Tabs.Screen name="rooms" options={{ title: 'Rooms', tabBarIcon: icon('bed-outline') }} />
-      <Tabs.Screen name="tenants" options={{ title: 'Tenants', tabBarIcon: icon('people-outline') }} />
-      <Tabs.Screen name="rent" options={{ title: 'Rent', tabBarIcon: icon('cash-outline') }} />
-      <Tabs.Screen name="expenses" options={{ title: 'Expenses', tabBarIcon: icon('receipt-outline') }} />
-      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: icon('ellipsis-horizontal') }} />
+      <Tabs.Screen name="index" options={{ title: t('tab.dashboard'), tabBarIcon: icon('home-outline') }} />
+      <Tabs.Screen name="tenants" options={{ title: t('tab.residents'), tabBarIcon: icon('people-outline') }} />
+      <Tabs.Screen name="rent" options={{ title: t('tab.rent'), tabBarIcon: icon('cash-outline') }} />
+      <Tabs.Screen name="rooms" options={{ title: t('tab.rooms'), tabBarIcon: icon('bed-outline') }} />
+      <Tabs.Screen name="more" options={{ title: t('tab.more'), tabBarIcon: icon('settings-outline') }} />
+      {/* Expenses placeholder is not surfaced in the bar in v1 — file still
+          exists so route lookups don't break if linked from elsewhere. */}
+      <Tabs.Screen name="expenses" options={{ href: null }} />
     </Tabs>
   );
 }

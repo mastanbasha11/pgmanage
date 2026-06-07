@@ -12,34 +12,45 @@
       "resizeMode": "contain",
       "backgroundColor": "#0F172A"
     },
-    "updates": {
-      "fallbackToCacheTimeout": 0
-    },
+    "updates": { "fallbackToCacheTimeout": 0 },
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.pgmanage.app"
+      "bundleIdentifier": "com.pgmanage.app",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F172A"
       },
-      "package": "com.pgmanage.app"
+      "package": "com.pgmanage.app",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK"
+      ]
     },
     "plugins": [
       "expo-router",
       "expo-font",
+      "expo-secure-store",
+      "expo-localization",
       [
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#3b82f6"
+          "color": "#0D9488"
         }
       ]
     ],
-    "experiments": {
-      "typedRoutes": true
+    "experiments": { "typedRoutes": false },
+    "extra": {
+      "eas": { "projectId": "" }
     }
   }
 }

@@ -1,131 +1,211 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+/**
+ * Rooms tab. Two sections: Available now + Upcoming vacancies (residents
+ * who've given notice). Mirrors the web PropertyDetailPage layout but
+ * compacted for phone.
+ *
+ * Bed/room colour spec (per product requirements):
+ *   green  = vacant
+ *   yellow = reserved
+ *   teal   = occupied (brand)
+ *   red    = maintenance
+ */
+import { useEffect } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+
 import { api } from '../../lib/api';
-import { useAuthStore } from '../../lib/store';
+import { useAppStore } from '../../lib/store';
+import { t } from '../../lib/i18n';
+import { speak } from '../../lib/voice';
+import { colors, radius, space, type as fontSize } from '../../lib/theme';
+import {
+  Card,
+  Empty,
+  Header,
+  Loading,
+  rupees,
+  Screen,
+  StatusPill,
+} from '../../components/ui';
 
-type BedStatus = 'VACANT' | 'OCCUPIED' | 'MAINTENANCE';
-
-interface Bed {
+interface VacantBed {
   id: string;
-  label: string;
-  status: BedStatus;
-  tenant_name?: string;
-}
-
-interface Room {
-  id: string;
+  bed_label: string;
   room_number: string;
+  floor_name: string;
   floor_number: number;
-  beds: Bed[];
+  room_type?: string;
+  monthly_base_rent_paise: number;
+  status: 'VACANT' | 'UPCOMING';
+  available_from?: string;
+  current_tenant_name?: string;
+  current_tenant_id?: string;
 }
 
-const BED_COLORS: Record<BedStatus, string> = {
-  VACANT: '#dcfce7',
-  OCCUPIED: '#dbeafe',
-  MAINTENANCE: '#fee2e2',
-};
+export default function RoomsTab() {
+  const { selectedPropertyId, voiceGuidance } = useAppStore();
 
-const BED_BORDER: Record<BedStatus, string> = {
-  VACANT: '#86efac',
-  OCCUPIED: '#93c5fd',
-  MAINTENANCE: '#fca5a5',
-};
+  useEffect(() => {
+    if (voiceGuidance) speak(t('tab.rooms'));
+  }, [voiceGuidance]);
 
-export default function RoomsScreen() {
-  const { selectedPropertyId } = useAuthStore();
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['occupancy', selectedPropertyId],
+  const { data, isLoading, refetch, isRefetching } = useQuery({
+    queryKey: ['vacant-beds-mobile', selectedPropertyId],
     queryFn: () =>
-      api.get(`/properties/${selectedPropertyId}/occupancy`).then((r) => r.data),
+      api
+        .get<{ items: VacantBed[]; vacant_count: number; upcoming_count: number }>(
+          `/properties/${selectedPropertyId}/vacant-beds`,
+        )
+        .then((r) => r.data),
     enabled: !!selectedPropertyId,
   });
 
-  if (!selectedPropertyId) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.muted}>Select a property to view rooms.</Text>
-      </View>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#2563eb" />
-      </View>
-    );
-  }
-
-  const rooms: Room[] = data?.floors?.flatMap((f: { rooms: Room[] }) => f.rooms) ?? [];
+  const items = data?.items ?? [];
+  const available = items.filter((b) => b.status === 'VACANT');
+  const upcoming = items.filter((b) => b.status === 'UPCOMING');
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
-      {/* Legend */}
-      <View style={styles.legend}>
-        {(['VACANT', 'OCCUPIED', 'MAINTENANCE'] as BedStatus[]).map((s) => (
-          <View key={s} style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: BED_BORDER[s] }]} />
-            <Text style={styles.legendText}>{s}</Text>
-          </View>
-        ))}
+    <Screen padded={false}>
+      <View style={{ padding: space.lg, paddingBottom: 0 }}>
+        <Header
+          title={t('tab.rooms')}
+          subtitle={`${data?.vacant_count ?? 0} now · ${data?.upcoming_count ?? 0} upcoming`}
+        />
       </View>
 
-      <View style={styles.grid}>
-        {rooms.map((room) => (
-          <View key={room.id} style={styles.roomCard}>
-            <Text style={styles.roomNumber}>Room {room.room_number}</Text>
-            <Text style={styles.floorLabel}>Floor {room.floor_number}</Text>
-            <View style={styles.beds}>
-              {room.beds.map((bed) => (
-                <View
-                  key={bed.id}
-                  style={[
-                    styles.bed,
-                    { backgroundColor: BED_COLORS[bed.status], borderColor: BED_BORDER[bed.status] },
-                  ]}
-                >
-                  <Text style={styles.bedLabel}>Bed {bed.label}</Text>
-                  {bed.tenant_name && (
-                    <Text style={styles.bedTenant} numberOfLines={1}>
-                      {bed.tenant_name}
-                    </Text>
-                  )}
-                </View>
-              ))}
-            </View>
+      {isLoading ? (
+        <Loading />
+      ) : (
+        <ScrollView
+          contentContainerStyle={{ padding: space.lg, paddingTop: space.sm }}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={refetch}
+              tintColor={colors.accent}
+              colors={[colors.accent]}
+            />
+          }
+        >
+          {/* Legend */}
+          <View style={styles.legend}>
+            <LegendItem color={colors.bedVacant} label={t('rooms.legend.vacant')} />
+            <LegendItem color={colors.bedReserved} label={t('rooms.legend.reserved')} />
+            <LegendItem color={colors.bedOccupied} label={t('rooms.legend.occupied')} />
+            <LegendItem color={colors.bedMaintenance} label={t('rooms.legend.maintenance')} />
           </View>
-        ))}
+
+          {available.length > 0 && (
+            <Section
+              dotColor={colors.bedVacant}
+              title={t('rooms.available_now')}
+              count={available.length}
+            >
+              {available.map((b) => (
+                <BedCard key={b.id} bed={b} />
+              ))}
+            </Section>
+          )}
+
+          {upcoming.length > 0 && (
+            <Section
+              dotColor={colors.warn}
+              title={t('rooms.upcoming')}
+              count={upcoming.length}
+            >
+              {upcoming.map((b) => (
+                <BedCard key={b.id} bed={b} />
+              ))}
+            </Section>
+          )}
+
+          {available.length === 0 && upcoming.length === 0 && (
+            <Empty
+              iconName="bed-outline"
+              title="No vacancies"
+              hint="Currently full and no notices given in the next 60 days."
+            />
+          )}
+        </ScrollView>
+      )}
+    </Screen>
+  );
+}
+
+function Section({
+  dotColor,
+  title,
+  count,
+  children,
+}: {
+  dotColor: string;
+  title: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={{ marginBottom: space.lg }}>
+      <View style={styles.sectionHeader}>
+        <View style={[styles.dot, { backgroundColor: dotColor }]} />
+        <Text style={styles.sectionTitle}>
+          {title} <Text style={styles.sectionCount}>({count})</Text>
+        </Text>
       </View>
-    </ScrollView>
+      {children}
+    </View>
+  );
+}
+
+function BedCard({ bed }: { bed: VacantBed }) {
+  const isUpcoming = bed.status === 'UPCOMING';
+  return (
+    <Card
+      style={{
+        ...styles.bed,
+        ...(isUpcoming
+          ? { backgroundColor: colors.warnBg, borderColor: colors.warn }
+          : { backgroundColor: colors.successBg, borderColor: colors.bedVacant }),
+      }}
+    >
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.bedTitle}>
+          {bed.room_number}·{bed.bed_label}
+          {bed.room_type ? ` · ${bed.room_type}` : ''}
+        </Text>
+        <Text style={styles.bedMeta}>
+          {bed.floor_name} · {rupees(bed.monthly_base_rent_paise ?? 0)}/mo
+        </Text>
+        {isUpcoming && bed.current_tenant_name && (
+          <Text style={styles.bedMeta}>{bed.current_tenant_name} is vacating</Text>
+        )}
+      </View>
+      {isUpcoming && bed.available_from && (
+        <View style={{ alignItems: 'flex-end' }}>
+          <StatusPill label={bed.available_from} tone="warn" />
+        </View>
+      )}
+    </Card>
+  );
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={styles.legendItem}>
+      <View style={[styles.dot, { backgroundColor: color }]} />
+      <Text style={styles.legendLabel}>{label}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  muted: { color: '#94a3b8', fontSize: 14 },
-  legend: { flexDirection: 'row', gap: 16, marginBottom: 16 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendText: { fontSize: 12, color: '#64748b' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  roomCard: {
-    width: '47%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    padding: 12,
-  },
-  roomNumber: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
-  floorLabel: { fontSize: 11, color: '#94a3b8', marginBottom: 8 },
-  beds: { gap: 6 },
-  bed: {
-    borderRadius: 6,
-    borderWidth: 1,
-    padding: 6,
-  },
-  bedLabel: { fontSize: 12, fontWeight: '600', color: '#374151' },
-  bedTenant: { fontSize: 10, color: '#64748b', marginTop: 2 },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginBottom: space.md },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  legendLabel: { fontSize: fontSize.caption, color: colors.textMuted, fontWeight: '600' },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.sm },
+  sectionTitle: { fontSize: fontSize.body, fontWeight: '700', color: colors.text },
+  sectionCount: { color: colors.textMuted, fontWeight: '400' },
+  bed: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.sm, padding: space.md, borderRadius: radius.md, borderWidth: 1 },
+  bedTitle: { fontSize: fontSize.bodyLg, fontWeight: '700', color: colors.text },
+  bedMeta: { fontSize: fontSize.caption, color: colors.textMuted, marginTop: 2 },
 });
