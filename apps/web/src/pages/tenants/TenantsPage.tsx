@@ -17,7 +17,12 @@ import { formatPaise, formatDate, shortRoomType } from '@/lib/utils';
 import CheckinWizard from './CheckinWizard';
 import ImportTenantsDialog from './ImportTenantsDialog';
 
-type StatusFilter = 'ACTIVE' | 'CHECKED_OUT' | 'ALL';
+/**
+ * Filter options for the tenants page. NOTICE is a virtual filter — under the
+ * hood it sends status=ACTIVE + has_notice=true to the API, so it only
+ * surfaces tenants who are still around but on the way out.
+ */
+type StatusFilter = 'ACTIVE' | 'NOTICE' | 'CHECKED_OUT' | 'ALL';
 
 export default function TenantsPage() {
   const [search, setSearch] = useState('');
@@ -29,7 +34,13 @@ export default function TenantsPage() {
   const { data, isLoading } = useTenants({
     property_id: selectedPropertyId ?? undefined,
     search: search || undefined,
-    status: statusFilter === 'ALL' ? undefined : statusFilter,
+    status:
+      statusFilter === 'ALL'
+        ? undefined
+        : statusFilter === 'NOTICE'
+          ? 'ACTIVE'
+          : statusFilter,
+    has_notice: statusFilter === 'NOTICE' ? true : undefined,
     sort_by: 'room',
     limit: 200,
   });
@@ -44,6 +55,8 @@ export default function TenantsPage() {
               {data?.total ?? 0}{' '}
               {statusFilter === 'ACTIVE'
                 ? 'active'
+                : statusFilter === 'NOTICE'
+                ? 'with notice given'
                 : statusFilter === 'CHECKED_OUT'
                 ? 'checked-out'
                 : 'total'}{' '}
@@ -87,6 +100,7 @@ export default function TenantsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ACTIVE">Active</SelectItem>
+              <SelectItem value="NOTICE">Notice given</SelectItem>
               <SelectItem value="CHECKED_OUT">Checked-out</SelectItem>
               <SelectItem value="ALL">All tenants</SelectItem>
             </SelectContent>
@@ -107,6 +121,8 @@ export default function TenantsPage() {
             <p className="font-medium">
               {statusFilter === 'CHECKED_OUT'
                 ? 'No checked-out tenants'
+                : statusFilter === 'NOTICE'
+                ? 'No tenants on notice'
                 : search
                 ? 'No matches'
                 : 'No tenants yet'}
@@ -114,11 +130,13 @@ export default function TenantsPage() {
             <p className="text-sm text-muted-foreground">
               {statusFilter === 'CHECKED_OUT'
                 ? 'Tenants who have checked out will appear here.'
+                : statusFilter === 'NOTICE'
+                ? 'Use the “Give notice” button on a tenant’s page when they tell you they’re vacating.'
                 : search
                 ? 'Try a different name or phone number.'
                 : 'Check in your first tenant to get started.'}
             </p>
-            {statusFilter !== 'CHECKED_OUT' && !search && (
+            {statusFilter !== 'CHECKED_OUT' && statusFilter !== 'NOTICE' && !search && (
               <Button className="mt-4 gap-2" onClick={() => setShowCheckin(true)}>
                 <Plus className="h-4 w-4" />
                 Check in tenant

@@ -89,6 +89,8 @@ export function useTenants(params?: {
   property_id?: string;
   status?: string;
   search?: string;
+  /** Filter on whether the tenant has given notice. Omit for no filter. */
+  has_notice?: boolean;
   limit?: number;
   sort_by?: 'room' | 'name' | 'move_in';
 }) {

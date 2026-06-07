@@ -271,6 +271,10 @@ async def list_tenants(
     status: str | None = Query(None),
     search: str | None = Query(None),
     upcoming_moveout: bool = Query(False),
+    has_notice: bool | None = Query(
+        None,
+        description="True → only tenants who've given notice. False → only those who haven't.",
+    ),
     limit: int = Query(200, le=500),
     cursor: str | None = Query(None),
     sort_by: str = Query("room", regex="^(room|name|move_in)$"),
@@ -306,6 +310,11 @@ async def list_tenants(
 
     if upcoming_moveout:
         conditions.append("t.expected_move_out_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'")
+
+    if has_notice is True:
+        conditions.append("t.notice_given_date IS NOT NULL")
+    elif has_notice is False:
+        conditions.append("t.notice_given_date IS NULL")
 
     order_by = {
         "room": "f.floor_number NULLS LAST, "
