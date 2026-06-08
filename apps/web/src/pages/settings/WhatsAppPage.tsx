@@ -11,7 +11,16 @@
  * everything end-to-end before the monthly cron actually pings tenants.
  */
 import { useEffect, useState } from 'react';
-import { Loader2, CircleCheck, CircleX, MessageSquare, ShieldAlert, KeyRound } from 'lucide-react';
+import {
+  Loader2,
+  CircleCheck,
+  CircleX,
+  MessageSquare,
+  ShieldAlert,
+  KeyRound,
+  Wand2,
+  ChevronRight,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -29,7 +38,9 @@ import {
   useWhatsAppSettings,
   useUpdateWhatsAppSettings,
   useTestSendWhatsApp,
+  type TemplateParam,
 } from '@/hooks/useWhatsApp';
+import TemplateWizard from './whatsapp/TemplateWizard';
 
 type TestState = 'idle' | 'sending' | 'ok' | 'fail';
 
@@ -51,20 +62,14 @@ export default function WhatsAppPage() {
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [upiVpa, setUpiVpa] = useState('');
-  const [reminderTplName, setReminderTplName] = useState('');
-  const [reminderTplLang, setReminderTplLang] = useState('');
-  const [overdueTplName, setOverdueTplName] = useState('');
-  const [overdueTplLang, setOverdueTplLang] = useState('');
+  // Which template the wizard is currently open for. null = closed.
+  const [wizardFor, setWizardFor] = useState<'rent_reminder' | 'rent_overdue' | null>(null);
   useEffect(() => {
     if (settings) {
       setPhoneNumberId(settings.whatsapp_phone_number_id ?? '');
       setWhatsappNumber(settings.whatsapp_number ?? '');
       setUpiVpa(settings.upi_vpa ?? '');
       setAccessToken(''); // never prefill — server only tells us whether one exists
-      setReminderTplName(settings.wa_rent_reminder_template_name ?? '');
-      setReminderTplLang(settings.wa_rent_reminder_template_language ?? '');
-      setOverdueTplName(settings.wa_rent_overdue_template_name ?? '');
-      setOverdueTplLang(settings.wa_rent_overdue_template_language ?? '');
     }
   }, [settings]);
 
@@ -78,11 +83,6 @@ export default function WhatsAppPage() {
         whatsapp_phone_number_id: phoneNumberId.trim() || null,
         whatsapp_number: whatsappNumber.trim() || null,
         upi_vpa: upiVpa.trim() || null,
-        // Empty string → NULL so we fall back to the server default.
-        wa_rent_reminder_template_name: reminderTplName.trim() || null,
-        wa_rent_reminder_template_language: reminderTplLang.trim() || null,
-        wa_rent_overdue_template_name: overdueTplName.trim() || null,
-        wa_rent_overdue_template_language: overdueTplLang.trim() || null,
       };
       // Only send the token if the user typed one — otherwise leave whatever's saved alone.
       if (accessToken.trim()) payload.whatsapp_access_token = accessToken.trim();
@@ -240,59 +240,34 @@ export default function WhatsAppPage() {
           </div>
 
           <div className="border-t pt-4 space-y-3">
-            <div className="text-sm font-medium">
-              Approved Meta templates (per property)
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <div className="text-sm font-medium">Approved Meta templates</div>
+                <p className="text-xs text-muted-foreground">
+                  Map each Meta-approved template's <span className="font-mono">{'{{N}}'}</span>{' '}
+                  placeholders to dynamic values or static text. The wizard auto-detects
+                  placeholders from the body you paste.
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground -mt-2">
-              Leave blank to use defaults <span className="font-mono">rent_reminder</span> /{' '}
-              <span className="font-mono">rent_overdue</span> in language{' '}
-              <span className="font-mono">en_US</span>. Override here if Meta approved your
-              templates under different names or languages (e.g. plain <span className="font-mono">en</span>).
-              Find the exact values in Meta → WhatsApp Manager → Message Templates.
-            </p>
 
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="reminderTplName">Rent-reminder template name</Label>
-                <Input
-                  id="reminderTplName"
-                  placeholder="rent_reminder"
-                  value={reminderTplName}
-                  onChange={(e) => setReminderTplName(e.target.value)}
-                  disabled={settingsLoading}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="reminderTplLang">Rent-reminder language code</Label>
-                <Input
-                  id="reminderTplLang"
-                  placeholder="en_US"
-                  value={reminderTplLang}
-                  onChange={(e) => setReminderTplLang(e.target.value)}
-                  disabled={settingsLoading}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="overdueTplName">Rent-overdue template name</Label>
-                <Input
-                  id="overdueTplName"
-                  placeholder="rent_overdue"
-                  value={overdueTplName}
-                  onChange={(e) => setOverdueTplName(e.target.value)}
-                  disabled={settingsLoading}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="overdueTplLang">Rent-overdue language code</Label>
-                <Input
-                  id="overdueTplLang"
-                  placeholder="en_US"
-                  value={overdueTplLang}
-                  onChange={(e) => setOverdueTplLang(e.target.value)}
-                  disabled={settingsLoading}
-                />
-              </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TemplateSummaryCard
+                title="Rent reminder"
+                description="Sent on the 1st of every month."
+                name={settings?.wa_rent_reminder_template_name}
+                language={settings?.wa_rent_reminder_template_language}
+                params={settings?.wa_rent_reminder_template_params}
+                onConfigure={() => setWizardFor('rent_reminder')}
+              />
+              <TemplateSummaryCard
+                title="Rent overdue"
+                description="Sent daily once rent is overdue."
+                name={settings?.wa_rent_overdue_template_name}
+                language={settings?.wa_rent_overdue_template_language}
+                params={settings?.wa_rent_overdue_template_params}
+                onConfigure={() => setWizardFor('rent_overdue')}
+              />
             </div>
           </div>
 
@@ -376,6 +351,92 @@ export default function WhatsAppPage() {
           </ol>
         </CardContent>
       </Card>
+
+      {/* Template wizard — mounted once, opens when wizardFor is set. */}
+      {propertyId && wizardFor && (
+        <TemplateWizard
+          open
+          onClose={() => setWizardFor(null)}
+          template={wizardFor}
+          propertyId={propertyId}
+          current={settings}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Small per-template card used in the "Approved Meta templates" section.
+ * Shows current state at a glance and opens the wizard on click.
+ */
+function TemplateSummaryCard({
+  title,
+  description,
+  name,
+  language,
+  params,
+  onConfigure,
+}: {
+  title: string;
+  description: string;
+  name: string | null | undefined;
+  language: string | null | undefined;
+  params: TemplateParam[] | null | undefined;
+  onConfigure: () => void;
+}) {
+  const configured = !!name;
+  const paramCount = params?.length ?? null;
+  return (
+    <div className="rounded-lg border bg-card p-4 flex flex-col gap-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{title}</div>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        {configured ? (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
+            <CircleCheck className="h-3.5 w-3.5" /> Configured
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700">
+            <CircleX className="h-3.5 w-3.5" /> Not configured
+          </span>
+        )}
+      </div>
+
+      {configured ? (
+        <div className="text-xs space-y-0.5">
+          <div>
+            <span className="text-muted-foreground">Template:</span>{' '}
+            <span className="font-mono">{name}</span>
+            <span className="text-muted-foreground"> · {language ?? 'en_US'}</span>
+          </div>
+          <div className="text-muted-foreground">
+            {paramCount === null
+              ? 'Using default param mapping.'
+              : paramCount === 0
+                ? 'Zero placeholders — sends template body as-is.'
+                : `${paramCount} placeholder${paramCount === 1 ? '' : 's'} mapped.`}
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Uses the built-in default. Configure if Meta approved your template under a
+          different name or with different placeholders.
+        </p>
+      )}
+
+      <Button
+        variant="outline"
+        size="sm"
+        className="self-start mt-1 gap-1"
+        onClick={onConfigure}
+      >
+        <Wand2 className="h-3.5 w-3.5" />
+        {configured ? 'Edit template' : 'Configure with wizard'}
+        <ChevronRight className="h-3.5 w-3.5" />
+      </Button>
     </div>
   );
 }

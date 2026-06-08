@@ -1,6 +1,7 @@
 """Property, floor, room type, room, and bed management endpoints."""
 from __future__ import annotations
 
+import json
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -865,6 +866,12 @@ class WhatsAppSettings(BaseModel):
     wa_rent_reminder_template_language: str | None = None
     wa_rent_overdue_template_name: str | None = None
     wa_rent_overdue_template_language: str | None = None
+    # Per-template param mapping. List of {"kind": "variable"|"static",
+    # "key": str, "value": str} dicts — one per `{{N}}` placeholder, in order.
+    # `[]` means a 0-param template (e.g. Meta's hello_world). NULL/omitted
+    # → fall back to the legacy hardcoded ordered list for that template.
+    wa_rent_reminder_template_params: list[dict] | None = None
+    wa_rent_overdue_template_params: list[dict] | None = None
 
 
 @router.get("/properties/{property_id}/whatsapp", summary="Read WhatsApp + UPI settings")
@@ -878,7 +885,9 @@ async def get_whatsapp_settings(
             text(
                 "SELECT whatsapp_phone_number_id, whatsapp_number, upi_vpa, "
                 "       wa_rent_reminder_template_name, wa_rent_reminder_template_language, "
+                "       wa_rent_reminder_template_params, "
                 "       wa_rent_overdue_template_name,  wa_rent_overdue_template_language, "
+                "       wa_rent_overdue_template_params, "
                 "       (whatsapp_access_token IS NOT NULL OR "
                 "        whatsapp_access_token_secret_arn IS NOT NULL) AS has_token "
                 "FROM properties WHERE id = :id AND org_id = :org_id"
@@ -895,8 +904,10 @@ async def get_whatsapp_settings(
         "has_access_token": bool(row["has_token"]),
         "wa_rent_reminder_template_name":     row["wa_rent_reminder_template_name"],
         "wa_rent_reminder_template_language": row["wa_rent_reminder_template_language"],
+        "wa_rent_reminder_template_params":   row["wa_rent_reminder_template_params"],
         "wa_rent_overdue_template_name":      row["wa_rent_overdue_template_name"],
         "wa_rent_overdue_template_language":  row["wa_rent_overdue_template_language"],
+        "wa_rent_overdue_template_params":    row["wa_rent_overdue_template_params"],
     }
 
 
@@ -921,8 +932,21 @@ async def update_whatsapp_settings(
     if not exists:
         raise NotFoundError("Property", str(property_id))
 
-    set_clause = ", ".join(f"{k} = :{k}" for k in fields)
-    params = {**fields, "id": str(property_id)}
+    # JSONB columns must be bound as text + cast in SQL, otherwise psycopg
+    # tries to send Python list → JSONB and fails with "invalid input
+    # syntax for type jsonb".
+    JSONB_COLS = {"wa_rent_reminder_template_params", "wa_rent_overdue_template_params"}
+
+    set_parts: list[str] = []
+    params: dict[str, Any] = {"id": str(property_id)}
+    for k, v in fields.items():
+        if k in JSONB_COLS:
+            set_parts.append(f"{k} = CAST(:{k} AS jsonb)")
+            params[k] = json.dumps(v) if v is not None else None
+        else:
+            set_parts.append(f"{k} = :{k}")
+            params[k] = v
+    set_clause = ", ".join(set_parts)
     await db.execute(
         text(f"UPDATE properties SET {set_clause}, updated_at = NOW() WHERE id = :id"),
         params,
@@ -991,20 +1015,60 @@ async def whatsapp_test_send(
     if not exists:
         raise NotFoundError("Property", str(property_id))
 
+    # Legacy ordered fallback (used when the property hasn't run the wizard
+    # yet and there's no per-template params config saved on the DB).
     if body.template_name == "rent_reminder":
-        params = ["Test Tenant", "₹1,000", "June 2026", "10 Jun 2026", "demo@upi"]
+        legacy = ["Test Tenant", "₹1,000", "June 2026", "10 Jun 2026", "demo@upi"]
     elif body.template_name == "rent_overdue":
-        params = ["Test Tenant", "₹1,000", "June 2026", "+919999999999"]
+        legacy = ["Test Tenant", "₹1,000", "June 2026", "+919999999999"]
     elif body.template_name == "welcome_checkin":
-        params = ["Test Tenant", "Demo Property", "101", "A", "01 Jun 2026"]
+        legacy = ["Test Tenant", "Demo Property", "101", "A", "01 Jun 2026"]
     else:
-        params = ["Test"]
+        legacy = ["Test"]
+
+    # Sample-data context the wizard variables resolve against. When the
+    # owner has configured per-property params, this is what fills them in.
+    test_context = {
+        "tenant_name": "Test Tenant",
+        "tenant_first_name": "Test",
+        "amount_rupees": "₹1,000",
+        "month_name": "June 2026",
+        "due_date": "10 Jun 2026",
+        "days_overdue": "7",
+        "upi_vpa": "demo@upi",
+        "property_name": "Demo Property",
+        "room_label": "101·A",
+        "manager_phone": "+919999999999",
+    }
 
     result = await send_whatsapp_template(
         to_phone=body.to_phone,
         template_name=body.template_name,
-        template_params=params,
+        template_params=legacy,
         property_id=property_id,
         db=db,
+        context=test_context,
     )
     return result
+
+
+@router.get(
+    "/whatsapp/template-variables",
+    summary="Catalogue of dynamic variables available in WhatsApp templates",
+)
+async def whatsapp_template_variables(
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),  # noqa: ARG001
+):
+    """
+    Returns the per-template catalogue used by the Templates wizard. The
+    wizard pastes the user's template body, detects `{{N}}` placeholders,
+    and shows this list in a dropdown next to each placeholder so the
+    owner can pick which value goes where (or type a static string).
+
+    Each variable has:
+      - key:     stable id used in the saved params config
+      - label:   human-readable description shown in the dropdown
+      - example: a sample value shown in the wizard's preview pane
+    """
+    from app.services.notification_service import BUILT_IN_VARIABLES
+    return BUILT_IN_VARIABLES

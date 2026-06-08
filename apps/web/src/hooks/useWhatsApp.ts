@@ -11,6 +11,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
+/**
+ * One placeholder mapping inside a WhatsApp template body. The list, in
+ * order, fills `{{1}}, {{2}}, …` at send time.
+ *  - `variable` → value resolved from the per-template variable catalogue
+ *    (tenant_name, amount_rupees, …). See useTemplateVariables.
+ *  - `static`   → literal text, never substituted.
+ */
+export type TemplateParam =
+  | { kind: 'variable'; key: string }
+  | { kind: 'static'; value: string };
+
 export interface WhatsAppSettings {
   whatsapp_phone_number_id: string | null;
   whatsapp_number: string | null;
@@ -20,8 +31,10 @@ export interface WhatsAppSettings {
    *  (rent_reminder/rent_overdue in en_US). */
   wa_rent_reminder_template_name: string | null;
   wa_rent_reminder_template_language: string | null;
+  wa_rent_reminder_template_params: TemplateParam[] | null;
   wa_rent_overdue_template_name: string | null;
   wa_rent_overdue_template_language: string | null;
+  wa_rent_overdue_template_params: TemplateParam[] | null;
 }
 
 export interface WhatsAppSettingsUpdate {
@@ -31,8 +44,30 @@ export interface WhatsAppSettingsUpdate {
   upi_vpa?: string | null;
   wa_rent_reminder_template_name?: string | null;
   wa_rent_reminder_template_language?: string | null;
+  wa_rent_reminder_template_params?: TemplateParam[] | null;
   wa_rent_overdue_template_name?: string | null;
   wa_rent_overdue_template_language?: string | null;
+  wa_rent_overdue_template_params?: TemplateParam[] | null;
+}
+
+/** Variable catalogue returned by /api/v1/whatsapp/template-variables. */
+export interface TemplateVariable {
+  key: string;
+  label: string;
+  example: string;
+}
+export type TemplateVariableCatalogue = Record<
+  'rent_reminder' | 'rent_overdue',
+  { variables: TemplateVariable[] }
+>;
+
+/** Fetches the per-template variable list — drives the wizard's dropdown. */
+export function useTemplateVariables() {
+  return useQuery<TemplateVariableCatalogue>({
+    queryKey: ['whatsapp-template-variables'],
+    queryFn: () => api.get('/whatsapp/template-variables').then((r) => r.data),
+    staleTime: Infinity, // catalogue is hardcoded on backend, never changes at runtime
+  });
 }
 
 export interface WhatsAppTestSendResult {

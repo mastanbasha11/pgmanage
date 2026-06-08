@@ -65,6 +65,75 @@ async def test_patch_template_overrides_round_trip(
 
 
 @pytest.mark.asyncio
+async def test_template_variables_endpoint(client: AsyncClient, test_owner: dict):
+    """The wizard's dropdown source: variable catalogue per template."""
+    r = await client.get(
+        "/api/v1/whatsapp/template-variables",
+        headers=auth_headers(test_owner["token"]),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "rent_reminder" in body and "rent_overdue" in body
+    keys = {v["key"] for v in body["rent_reminder"]["variables"]}
+    # Spot-check a few well-known variables that the wizard relies on.
+    assert {"tenant_name", "amount_rupees", "month_name", "upi_vpa"} <= keys
+
+
+@pytest.mark.asyncio
+async def test_patch_template_params_round_trip(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """Wizard output: an ordered list of {kind, key|value} dicts per template."""
+    pid = test_property["property_id"]
+    payload = {
+        "wa_rent_reminder_template_params": [
+            {"kind": "variable", "key": "tenant_name"},
+            {"kind": "static", "value": "your rent of"},
+            {"kind": "variable", "key": "amount_rupees"},
+            {"kind": "variable", "key": "due_date"},
+        ],
+        "wa_rent_overdue_template_params": [],
+    }
+    r = await client.patch(
+        f"/api/v1/properties/{pid}/whatsapp",
+        headers=auth_headers(test_owner["token"]),
+        json=payload,
+    )
+    assert r.status_code == 200, r.text
+
+    got = (await client.get(
+        f"/api/v1/properties/{pid}/whatsapp",
+        headers=auth_headers(test_owner["token"]),
+    )).json()
+    saved = got["wa_rent_reminder_template_params"]
+    assert isinstance(saved, list) and len(saved) == 4
+    assert saved[0] == {"kind": "variable", "key": "tenant_name"}
+    assert saved[1] == {"kind": "static", "value": "your rent of"}
+    # Empty list also persists (vs NULL → fall back to legacy).
+    assert got["wa_rent_overdue_template_params"] == []
+
+
+def test_build_params_substitution_helper():
+    """Unit-test the resolver — no DB / API involved."""
+    from app.services.notification_service import _build_params
+
+    cfg = [
+        {"kind": "variable", "key": "tenant_name"},
+        {"kind": "static", "value": "owes"},
+        {"kind": "variable", "key": "amount_rupees"},
+        {"kind": "variable", "key": "missing_key"},
+    ]
+    out = _build_params(cfg, {"tenant_name": "Asha", "amount_rupees": "₹9,000"}, legacy=[])
+    assert out == ["Asha", "owes", "₹9,000", ""]
+
+    # NULL config → legacy fallback.
+    assert _build_params(None, {}, legacy=["a", "b"]) == ["a", "b"]
+
+    # Empty list → 0-param template (e.g. hello_world). Not a fallback.
+    assert _build_params([], {}, legacy=["a", "b"]) == []
+
+
+@pytest.mark.asyncio
 async def test_patch_whatsapp_settings_persists_and_routes(
     client: AsyncClient, test_owner: dict, test_property: dict
 ):

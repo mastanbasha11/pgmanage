@@ -26,10 +26,99 @@ TEMPLATES: dict[str, dict[str, str]] = {
 
 
 # Maps logical key → DB columns holding the per-property override for that template.
-_OVERRIDE_COLUMNS: dict[str, tuple[str, str]] = {
-    "rent_reminder": ("wa_rent_reminder_template_name", "wa_rent_reminder_template_language"),
-    "rent_overdue":  ("wa_rent_overdue_template_name",  "wa_rent_overdue_template_language"),
+_OVERRIDE_COLUMNS: dict[str, tuple[str, str, str]] = {
+    # (name_col, language_col, params_col)
+    "rent_reminder": (
+        "wa_rent_reminder_template_name",
+        "wa_rent_reminder_template_language",
+        "wa_rent_reminder_template_params",
+    ),
+    "rent_overdue": (
+        "wa_rent_overdue_template_name",
+        "wa_rent_overdue_template_language",
+        "wa_rent_overdue_template_params",
+    ),
 }
+
+
+# ── Built-in variable catalogue ──────────────────────────────────────────────
+#
+# Every variable that can appear in a {{N}} slot. The Templates wizard reads
+# the per-template list to populate the dropdown next to each placeholder.
+# When `send_whatsapp_template` is called it receives a `context` dict with
+# the live values for these keys (filled in by the caller — rent_reminders
+# task, the test-send endpoint, etc.).
+
+BUILT_IN_VARIABLES: dict[str, dict[str, list[dict[str, str]]]] = {
+    "rent_reminder": {
+        "variables": [
+            {"key": "tenant_name",       "label": "Resident's full name",            "example": "Asha Rao"},
+            {"key": "tenant_first_name", "label": "Resident's first name",           "example": "Asha"},
+            {"key": "amount_rupees",     "label": "Amount due (₹ formatted)",        "example": "₹9,000"},
+            {"key": "month_name",        "label": "Billing month (e.g. June 2026)",  "example": "June 2026"},
+            {"key": "due_date",          "label": "Due date (e.g. 10 Jun 2026)",     "example": "10 Jun 2026"},
+            {"key": "upi_vpa",           "label": "Property UPI handle",             "example": "loop@okhdfc"},
+            {"key": "property_name",     "label": "Property display name",           "example": "Loop Coliving PG"},
+            {"key": "room_label",        "label": "Room · Bed (e.g. 101·A)",         "example": "101·A"},
+        ],
+    },
+    "rent_overdue": {
+        "variables": [
+            {"key": "tenant_name",       "label": "Resident's full name",            "example": "Asha Rao"},
+            {"key": "tenant_first_name", "label": "Resident's first name",           "example": "Asha"},
+            {"key": "amount_rupees",     "label": "Outstanding (₹ formatted)",       "example": "₹9,000"},
+            {"key": "month_name",        "label": "Billing month",                   "example": "June 2026"},
+            {"key": "days_overdue",      "label": "Days overdue",                    "example": "7"},
+            {"key": "upi_vpa",           "label": "Property UPI handle",             "example": "loop@okhdfc"},
+            {"key": "property_name",     "label": "Property display name",           "example": "Loop Coliving PG"},
+            {"key": "manager_phone",     "label": "Manager's phone (with +91)",      "example": "+919999999999"},
+        ],
+    },
+}
+
+
+def _build_params(
+    params_config: list[dict] | None,
+    context: dict[str, str],
+    legacy: list[str],
+) -> list[str]:
+    """
+    Translate the per-property params config into the ordered string list
+    that goes into Meta's `components[0].parameters` body.
+
+    `params_config` shape: list of {kind, key|value} dicts (see migration 018).
+    `context` shape: { variable_key -> already-formatted-string }.
+    `legacy` is the historical hardcoded ordered list (5 strings for
+    rent_reminder, 4 for rent_overdue) — used as a fallback when the
+    property hasn't configured params yet, so existing setups keep working.
+
+    Unknown variable keys resolve to empty string rather than raising — Meta
+    rejects messages with empty params, but a config-time validation error
+    elsewhere is the right way to catch that; we don't want a runtime KeyError
+    silently swallowed.
+    """
+    if params_config is None:
+        return legacy
+    if not isinstance(params_config, list):
+        return legacy
+    out: list[str] = []
+    for entry in params_config:
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("kind")
+        if kind == "variable":
+            key = entry.get("key") or ""
+            out.append(str(context.get(key, "")))
+        elif kind == "static":
+            out.append(str(entry.get("value", "")))
+    return out
+
+
+def _params_config_for(template_name: str, overrides: dict) -> list[dict] | None:
+    cols = _OVERRIDE_COLUMNS.get(template_name)
+    if not cols:
+        return None
+    return overrides.get(cols[2])
 
 
 def _resolve_template(template_name: str, overrides: dict) -> tuple[str, str]:
@@ -41,7 +130,7 @@ def _resolve_template(template_name: str, overrides: dict) -> tuple[str, str]:
     """
     cols = _OVERRIDE_COLUMNS.get(template_name)
     if cols:
-        name_col, lang_col = cols
+        name_col, lang_col, _ = cols
         name = overrides.get(name_col)
         lang = overrides.get(lang_col)
         if name:
@@ -70,7 +159,9 @@ async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | No
                 "SELECT whatsapp_phone_number_id, whatsapp_access_token_secret_arn, "
                 "       whatsapp_access_token, "
                 "       wa_rent_reminder_template_name, wa_rent_reminder_template_language, "
-                "       wa_rent_overdue_template_name,  wa_rent_overdue_template_language "
+                "       wa_rent_reminder_template_params, "
+                "       wa_rent_overdue_template_name,  wa_rent_overdue_template_language, "
+                "       wa_rent_overdue_template_params "
                 "FROM properties WHERE id = :id"
             ),
             {"id": str(property_id)},
@@ -104,8 +195,10 @@ async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | No
         "overrides": {
             "wa_rent_reminder_template_name":     row["wa_rent_reminder_template_name"],
             "wa_rent_reminder_template_language": row["wa_rent_reminder_template_language"],
+            "wa_rent_reminder_template_params":   row["wa_rent_reminder_template_params"],
             "wa_rent_overdue_template_name":      row["wa_rent_overdue_template_name"],
             "wa_rent_overdue_template_language":  row["wa_rent_overdue_template_language"],
+            "wa_rent_overdue_template_params":    row["wa_rent_overdue_template_params"],
         },
     }
 
@@ -116,8 +209,22 @@ async def send_whatsapp_template(
     template_params: list[str],
     property_id: UUID,
     db,
+    context: dict[str, str] | None = None,
 ) -> dict:
-    """Send a pre-approved WhatsApp template message from a property's number."""
+    """
+    Send a pre-approved WhatsApp template message from a property's number.
+
+    Param resolution:
+      1. If the property has saved a params config for this template
+         (`wa_<name>_template_params`), substitute each `{kind, key|value}`
+         entry from the `context` dict and ignore `template_params`.
+      2. Otherwise fall back to `template_params` (the legacy hardcoded
+         ordered list, kept for callers that haven't been updated yet).
+
+    A zero-param payload omits the `components` array entirely — Meta
+    rejects a `{"type":"body","parameters":[]}` body for templates that
+    don't declare any placeholder (this is what trips `hello_world`).
+    """
     creds = await _get_property_whatsapp_credentials(property_id, db)
     if not creds:
         return {"success": False, "error": "WhatsApp not configured for this org"}
@@ -127,28 +234,37 @@ async def send_whatsapp_template(
     if not phone.startswith("+"):
         phone = "+91" + phone
 
-    meta_name, lang_code = _resolve_template(template_name, creds.get("overrides", {}))
+    overrides = creds.get("overrides", {})
+    meta_name, lang_code = _resolve_template(template_name, overrides)
+
+    # Resolve params: per-property config first, then the legacy ordered list.
+    params_config = _params_config_for(template_name, overrides)
+    final_params = _build_params(params_config, context or {}, template_params)
+
+    template_block: dict = {
+        "name": meta_name,
+        "language": {"code": lang_code},
+    }
+    if final_params:
+        template_block["components"] = [
+            {
+                "type": "body",
+                "parameters": [{"type": "text", "text": p} for p in final_params],
+            }
+        ]
+
     payload = {
         "messaging_product": "whatsapp",
         "to": phone,
         "type": "template",
-        "template": {
-            "name": meta_name,
-            "language": {"code": lang_code},
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [{"type": "text", "text": p} for p in template_params],
-                }
-            ],
-        },
+        "template": template_block,
     }
 
     url = f"https://graph.facebook.com/v18.0/{creds['phone_number_id']}/messages"
 
     if settings.is_local:
         # In local dev, just log and return success
-        print(f"[WA] {template_name} → {phone}: {template_params}")
+        print(f"[WA] {template_name} → {phone}: {final_params}")
         return {"success": True, "message_id": "dev_mock_id"}
 
     try:
@@ -323,14 +439,28 @@ async def send_rent_reminder(
     org_id: UUID,
     property_id: UUID,
     db,
+    property_name: str = "",
+    room_label: str = "",
 ) -> None:
     amount_rupees = f"₹{amount_paise // 100:,}"
+    context = {
+        "tenant_name": tenant_name,
+        "tenant_first_name": tenant_name.split(" ")[0] if tenant_name else "",
+        "amount_rupees": amount_rupees,
+        "month_name": month_name,
+        "due_date": due_date,
+        "upi_vpa": upi_id,
+        "property_name": property_name,
+        "room_label": room_label,
+    }
     result = await send_whatsapp_template(
         to_phone=tenant_phone,
         template_name="rent_reminder",
+        # Legacy ordered fallback for properties that haven't run the wizard yet.
         template_params=[tenant_name, amount_rupees, month_name, due_date, upi_id],
         property_id=property_id,
         db=db,
+        context=context,
     )
     status = "SENT" if result["success"] else "FAILED"
     await log_notification(
@@ -353,14 +483,28 @@ async def send_rent_overdue(
     org_id: UUID,
     property_id: UUID,
     db,
+    days_overdue: int = 0,
+    upi_vpa: str = "",
+    property_name: str = "",
 ) -> None:
     amount_rupees = f"₹{amount_paise // 100:,}"
+    context = {
+        "tenant_name": tenant_name,
+        "tenant_first_name": tenant_name.split(" ")[0] if tenant_name else "",
+        "amount_rupees": amount_rupees,
+        "month_name": month_name,
+        "days_overdue": str(days_overdue),
+        "upi_vpa": upi_vpa,
+        "property_name": property_name,
+        "manager_phone": manager_phone,
+    }
     result = await send_whatsapp_template(
         to_phone=tenant_phone,
         template_name="rent_overdue",
         template_params=[tenant_name, amount_rupees, month_name, manager_phone],
         property_id=property_id,
         db=db,
+        context=context,
     )
     status = "SENT" if result["success"] else "FAILED"
     await log_notification(

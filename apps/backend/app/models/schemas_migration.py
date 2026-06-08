@@ -101,8 +101,10 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             -- Optional Meta template overrides; NULL → use defaults in notification_service.TEMPLATES.
             wa_rent_reminder_template_name VARCHAR(200),
             wa_rent_reminder_template_language VARCHAR(20),
+            wa_rent_reminder_template_params JSONB,
             wa_rent_overdue_template_name VARCHAR(200),
             wa_rent_overdue_template_language VARCHAR(20),
+            wa_rent_overdue_template_params JSONB,
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
