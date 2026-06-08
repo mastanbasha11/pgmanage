@@ -14,6 +14,7 @@ import { AppState, AppStateStatus, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAppStore } from '../lib/store';
 
 const queryClient = new QueryClient({
@@ -56,19 +57,21 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <QueryClientProvider client={queryClient}>
-          <AuthGuard />
-          <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
-            <Stack.Screen name="auth" />
-            <Stack.Screen name="tabs" />
-            <Stack.Screen name="tenant-portal" />
-            <Stack.Screen name="residents/[id]" />
-            <Stack.Screen name="payments/new" options={{ presentation: 'modal' }} />
-          </Stack>
-        </QueryClientProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <QueryClientProvider client={queryClient}>
+            <AuthGuard />
+            <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+              <Stack.Screen name="auth" />
+              <Stack.Screen name="tabs" />
+              <Stack.Screen name="tenant-portal" />
+              <Stack.Screen name="residents/[id]" />
+              <Stack.Screen name="payments/new" options={{ presentation: 'modal' }} />
+            </Stack>
+          </QueryClientProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }

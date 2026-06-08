@@ -213,7 +213,21 @@ export const i18n = new I18n({ en, hi, te });
 // Fallback chain: missing hi/te keys fall back to en automatically.
 i18n.enableFallback = true;
 i18n.defaultLocale = 'en';
-i18n.locale = (Localization.getLocales()[0]?.languageCode as 'en' | 'hi' | 'te' | undefined) ?? 'en';
+
+// `Localization.getLocales()` is a sync native call; on some Android cold
+// starts the native module isn't ready yet and throws — which would crash
+// the JS bundle at module-load time (before our ErrorBoundary mounts).
+// Guard so the worst case is just "default to English".
+function detectInitialLocale(): 'en' | 'hi' | 'te' {
+  try {
+    const code = Localization.getLocales()[0]?.languageCode;
+    if (code === 'hi' || code === 'te') return code;
+  } catch {
+    /* fall through */
+  }
+  return 'en';
+}
+i18n.locale = detectInitialLocale();
 
 export type Lang = 'en' | 'hi' | 'te';
 
