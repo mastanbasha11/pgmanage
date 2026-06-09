@@ -8,7 +8,7 @@
  * SecureStore but the user record is a fine proxy for "signed-in".
  */
 import { useEffect } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -39,13 +39,20 @@ function AuthGuard() {
   const user = useAppStore((s) => s.user);
   const segments = useSegments();
   const router = useRouter();
+  // useRootNavigationState().key becomes truthy only AFTER the Stack
+  // (root navigator) is mounted. Calling router.replace before that point
+  // throws "Attempted to navigate before mounting the Root Layout
+  // component" — exactly what happens on a cold start where this
+  // component's useEffect fires the same tick the Stack is still mounting.
+  const navState = useRootNavigationState();
 
   useEffect(() => {
+    if (!navState?.key) return;
     const inAuth = segments[0] === 'auth';
     const inPortal = segments[0] === 'tenant-portal';
     if (!user && !inAuth && !inPortal) router.replace('/auth/login');
     if (user && inAuth) router.replace('/tabs');
-  }, [user, segments, router]);
+  }, [user, segments, router, navState?.key]);
 
   return null;
 }
