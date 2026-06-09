@@ -45,9 +45,10 @@ export default function TabsLayout() {
       <Tabs.Screen name="rent" options={{ title: t('tab.rent'), tabBarIcon: icon('cash-outline') }} />
       <Tabs.Screen name="rooms" options={{ title: t('tab.rooms'), tabBarIcon: icon('bed-outline') }} />
       <Tabs.Screen name="more" options={{ title: t('tab.more'), tabBarIcon: icon('settings-outline') }} />
-      {/* Expenses placeholder is not surfaced in the bar in v1 — file still
-          exists so route lookups don't break if linked from elsewhere. */}
+      {/* Secondary screens — not in the bar (5 visible is the phone max),
+          reachable from More → Manage or the Dashboard's quick actions. */}
       <Tabs.Screen name="expenses" options={{ href: null }} />
+      <Tabs.Screen name="leads" options={{ href: null }} />
     </Tabs>
   );
 }

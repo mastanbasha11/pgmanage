@@ -91,6 +91,28 @@ export default function SettingsTab() {
           </Card>
         )}
 
+        {/* Manage — secondary screens not in the bottom bar. */}
+        <Card>
+          <Text style={styles.label}>Manage</Text>
+          <View style={{ gap: space.xs, marginTop: space.sm }}>
+            <Row
+              iconName="megaphone-outline"
+              label="Leads"
+              onPress={() => router.push('/tabs/leads')}
+            />
+            <Row
+              iconName="receipt-outline"
+              label="Expenses"
+              onPress={() => router.push('/tabs/expenses')}
+            />
+            <Row
+              iconName="bed-outline"
+              label={t('tab.rooms')}
+              onPress={() => router.push('/tabs/rooms')}
+            />
+          </View>
+        </Card>
+
         {/* Property switcher */}
         {(props?.items ?? []).length > 1 && (
           <Card>

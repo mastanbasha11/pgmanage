@@ -213,6 +213,14 @@ export const i18n = new I18n({ en, hi, te });
 // Fallback chain: missing hi/te keys fall back to en automatically.
 i18n.enableFallback = true;
 i18n.defaultLocale = 'en';
+// CRITICAL: our keys contain dots (`tab.dashboard`, `common.signin`, …)
+// and we want them treated as literal flat strings, NOT as nested-object
+// paths into the translation tree. i18n-js's default separator is `.`,
+// which would split every key and try `translations.en.tab.dashboard`
+// (nested) — leading to `[missing "en.tab.dashboard" translation]` for
+// every single label. Setting the separator to a control char that
+// never appears in real keys makes lookups flat.
+i18n.defaultSeparator = '\x1f';
 
 // `Localization.getLocales()` is a sync native call; on some Android cold
 // starts the native module isn't ready yet and throws — which would crash

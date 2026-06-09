@@ -141,6 +141,20 @@ export default function DashboardTab() {
                 />
                 <Button
                   variant="secondary"
+                  iconName="megaphone-outline"
+                  label="Leads"
+                  onPress={() => router.push('/tabs/leads')}
+                  block
+                />
+                <Button
+                  variant="secondary"
+                  iconName="receipt-outline"
+                  label="Expenses"
+                  onPress={() => router.push('/tabs/expenses')}
+                  block
+                />
+                <Button
+                  variant="secondary"
                   iconName="bed-outline"
                   label={t('tab.rooms')}
                   onPress={() => router.push('/tabs/rooms')}
