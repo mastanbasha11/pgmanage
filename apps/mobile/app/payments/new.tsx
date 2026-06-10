@@ -43,9 +43,14 @@ import {
   rupees,
   Screen,
 } from '../../components/ui';
-
-type PaymentType = 'RENT' | 'ADVANCE' | 'DAILY' | 'DEPOSIT' | 'REFUND' | 'FOOD' | 'OTHER_CHARGE';
-type Mode = 'CASH' | 'UPI' | 'BANK';
+import {
+  buildPaymentBody,
+  showDays as helperShowDays,
+  showMonthYear as helperShowMonthYear,
+  showReference as helperShowReference,
+  type PaymentType,
+  type PaymentMode as Mode,
+} from '../../lib/payment-form';
 
 const TYPE_LABEL: Record<PaymentType, string> = {
   RENT: 'Rent',
@@ -112,9 +117,9 @@ export default function AddPaymentScreen() {
         .then((r) => r.data),
   });
 
-  const showMonthYear = type === 'RENT' || type === 'FOOD' || type === 'OTHER_CHARGE';
-  const showDays = type === 'DAILY';
-  const showReference = mode !== 'CASH';
+  const showMonthYear = helperShowMonthYear(type);
+  const showDays = helperShowDays(type);
+  const showReference = helperShowReference(mode);
 
   const { mutateAsync, isPending } = useMutation({
     mutationFn: (body: object) =>
@@ -132,23 +137,19 @@ export default function AddPaymentScreen() {
       return;
     }
     try {
-      // For DAILY type the backend expects payment_type=RENT with for_days.
-      const payment_type = type === 'DAILY' ? 'RENT' : type;
-      const body: Record<string, unknown> = {
-        tenant_id: tenantId,
-        amount_paise: Math.round(rupeesValue * 100),
-        payment_type,
-        payment_mode: mode,
-        paid_to: paidTo || undefined,
-        reference_number: showReference ? referenceNumber || undefined : undefined,
-        collected_at: collectedOn,
+      const body = buildPaymentBody({
+        tenantId,
+        amountRupees: rupeesValue,
+        type,
+        mode,
+        paidTo: paidTo || undefined,
+        referenceNumber: referenceNumber || undefined,
+        forMonth: Number(forMonth) || undefined,
+        forYear: Number(forYear) || undefined,
+        forDays: Number(forDays) || undefined,
+        collectedOn,
         notes: notes || undefined,
-      };
-      if (showMonthYear) {
-        body.for_month = Number(forMonth) || undefined;
-        body.for_year = Number(forYear) || undefined;
-      }
-      if (showDays) body.for_days = Number(forDays) || undefined;
+      });
 
       await mutateAsync(body);
 

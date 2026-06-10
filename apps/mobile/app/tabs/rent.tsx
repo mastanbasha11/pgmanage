@@ -31,6 +31,12 @@ import {
   Screen,
   StatusPill,
 } from '../../components/ui';
+import {
+  countByStatus,
+  filterByStatus,
+  sumOutstanding,
+  type LedgerFilter,
+} from '../../lib/ledger-filter';
 
 interface LedgerEntry {
   id: string;
@@ -46,15 +52,13 @@ interface LedgerEntry {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-type RentFilter = 'ALL' | 'UNPAID' | 'PARTIAL' | 'PAID';
-
 export default function RentTab() {
   const { selectedPropertyId, voiceGuidance } = useAppStore();
   const router = useRouter();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year] = useState(now.getFullYear());
-  const [filter, setFilter] = useState<RentFilter>('ALL');
+  const [filter, setFilter] = useState<LedgerFilter>('ALL');
 
   useEffect(() => {
     if (voiceGuidance) speak(t('tab.rent'));
@@ -71,11 +75,11 @@ export default function RentTab() {
     enabled: !!selectedPropertyId,
   });
 
-  const allEntries = data?.items ?? [];
-  const entries =
-    filter === 'ALL' ? allEntries : allEntries.filter((e) => e.status === filter);
-  // Outstanding still computed over ALL entries — filter is a view, not a scope.
-  const outstanding = allEntries.reduce((s, e) => s + (e.outstanding_paise ?? 0), 0);
+  const allEntries: LedgerEntry[] = data?.items ?? [];
+  const entries = filterByStatus<LedgerEntry>(allEntries, filter);
+  // Outstanding always sums over ALL entries — filter is a view, not a scope.
+  const outstanding = sumOutstanding(allEntries);
+  const statusCounts = countByStatus(allEntries);
 
   function statusTone(s: LedgerEntry['status']): 'success' | 'warn' | 'danger' {
     return s === 'PAID' ? 'success' : s === 'PARTIAL' ? 'warn' : 'danger';
@@ -115,10 +119,6 @@ export default function RentTab() {
         <View style={{ flexDirection: 'row', gap: space.xs, paddingBottom: space.sm }}>
           {(['ALL', 'UNPAID', 'PARTIAL', 'PAID'] as const).map((f) => {
             const active = filter === f;
-            const count =
-              f === 'ALL'
-                ? allEntries.length
-                : allEntries.filter((e) => e.status === f).length;
             return (
               <Pressable
                 key={f}
@@ -128,7 +128,7 @@ export default function RentTab() {
                 accessibilityState={{ selected: active }}
               >
                 <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
-                  {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()} ({count})
+                  {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()} ({statusCounts[f] ?? 0})
                 </Text>
               </Pressable>
             );

@@ -24,6 +24,13 @@ import { t } from '../../lib/i18n';
 import { speak } from '../../lib/voice';
 import { colors, radius, space, type as fontSize } from '../../lib/theme';
 import { Button, Card, Header, KpiCard, Loading, rupees, Screen } from '../../components/ui';
+import {
+  deriveCashIn,
+  deriveCashOut,
+  deriveNetIncome,
+  deriveOccupied,
+  derivePercent,
+} from '../../lib/dashboard-derive';
 
 /**
  * Actual shape returned by GET /api/v1/dashboard/summary (web's authority).
@@ -74,8 +81,8 @@ export default function DashboardTab() {
     if (voiceGuidance) speak(t('tab.dashboard'));
   }, [voiceGuidance]);
 
-  const occupiedBeds = data ? Math.max((data.total_beds ?? 0) - (data.vacant_beds ?? 0), 0) : 0;
-  const occupancyPct = data ? Math.round((data.occupancy_rate ?? 0) * 100) : 0;
+  const occupiedBeds = data ? deriveOccupied(data.total_beds, data.vacant_beds) : 0;
+  const occupancyPct = data ? derivePercent(data.occupancy_rate) : 0;
 
   return (
     <Screen padded={false}>
@@ -125,12 +132,11 @@ export default function DashboardTab() {
               />
             ) : (
               <PnlKpis
-                cashIn={
-                  (data.collected_rent_paise ?? 0) + (data.advance_received_paise ?? 0)
-                }
+                cashIn={deriveCashIn(data)}
+                cashOut={deriveCashOut(data)}
                 expenses={data.total_expenses_paise}
                 refunds={data.refunds_given_paise}
-                netIncome={data.net_income_paise}
+                netIncome={data.net_income_paise ?? deriveNetIncome(data)}
               />
             )}
           </>
@@ -354,11 +360,13 @@ function RentKpis({
 
 function PnlKpis({
   cashIn,
+  cashOut,
   expenses,
   refunds,
   netIncome,
 }: {
   cashIn: number;
+  cashOut: number;
   expenses: number;
   refunds: number;
   netIncome: number;
@@ -375,7 +383,7 @@ function PnlKpis({
         />
         <KpiCard
           label="Cash Out"
-          value={rupees((expenses ?? 0) + (refunds ?? 0))}
+          value={rupees(cashOut ?? 0)}
           hint="Expenses + refunds"
           tone="danger"
           iconName="trending-down-outline"

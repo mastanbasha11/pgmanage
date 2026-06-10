@@ -24,8 +24,7 @@ import { t } from '../../lib/i18n';
 import { speak } from '../../lib/voice';
 import { colors, radius, space, type as fontSize, TOUCH_TARGET } from '../../lib/theme';
 import { Empty, Header, Loading, StatusPill, rupees, Screen } from '../../components/ui';
-
-type StatusFilter = 'ACTIVE' | 'NOTICE' | 'CHECKED_OUT' | 'ALL';
+import { buildTenantParams, type StatusFilter } from '../../lib/tenants-filter';
 
 interface Resident {
   id: string;
@@ -59,13 +58,7 @@ export default function ResidentsTab() {
           params: {
             property_id: selectedPropertyId,
             search: search || undefined,
-            status:
-              filter === 'ALL'
-                ? undefined
-                : filter === 'NOTICE'
-                  ? 'ACTIVE'
-                  : filter,
-            has_notice: filter === 'NOTICE' ? true : undefined,
+            ...buildTenantParams(filter),
           },
         })
         .then((r) => r.data),
