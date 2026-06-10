@@ -414,3 +414,5 @@ See "Play Store submission checklist" above. Recommended order:
 |------|------|----|
 | 2026-06-07 | Phase 1 audit completed. | session#current |
 | 2026-06-08 | Phase 2-5 shipped: foundation modules + 8 screens + build pipeline + this doc. TypeScript clean. | session#current |
+| 2026-06-09 | i18n separator fix; Leads tab; More→Manage section; jest setup + 8/8 unit tests; MANUAL_TEST_PLAN. | session#current |
+| 2026-06-10 | Dashboard correctness (real /dashboard/summary field mapping) + section switcher (Occupancy / Rent / P&L) gated to OWNER/PARTNER. Rent status filter (Unpaid/Partial/Paid/All). Take Payment rewritten as inline AddPayment with Type (Rent/Advance/Daily/Deposit/Refund/Other), inline tenant search, days, mode, paid-to/by, reference. Resident detail: Edit profile modal + ID-proof upload via expo-image-picker. Expenses: property_id param fix + Mine/Everyone scope filter (Everyone gated to OWNER/PARTNER). Bookings tab deferred. | session#current |

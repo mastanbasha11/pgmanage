@@ -46,12 +46,15 @@ interface LedgerEntry {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+type RentFilter = 'ALL' | 'UNPAID' | 'PARTIAL' | 'PAID';
+
 export default function RentTab() {
   const { selectedPropertyId, voiceGuidance } = useAppStore();
   const router = useRouter();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year] = useState(now.getFullYear());
+  const [filter, setFilter] = useState<RentFilter>('ALL');
 
   useEffect(() => {
     if (voiceGuidance) speak(t('tab.rent'));
@@ -68,8 +71,11 @@ export default function RentTab() {
     enabled: !!selectedPropertyId,
   });
 
-  const entries = data?.items ?? [];
-  const outstanding = entries.reduce((s, e) => s + (e.outstanding_paise ?? 0), 0);
+  const allEntries = data?.items ?? [];
+  const entries =
+    filter === 'ALL' ? allEntries : allEntries.filter((e) => e.status === filter);
+  // Outstanding still computed over ALL entries — filter is a view, not a scope.
+  const outstanding = allEntries.reduce((s, e) => s + (e.outstanding_paise ?? 0), 0);
 
   function statusTone(s: LedgerEntry['status']): 'success' | 'warn' | 'danger' {
     return s === 'PAID' ? 'success' : s === 'PARTIAL' ? 'warn' : 'danger';
@@ -103,6 +109,31 @@ export default function RentTab() {
             ))}
           </View>
         </ScrollView>
+
+        {/* Status filter chips. ALL is default; PARTIAL + UNPAID are the
+            two an owner usually wants to filter to when chasing collections. */}
+        <View style={{ flexDirection: 'row', gap: space.xs, paddingBottom: space.sm }}>
+          {(['ALL', 'UNPAID', 'PARTIAL', 'PAID'] as const).map((f) => {
+            const active = filter === f;
+            const count =
+              f === 'ALL'
+                ? allEntries.length
+                : allEntries.filter((e) => e.status === f).length;
+            return (
+              <Pressable
+                key={f}
+                onPress={() => setFilter(f)}
+                style={[styles.statusChip, active && styles.statusChipActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
+                  {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()} ({count})
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       {isLoading ? (
@@ -169,6 +200,17 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.accent },
   chipText: { fontSize: fontSize.small, fontWeight: '700', color: colors.textMuted },
   chipTextActive: { color: colors.white },
+  statusChip: {
+    paddingHorizontal: space.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  statusChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  statusChipText: { fontSize: fontSize.caption, fontWeight: '700', color: colors.textMuted },
+  statusChipTextActive: { color: colors.white },
   entry: {
     flexDirection: 'row',
     alignItems: 'center',

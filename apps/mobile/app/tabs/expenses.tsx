@@ -20,26 +20,43 @@ type Step = 'category' | 'amount' | 'confirm';
 interface Category { id: string; name: string; icon?: string; }
 
 export default function ExpensesScreen() {
-  const { selectedPropertyId } = useAuthStore();
+  const { selectedPropertyId, user, canAccessFinancials } = useAuthStore();
   const qc = useQueryClient();
+  const hasFinancials = canAccessFinancials();
 
   const [step, setStep] = useState<Step>('category');
   const [selectedCat, setSelectedCat] = useState<Category | null>(null);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
+  // Owner/Partner can switch between everyone's expenses and just their own.
+  // Other roles can only ever see their own (gated by the backend too).
+  const [scope, setScope] = useState<'mine' | 'all'>(hasFinancials ? 'all' : 'mine');
 
+  // /expense-categories needs property_id — passing none returns 422.
   const { data: cats } = useQuery({
-    queryKey: ['expense-categories'],
-    queryFn: () => api.get('/expense-categories').then((r) => r.data),
+    queryKey: ['expense-categories', selectedPropertyId],
+    queryFn: () =>
+      api
+        .get('/expense-categories', { params: { property_id: selectedPropertyId } })
+        .then((r) => r.data),
+    enabled: !!selectedPropertyId,
     staleTime: Infinity,
   });
 
   const { data: recent, isLoading } = useQuery({
-    queryKey: ['expenses-recent', selectedPropertyId],
+    queryKey: ['expenses-recent', selectedPropertyId, scope, user?.user_id],
     queryFn: () =>
-      api.get('/expenses', {
-        params: { property_id: selectedPropertyId, page_size: 20 },
-      }).then((r) => r.data),
+      api
+        .get('/expenses', {
+          params: {
+            property_id: selectedPropertyId,
+            page_size: 20,
+            // Backend accepts a creator filter. For non-financial roles we
+            // always scope; OWNER/PARTNER can flip via the chip below.
+            created_by: scope === 'mine' ? user?.user_id : undefined,
+          },
+        })
+        .then((r) => r.data),
     enabled: !!selectedPropertyId,
   });
 
@@ -164,7 +181,27 @@ export default function ExpensesScreen() {
 
       {/* Recent expenses */}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-        <Text style={styles.sectionTitle}>Recent Expenses</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Text style={styles.sectionTitle}>Recent Expenses</Text>
+          <View style={{ flex: 1 }} />
+          {hasFinancials && (
+            <View style={{ flexDirection: 'row', gap: 4 }}>
+              {(['mine', 'all'] as const).map((s) => (
+                <TouchableOpacity
+                  key={s}
+                  onPress={() => setScope(s)}
+                  style={[styles.scopeChip, scope === s && styles.scopeChipActive]}
+                >
+                  <Text
+                    style={[styles.scopeChipText, scope === s && styles.scopeChipTextActive]}
+                  >
+                    {s === 'mine' ? 'Mine' : 'Everyone'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
         {isLoading && <ActivityIndicator color="#2563eb" style={{ marginTop: 20 }} />}
         {(recent?.items ?? []).map((e: { id: string; category_name: string; description: string; amount_paise: number; expense_date: string; status: string }) => (
           <View key={e.id} style={styles.expenseRow}>
@@ -259,4 +296,15 @@ const styles = StyleSheet.create({
   expDesc: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
   expMeta: { fontSize: 11, color: '#94a3b8', marginTop: 2 },
   expAmt: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  scopeChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  scopeChipActive: { backgroundColor: '#0F172A', borderColor: '#0F172A' },
+  scopeChipText: { fontSize: 11, fontWeight: '700', color: '#64748b' },
+  scopeChipTextActive: { color: '#fff' },
 });

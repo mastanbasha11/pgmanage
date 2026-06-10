@@ -18,6 +18,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 
 import { api, getApiError } from '../../lib/api';
 import { t } from '../../lib/i18n';
@@ -55,6 +56,17 @@ interface ResidentDetail {
     advance_paid_paise?: number;
     monthly_rent_paise?: number;
   } | null;
+  // Editable profile fields the Edit dialog touches.
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  emergency_contact_relation?: string;
+  occupation?: string;
+  employer_name?: string;
+  hometown?: string;
+  permanent_address?: string;
+  id_type?: string;
+  id_number?: string;
+  id_proof_url?: string;
 }
 
 interface Payment {
@@ -72,7 +84,10 @@ export default function ResidentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const qc = useQueryClient();
+  const { canAccessFinancials } = useAppStore();
   const [showNotice, setShowNotice] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [idUploading, setIdUploading] = useState(false);
 
   const { data: r, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['resident', id],
@@ -151,27 +166,40 @@ export default function ResidentDetailScreen() {
 
         {/* Actions */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-          {isActive && (
-            <>
-              <Button
-                variant="primary"
-                iconName="cash-outline"
-                label={t('res.record_payment')}
-                onPress={() =>
-                  router.push({
-                    pathname: '/payments/new',
-                    params: { tenant_id: r.id, name: r.name },
-                  })
-                }
-              />
-              <Button
-                variant="secondary"
-                iconName="calendar-outline"
-                label={r.notice_given_date ? 'Edit notice' : t('res.give_notice')}
-                onPress={() => setShowNotice(true)}
-              />
-            </>
+          {isActive && canAccessFinancials() && (
+            <Button
+              variant="primary"
+              iconName="cash-outline"
+              label={t('res.record_payment')}
+              onPress={() =>
+                router.push({
+                  pathname: '/payments/new',
+                  params: { tenant_id: r.id, name: r.name },
+                })
+              }
+            />
           )}
+          {isActive && (
+            <Button
+              variant="secondary"
+              iconName="calendar-outline"
+              label={r.notice_given_date ? 'Edit notice' : t('res.give_notice')}
+              onPress={() => setShowNotice(true)}
+            />
+          )}
+          <Button
+            variant="secondary"
+            iconName="create-outline"
+            label="Edit"
+            onPress={() => setShowEdit(true)}
+          />
+          <Button
+            variant="secondary"
+            iconName="cloud-upload-outline"
+            label="Upload ID"
+            onPress={uploadIdProof}
+            loading={idUploading}
+          />
           <Button
             variant="ghost"
             iconName="logo-whatsapp"
@@ -224,8 +252,66 @@ export default function ResidentDetailScreen() {
           }}
         />
       )}
+
+      {showEdit && r && (
+        <EditTenantModal
+          tenant={r}
+          onClose={() => setShowEdit(false)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ['resident', r.id] });
+            qc.invalidateQueries({ queryKey: ['residents-mobile'] });
+            setShowEdit(false);
+          }}
+        />
+      )}
     </Screen>
   );
+
+  /**
+   * Aadhar / ID-proof upload. Uses expo-image-picker for camera-or-gallery
+   * choice; we POST the selected file as multipart/form-data to the
+   * existing /tenants/{id}/id-proof endpoint the web uses.
+   */
+  async function uploadIdProof() {
+    if (!r) return;
+    try {
+      setIdUploading(true);
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        alertOnce('Photo permission denied — enable it in Settings to upload.');
+        return;
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.85,
+        allowsMultipleSelection: false,
+      });
+      if (res.canceled) return;
+      const asset = res.assets[0];
+      const form = new FormData();
+      // RN's FormData accepts the {uri, name, type} blob descriptor.
+      form.append('file', {
+        uri: asset.uri,
+        name: asset.fileName ?? `id-${r.id}.jpg`,
+        type: asset.mimeType ?? 'image/jpeg',
+      } as unknown as Blob);
+      await api.post(`/tenants/${r.id}/id-proof`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      qc.invalidateQueries({ queryKey: ['resident', r.id] });
+      alertOnce('ID proof uploaded.');
+    } catch (err) {
+      alertOnce(getApiError(err));
+    } finally {
+      setIdUploading(false);
+    }
+  }
+}
+
+function alertOnce(msg: string) {
+  // Tiny wrapper so the resident page doesn't depend on Alert in two places.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('react-native').Alert.alert(msg);
 }
 
 function NoticeModal({
@@ -368,3 +454,166 @@ const styles = StyleSheet.create({
 
 // Suppress unused-icon warning — re-exported here for future tabs
 export { Ionicons as _Ionicons };
+
+// ── Edit Tenant ────────────────────────────────────────────────────────────
+
+function EditTenantModal({
+  tenant,
+  onClose,
+  onSaved,
+}: {
+  tenant: ResidentDetail;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  // Mirrors EditTenantDialog on the web — same field set, same endpoint,
+  // just laid out for one column on phone.
+  const [name, setName] = useState(tenant.name);
+  const [phone, setPhone] = useState(tenant.phone);
+  const [email, setEmail] = useState(tenant.email ?? '');
+  const [idType, setIdType] = useState(tenant.id_type ?? 'AADHAR');
+  const [idNumber, setIdNumber] = useState(tenant.id_number ?? '');
+  const [emergencyName, setEmergencyName] = useState(tenant.emergency_contact_name ?? '');
+  const [emergencyPhone, setEmergencyPhone] = useState(tenant.emergency_contact_phone ?? '');
+  const [emergencyRelation, setEmergencyRelation] = useState(
+    tenant.emergency_contact_relation ?? '',
+  );
+  const [occupation, setOccupation] = useState(tenant.occupation ?? '');
+  const [hometown, setHometown] = useState(tenant.hometown ?? '');
+  const [permanentAddress, setPermanentAddress] = useState(tenant.permanent_address ?? '');
+  const [expectedMoveOut, setExpectedMoveOut] = useState(tenant.expected_move_out_date ?? '');
+  const [error, setError] = useState('');
+
+  const { mutateAsync, isPending } = useMutation({
+    mutationFn: (body: object) => api.patch(`/tenants/${tenant.id}`, body).then((r) => r.data),
+  });
+
+  async function save() {
+    setError('');
+    try {
+      await mutateAsync({
+        name: name.trim(),
+        phone: phone.trim(),
+        email: email.trim() || null,
+        id_type: idType,
+        id_number: idNumber.trim() || null,
+        emergency_contact_name: emergencyName.trim() || null,
+        emergency_contact_phone: emergencyPhone.trim() || null,
+        emergency_contact_relation: emergencyRelation.trim() || null,
+        occupation: occupation.trim() || null,
+        hometown: hometown.trim() || null,
+        permanent_address: permanentAddress.trim() || null,
+        expected_move_out_date: expectedMoveOut || null,
+      });
+      onSaved();
+    } catch (err) {
+      setError(getApiError(err));
+    }
+  }
+
+  return (
+    <Modal transparent animationType="slide" visible onRequestClose={onClose}>
+      <View style={editStyles.modalBg}>
+        <View style={editStyles.modalSheet}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: space.md }}>
+            <Text style={editStyles.title}>Edit resident</Text>
+            <View style={{ flex: 1 }} />
+            <IconButton name="close" accessibilityLabel="Close" onPress={onClose} />
+          </View>
+
+          <ScrollView style={{ maxHeight: '78%' }}>
+            <Field label="Full name" value={name} onChangeText={setName} required />
+            <Field
+              label="Phone"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+              required
+            />
+            <Field
+              label="Email (optional)"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <Field
+              label="ID type (AADHAR / PASSPORT / DRIVING_LICENSE / OTHER)"
+              value={idType}
+              onChangeText={setIdType}
+              autoCapitalize="characters"
+            />
+            <Field label="ID number" value={idNumber} onChangeText={setIdNumber} />
+
+            <Text style={editStyles.section}>Emergency contact</Text>
+            <Field label="Name" value={emergencyName} onChangeText={setEmergencyName} />
+            <Field
+              label="Phone"
+              value={emergencyPhone}
+              onChangeText={setEmergencyPhone}
+              keyboardType="phone-pad"
+            />
+            <Field
+              label="Relation"
+              value={emergencyRelation}
+              onChangeText={setEmergencyRelation}
+              placeholder="Father, Mother…"
+            />
+
+            <Text style={editStyles.section}>Other</Text>
+            <Field label="Occupation" value={occupation} onChangeText={setOccupation} />
+            <Field label="Hometown" value={hometown} onChangeText={setHometown} />
+            <Field
+              label="Permanent address"
+              value={permanentAddress}
+              onChangeText={setPermanentAddress}
+            />
+            <Field
+              label="Expected move-out date"
+              placeholder="YYYY-MM-DD"
+              value={expectedMoveOut}
+              onChangeText={setExpectedMoveOut}
+            />
+          </ScrollView>
+
+          {!!error && <Text style={{ color: colors.danger, marginVertical: space.sm }}>{error}</Text>}
+
+          <View style={{ flexDirection: 'row', gap: space.sm }}>
+            <Button variant="ghost" label="Cancel" onPress={onClose} style={{ flex: 1 }} />
+            <Button
+              variant="primary"
+              iconName="checkmark-outline"
+              label={isPending ? 'Saving…' : 'Save changes'}
+              onPress={save}
+              loading={isPending}
+              block
+              style={{ flex: 2 }}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const editStyles = StyleSheet.create({
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalSheet: {
+    backgroundColor: colors.surface,
+    padding: space.lg,
+    paddingBottom: space.xxl,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    maxHeight: '92%',
+  },
+  title: { fontSize: fontSize.h2, fontWeight: '700', color: colors.text },
+  section: {
+    fontSize: fontSize.small,
+    fontWeight: '700',
+    color: colors.textMuted,
+    marginTop: space.md,
+    marginBottom: space.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+});
