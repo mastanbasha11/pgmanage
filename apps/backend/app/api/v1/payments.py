@@ -341,6 +341,20 @@ async def rent_ledger(
     total_paid = sum(r["amount_paid_paise"] for r in items)
     total_discount = sum(r["discount_paise"] or 0 for r in items)
     settled = total_paid + total_discount
+    # Outstanding must be the sum of PER-ROW shortfalls, not max(total_due -
+    # total_paid, 0). With aggregate subtraction, over-payments by some
+    # tenants (advance applied to the month, double payments, etc.) silently
+    # cancel out under-payments by others — the KPI reads ₹0 while real
+    # unpaid tenants are listed below. Reported as a bug on 2026-06-10.
+    total_outstanding = sum(
+        max(
+            (r["amount_due_paise"] or 0)
+            - (r["amount_paid_paise"] or 0)
+            - (r["discount_paise"] or 0),
+            0,
+        )
+        for r in items
+    )
 
     # Per-collector breakdown using the fiscal period (collected_at in [start, end]).
     # Splits Rent vs Advance/Deposit per person — and FOLDS bookings in:
@@ -455,7 +469,7 @@ async def rent_ledger(
             "collected_in_period_paise": rent_collected_in_period,
             "discount_paise": total_discount,
             "settled_paise": settled,
-            "outstanding_paise": max(total_due - settled, 0),
+            "outstanding_paise": total_outstanding,
             "advance_received_paise": advance_received,
             "refunds_given_paise": refunds_given,
             "collection_rate": round(settled / total_due * 100, 1) if total_due > 0 else 0,

@@ -350,3 +350,111 @@ async def test_overdue_endpoint(
     )
     assert response.status_code == 200
     assert "items" in response.json()
+
+
+# ── Outstanding-aggregation regression ─────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_outstanding_uses_per_row_clamped_sum(
+    client: AsyncClient, test_owner: dict, test_property: dict, db: AsyncSession
+):
+    """
+    Two tenants in the same month: one under-paid, one over-paid. The
+    aggregate (sum_due - sum_paid - sum_discount) cancels out — the per-row
+    clamped sum must still surface the real shortfall.
+
+    This is the bug reported 2026-06-10: the Rent & Payments page Outstanding
+    KPI showed ₹0 even though several tenants in the list had unpaid rent.
+    Reason was the old `max(total_due - settled, 0)` formula. Fix in
+    payments.py:/rent/ledger + dashboard.py:/dashboard/summary.
+    """
+    schema = test_property["schema_name"]
+    property_id = test_property["property_id"]
+    bed_a = test_property["bed_ids"][0]
+    bed_b = test_property["bed_ids"][1]
+
+    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+
+    # Under-paid tenant: owes 9000, paid 0.
+    t_under = uuid.uuid4()
+    await db.execute(
+        text("""
+            INSERT INTO tenants (id, org_id, property_id, bed_id, name, phone,
+                id_type, id_number, emergency_contact_name, emergency_contact_phone,
+                emergency_contact_relation, move_in_date, status)
+            VALUES (:id, :org, :pid, :bed, 'Under Paid', '+919000000001',
+                'AADHAR', '111111111111', 'P', '+919000000099', 'P',
+                '2024-01-01', 'ACTIVE')
+        """),
+        {"id": str(t_under), "org": str(test_property["org_id"]),
+         "pid": str(property_id), "bed": str(bed_a)},
+    )
+    await db.execute(
+        text("""
+            INSERT INTO rent_plans (tenant_id, property_id, monthly_rent_paise,
+                security_deposit_paise, billing_day, effective_from, is_active)
+            VALUES (:tid, :pid, 900000, 0, 1, '2024-01-01', true)
+        """),
+        {"tid": str(t_under), "pid": str(property_id)},
+    )
+
+    # Over-paid tenant: owes 9000, paid 18000 (e.g. paid this month + advance).
+    t_over = uuid.uuid4()
+    await db.execute(
+        text("""
+            INSERT INTO tenants (id, org_id, property_id, bed_id, name, phone,
+                id_type, id_number, emergency_contact_name, emergency_contact_phone,
+                emergency_contact_relation, move_in_date, status)
+            VALUES (:id, :org, :pid, :bed, 'Over Paid', '+919000000002',
+                'AADHAR', '222222222222', 'P', '+919000000098', 'P',
+                '2024-01-01', 'ACTIVE')
+        """),
+        {"id": str(t_over), "org": str(test_property["org_id"]),
+         "pid": str(property_id), "bed": str(bed_b)},
+    )
+    await db.execute(
+        text("""
+            INSERT INTO rent_plans (tenant_id, property_id, monthly_rent_paise,
+                security_deposit_paise, billing_day, effective_from, is_active)
+            VALUES (:tid, :pid, 900000, 0, 1, '2024-01-01', true)
+        """),
+        {"tid": str(t_over), "pid": str(property_id)},
+    )
+
+    # Direct ledger inserts — the bug is in the aggregation, not the
+    # ledger-generation flow, so we skip /rent/generate-ledger to keep the
+    # arithmetic crystal-clear.
+    await db.execute(
+        text("""
+            INSERT INTO rent_ledger_entries
+                (tenant_id, property_id, month, year, amount_due_paise,
+                 amount_paid_paise, discount_paise, status, due_date)
+            VALUES
+                (:t_under, :pid, 8, 2024, 900000, 0, 0, 'UNPAID', '2024-08-01'),
+                (:t_over,  :pid, 8, 2024, 900000, 1800000, 0, 'PAID', '2024-08-01')
+        """),
+        {"t_under": str(t_under), "t_over": str(t_over), "pid": str(property_id)},
+    )
+    await db.commit()
+
+    # Hit /rent/ledger and assert the stats.outstanding_paise reflects the
+    # UNDER-PAID tenant only (₹9,000) — NOT 0, which is what the buggy
+    # aggregate formula returned.
+    response = await client.get(
+        "/api/v1/rent/ledger",
+        headers=auth_headers(test_owner["token"]),
+        params={
+            "property_id": str(property_id),
+            "month": 8,
+            "year": 2024,
+        },
+    )
+    assert response.status_code == 200, response.text
+    stats = response.json()["stats"]
+    # Aggregate would say 0 (sum_due 18000 - sum_paid 18000 = 0).
+    # Per-row clamped sum says 9000 (only the under-paid row's shortfall).
+    assert stats["outstanding_paise"] == 900000, (
+        f"Outstanding must be the per-row clamped sum (₹9,000), got "
+        f"₹{stats['outstanding_paise'] // 100} — the aggregate-subtraction "
+        "bug is back. See payments.py /rent/ledger."
+    )

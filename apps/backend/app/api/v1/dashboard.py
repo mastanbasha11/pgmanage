@@ -57,6 +57,16 @@ async def dashboard_summary(
                 COALESCE(SUM(rle.amount_due_paise), 0) as expected,
                 COALESCE(SUM(rle.amount_paid_paise), 0) as collected,
                 COALESCE(SUM(COALESCE(rle.discount_paise, 0)), 0) as discount_total,
+                -- Per-row clamped sum: each tenant's shortfall, summed.
+                -- Aggregate subtraction (max(expected - settled, 0)) is wrong
+                -- because over-payment by one tenant silently masks
+                -- under-payment by another, giving a false 0 outstanding.
+                COALESCE(SUM(GREATEST(
+                    rle.amount_due_paise
+                    - rle.amount_paid_paise
+                    - COALESCE(rle.discount_paise, 0),
+                    0
+                )), 0) as outstanding,
                 COUNT(DISTINCT rle.tenant_id) as total_tenants
             FROM rent_ledger_entries rle
             JOIN tenants t ON t.id = rle.tenant_id
@@ -122,6 +132,7 @@ async def dashboard_summary(
     expected = rent["expected"] or 0
     collected = rent["collected"] or 0
     discount_total = rent["discount_total"] or 0
+    outstanding_total = rent["outstanding"] or 0
     settled = collected + discount_total
     total_expenses = expenses["total_expenses"] or 0
     total_beds = occ["total"] or 0
@@ -375,7 +386,7 @@ async def dashboard_summary(
         "expected_rent_paise": expected,
         "collected_rent_paise": collected,
         "discount_paise": discount_total,
-        "outstanding_paise": max(expected - settled, 0),
+        "outstanding_paise": outstanding_total,
         "collection_rate": round(rate, 4),                   # 0..1 fraction
         "advance_received_paise": advance_received,
         "bookings_revenue_paise": int(bookings_revenue),
