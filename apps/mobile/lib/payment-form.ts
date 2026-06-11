@@ -42,6 +42,60 @@ export function mapPaymentTypeForApi(uiType: PaymentType): Exclude<PaymentType, 
   return uiType === 'DAILY' ? 'RENT' : uiType;
 }
 
+/**
+ * Tenant-less revenue capture. The web app has a separate /bookings UI for
+ * this; on mobile we expose it on the same Add Payment screen via a
+ * mode picker so an owner sitting at the counter can record any inbound
+ * money in one place.
+ *
+ * - DAILY    → short-stay rent for a walk-in guest who isn't (yet) a tenant.
+ *              guest_name + room + check-in/out dates required.
+ * - ADVANCE  → someone reserved a future spot; converts to a tenant on
+ *              actual check-in.
+ */
+export type BookingKind = 'DAILY' | 'ADVANCE';
+
+export interface BuildBookingBodyInput {
+  propertyId: string;
+  guestName: string;
+  guestPhone?: string;
+  roomLabel: string;
+  kind: BookingKind;
+  amountRupees: number;
+  mode: PaymentMode;
+  paidTo?: string;
+  referenceNumber?: string;
+  checkInDate: string;        // ISO YYYY-MM-DD
+  checkOutDate?: string;      // optional for ADVANCE; usually set for DAILY
+  collectedOn: string;        // ISO YYYY-MM-DD
+  notes?: string;
+}
+
+/**
+ * Builds the request body POSTed to /api/v1/bookings. Field shape matches
+ * BookingCreate on the backend.
+ */
+export function buildBookingBody(input: BuildBookingBodyInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    property_id: input.propertyId,
+    guest_name: input.guestName,
+    room_label: input.roomLabel,
+    kind: input.kind,
+    amount_paise: Math.round(input.amountRupees * 100),
+    payment_mode: input.mode,
+    check_in_date: input.checkInDate,
+    collected_at: input.collectedOn,
+  };
+  if (input.guestPhone) body.guest_phone = input.guestPhone;
+  if (input.checkOutDate) body.check_out_date = input.checkOutDate;
+  if (showReference(input.mode) && input.referenceNumber) {
+    body.reference_number = input.referenceNumber;
+  }
+  if (input.paidTo) body.paid_to = input.paidTo;
+  if (input.notes) body.notes = input.notes;
+  return body;
+}
+
 export interface BuildPaymentBodyInput {
   tenantId: string;
   amountRupees: number;

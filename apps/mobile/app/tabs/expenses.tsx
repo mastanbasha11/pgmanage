@@ -1,58 +1,83 @@
+/**
+ * Expenses tab. Mirrors the web ExpensesPage:
+ *
+ *   ┌─────────────────────────────────────────┐
+ *   │ Expenses        [+ Add expense] (big)   │
+ *   │ Filter: [ Mine | Everyone ] (OWNER+)    │
+ *   ├─────────────────────────────────────────┤
+ *   │ Recent expense rows…                    │
+ *
+ * The Add button is always visible at the top (sticky-feel header). Tap →
+ * full-screen modal with category / amount / description / vendor /
+ * paid-by / mode / date.
+ *
+ * RBAC: OWNER + PARTNER see the Mine/Everyone toggle. Others always see
+ * just their own (backend enforces this too via created_by filter).
+ */
 import { useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  TextInput,
-  Modal,
   ActivityIndicator,
   Alert,
+  FlatList,
+  Modal,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
+
 import { api, getApiError } from '../../lib/api';
-import { useAuthStore } from '../../lib/store';
+import { useAppStore } from '../../lib/store';
+import { colors, radius, space, type as fontSize, TOUCH_TARGET } from '../../lib/theme';
+import {
+  Button,
+  Card,
+  Empty,
+  Field,
+  Header,
+  IconButton,
+  Loading,
+  rupees,
+  Screen,
+  StatusPill,
+} from '../../components/ui';
 
-// 3-tap flow: (1) tap category → (2) enter amount → (3) confirm
-type Step = 'category' | 'amount' | 'confirm';
+interface Category {
+  id: string;
+  name: string;
+  icon?: string;
+}
 
-interface Category { id: string; name: string; icon?: string; }
+interface Expense {
+  id: string;
+  category_name: string;
+  description: string | null;
+  vendor_name?: string | null;
+  paid_by?: string | null;
+  amount_paise: number;
+  payment_mode?: string | null;
+  purchase_date: string;
+  approval_status: 'APPROVED' | 'PENDING' | 'REJECTED';
+  created_by_name?: string | null;
+}
 
 export default function ExpensesScreen() {
-  const { selectedPropertyId, user, canAccessFinancials } = useAuthStore();
-  const qc = useQueryClient();
+  const { selectedPropertyId, user, canAccessFinancials } = useAppStore();
   const hasFinancials = canAccessFinancials();
-
-  const [step, setStep] = useState<Step>('category');
-  const [selectedCat, setSelectedCat] = useState<Category | null>(null);
-  const [amount, setAmount] = useState('');
-  const [description, setDescription] = useState('');
-  // Owner/Partner can switch between everyone's expenses and just their own.
-  // Other roles can only ever see their own (gated by the backend too).
   const [scope, setScope] = useState<'mine' | 'all'>(hasFinancials ? 'all' : 'mine');
+  const [showAdd, setShowAdd] = useState(false);
 
-  // /expense-categories needs property_id — passing none returns 422.
-  const { data: cats } = useQuery({
-    queryKey: ['expense-categories', selectedPropertyId],
-    queryFn: () =>
-      api
-        .get('/expense-categories', { params: { property_id: selectedPropertyId } })
-        .then((r) => r.data),
-    enabled: !!selectedPropertyId,
-    staleTime: Infinity,
-  });
-
-  const { data: recent, isLoading } = useQuery({
+  const { data: recent, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['expenses-recent', selectedPropertyId, scope, user?.user_id],
     queryFn: () =>
       api
-        .get('/expenses', {
+        .get<{ items: Expense[] }>('/expenses', {
           params: {
             property_id: selectedPropertyId,
-            page_size: 20,
-            // Backend accepts a creator filter. For non-financial roles we
-            // always scope; OWNER/PARTNER can flip via the chip below.
+            page_size: 50,
             created_by: scope === 'mine' ? user?.user_id : undefined,
           },
         })
@@ -60,251 +85,355 @@ export default function ExpensesScreen() {
     enabled: !!selectedPropertyId,
   });
 
+  const items = recent?.items ?? [];
+
+  return (
+    <Screen padded={false}>
+      <View style={styles.header}>
+        <Header title="Expenses" />
+
+        {/* Prominent Add button — the user explicitly called this out as
+            missing in v1. Sticky-top so it's always one tap away. */}
+        <Button
+          variant="primary"
+          iconName="add-circle-outline"
+          label="Add expense"
+          onPress={() => setShowAdd(true)}
+          block
+        />
+
+        {/* Scope toggle (OWNER/PARTNER only). For non-financial roles,
+            always shows their own; no toggle. */}
+        {hasFinancials && (
+          <View style={styles.scopeRow}>
+            {(['mine', 'all'] as const).map((s) => {
+              const active = scope === s;
+              return (
+                <Pressable
+                  key={s}
+                  onPress={() => setScope(s)}
+                  style={[styles.scopeChip, active && styles.scopeChipActive]}
+                >
+                  <Text style={[styles.scopeChipText, active && styles.scopeChipTextActive]}>
+                    {s === 'mine' ? 'Mine' : 'Everyone'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </View>
+
+      {isLoading ? (
+        <Loading />
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(e) => e.id}
+          contentContainerStyle={{ padding: space.lg, paddingTop: space.sm }}
+          refreshControl={
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.accent} />
+          }
+          renderItem={({ item }) => <ExpenseRow item={item} />}
+          ListEmptyComponent={
+            <Empty
+              iconName="receipt-outline"
+              title="No expenses yet"
+              hint="Tap “Add expense” to record one — categories, vendor, paid-by, all in one flow."
+            />
+          }
+        />
+      )}
+
+      {showAdd && (
+        <AddExpenseModal
+          propertyId={selectedPropertyId ?? null}
+          onClose={() => setShowAdd(false)}
+        />
+      )}
+    </Screen>
+  );
+}
+
+function ExpenseRow({ item }: { item: Expense }) {
+  return (
+    <Card style={styles.row}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {item.description || item.category_name}
+        </Text>
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {item.category_name} · {item.purchase_date}
+          {item.paid_by ? ` · paid by ${item.paid_by}` : ''}
+        </Text>
+      </View>
+      <View style={{ alignItems: 'flex-end', gap: 4 }}>
+        <Text style={styles.rowAmount}>{rupees(item.amount_paise)}</Text>
+        {item.approval_status !== 'APPROVED' && (
+          <StatusPill
+            label={item.approval_status}
+            tone={item.approval_status === 'PENDING' ? 'warn' : 'danger'}
+          />
+        )}
+      </View>
+    </Card>
+  );
+}
+
+// ── Add Expense modal ──────────────────────────────────────────────────────
+
+function AddExpenseModal({
+  propertyId,
+  onClose,
+}: {
+  propertyId: string | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [categoryId, setCategoryId] = useState<string>('');
+  const [categoryName, setCategoryName] = useState<string>('');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [vendor, setVendor] = useState('');
+  const [paidBy, setPaidBy] = useState('');
+  const [mode, setMode] = useState<'CASH' | 'UPI' | 'BANK'>('CASH');
+  const [referenceNumber, setReferenceNumber] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
+
+  const { data: cats } = useQuery({
+    queryKey: ['expense-categories', propertyId],
+    queryFn: () =>
+      api
+        .get<{ items: Category[] }>('/expense-categories', { params: { property_id: propertyId } })
+        .then((r) => r.data),
+    enabled: !!propertyId,
+    staleTime: Infinity,
+  });
+
   const { mutateAsync, isPending } = useMutation({
     mutationFn: (data: object) => api.post('/expenses', data).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['expenses-recent'] });
-      resetFlow();
     },
   });
 
-  function resetFlow() {
-    setStep('category');
-    setSelectedCat(null);
-    setAmount('');
-    setDescription('');
-  }
-
-  async function confirmExpense() {
-    if (!selectedCat || !amount || !selectedPropertyId) return;
+  async function save() {
+    if (!propertyId) return Alert.alert('Pick a property first');
+    if (!categoryId) return Alert.alert('Pick a category');
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n <= 0) return Alert.alert('Enter the amount');
     try {
       await mutateAsync({
-        category_id: selectedCat.id,
-        description: description || selectedCat.name,
-        amount_paise: Math.round(Number(amount) * 100),
-        expense_date: new Date().toISOString().slice(0, 10),
-        property_id: selectedPropertyId,
+        property_id: propertyId,
+        category_id: categoryId,
+        amount_paise: Math.round(n * 100),
+        description: description || categoryName || undefined,
+        vendor_name: vendor || undefined,
+        paid_by: paidBy || undefined,
+        payment_mode: mode,
+        reference_number: mode !== 'CASH' ? referenceNumber || undefined : undefined,
+        purchase_date: purchaseDate,
       });
-      Alert.alert('Saved!', `₹${amount} expense recorded.`);
+      Alert.alert('✅ Expense recorded', `₹${amount} added to ${categoryName}.`);
+      onClose();
     } catch (err) {
       Alert.alert('Error', getApiError(err));
     }
   }
 
-  const categories: Category[] = cats?.items ?? [];
-
-  const formatPaise = (p: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
-
   return (
-    <View style={{ flex: 1, backgroundColor: '#f8fafc' }}>
-      {/* Quick add - 3 tap flow */}
-      <View style={styles.quickAdd}>
-        <Text style={styles.quickTitle}>Quick Add Expense</Text>
-
-        {/* Step indicator */}
-        <View style={styles.steps}>
-          {(['category', 'amount', 'confirm'] as Step[]).map((s, i) => (
-            <View key={s} style={styles.stepItem}>
-              <View style={[styles.stepDot, step === s && styles.stepDotActive]}>
-                <Text style={[styles.stepNum, step === s && styles.stepNumActive]}>{i + 1}</Text>
-              </View>
-              {i < 2 && <View style={[styles.stepLine, i < (['category', 'amount', 'confirm'] as Step[]).indexOf(step) && styles.stepLineDone]} />}
-            </View>
-          ))}
-        </View>
-
-        {step === 'category' && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }}>
-            <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 4 }}>
-              {categories.map((cat) => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={styles.catChip}
-                  onPress={() => { setSelectedCat(cat); setStep('amount'); }}
-                >
-                  <Text style={styles.catName}>{cat.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
-        )}
-
-        {step === 'amount' && (
-          <View style={{ marginTop: 12 }}>
-            <Text style={styles.stepLabel}>{selectedCat?.name} — Enter Amount (₹)</Text>
-            <TextInput
-              style={styles.amountInput}
-              value={amount}
-              onChangeText={setAmount}
-              keyboardType="numeric"
-              placeholder="0"
-              autoFocus
-            />
-            <TextInput
-              style={[styles.amountInput, { fontSize: 13, height: 36, marginTop: 8 }]}
-              value={description}
-              onChangeText={setDescription}
-              placeholder="Description (optional)"
-            />
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-              <TouchableOpacity style={styles.btnSecondary} onPress={resetFlow}>
-                <Text style={styles.btnSecText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btnPrimary, !amount && styles.btnDisabled]}
-                disabled={!amount}
-                onPress={() => setStep('confirm')}
-              >
-                <Text style={styles.btnText}>Next →</Text>
-              </TouchableOpacity>
-            </View>
+    <Modal transparent animationType="slide" visible onRequestClose={onClose}>
+      <View style={styles.modalBg}>
+        <View style={styles.modalSheet}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: space.md }}>
+            <Text style={styles.modalTitle}>Add expense</Text>
+            <View style={{ flex: 1 }} />
+            <IconButton name="close" accessibilityLabel="Close" onPress={onClose} />
           </View>
-        )}
 
-        {step === 'confirm' && (
-          <View style={{ marginTop: 12, padding: 12, backgroundColor: '#eff6ff', borderRadius: 10 }}>
-            <Text style={styles.confirmLine}>Category: <Text style={{ fontWeight: '700' }}>{selectedCat?.name}</Text></Text>
-            <Text style={styles.confirmLine}>Amount: <Text style={{ fontWeight: '700' }}>₹{amount}</Text></Text>
-            {description ? <Text style={styles.confirmLine}>Note: {description}</Text> : null}
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-              <TouchableOpacity style={styles.btnSecondary} onPress={() => setStep('amount')}>
-                <Text style={styles.btnSecText}>← Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btnPrimary} onPress={confirmExpense} disabled={isPending}>
-                {isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.btnText}>Save Expense</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-      </View>
-
-      {/* Recent expenses */}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <Text style={styles.sectionTitle}>Recent Expenses</Text>
-          <View style={{ flex: 1 }} />
-          {hasFinancials && (
-            <View style={{ flexDirection: 'row', gap: 4 }}>
-              {(['mine', 'all'] as const).map((s) => (
-                <TouchableOpacity
-                  key={s}
-                  onPress={() => setScope(s)}
-                  style={[styles.scopeChip, scope === s && styles.scopeChipActive]}
+          <FlatList
+            data={cats?.items ?? []}
+            keyExtractor={(c) => c.id}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ flexGrow: 0, marginBottom: space.sm }}
+            contentContainerStyle={{ gap: space.xs, paddingVertical: space.xs }}
+            ListEmptyComponent={
+              <ActivityIndicator color={colors.accent} style={{ paddingHorizontal: space.lg }} />
+            }
+            renderItem={({ item }) => {
+              const active = categoryId === item.id;
+              return (
+                <Pressable
+                  onPress={() => {
+                    setCategoryId(item.id);
+                    setCategoryName(item.name);
+                  }}
+                  style={[styles.catChip, active && styles.catChipActive]}
                 >
-                  <Text
-                    style={[styles.scopeChipText, scope === s && styles.scopeChipTextActive]}
-                  >
-                    {s === 'mine' ? 'Mine' : 'Everyone'}
+                  <Text style={[styles.catChipText, active && styles.catChipTextActive]}>
+                    {item.name}
                   </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-        {isLoading && <ActivityIndicator color="#2563eb" style={{ marginTop: 20 }} />}
-        {(recent?.items ?? []).map((e: { id: string; category_name: string; description: string; amount_paise: number; expense_date: string; status: string }) => (
-          <View key={e.id} style={styles.expenseRow}>
+                </Pressable>
+              );
+            }}
+          />
+
+          <View style={{ flexDirection: 'row', gap: space.sm }}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.expDesc}>{e.description}</Text>
-              <Text style={styles.expMeta}>{e.category_name} · {e.expense_date}</Text>
+              <Field
+                label="Amount (₹)"
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="numeric"
+                placeholder="0"
+                required
+              />
             </View>
-            <Text style={styles.expAmt}>{formatPaise(e.amount_paise)}</Text>
+            <View style={{ flex: 1 }}>
+              <Field
+                label="Date"
+                value={purchaseDate}
+                onChangeText={setPurchaseDate}
+                placeholder="YYYY-MM-DD"
+              />
+            </View>
           </View>
-        ))}
-      </ScrollView>
-    </View>
+
+          <Field
+            label="Description"
+            value={description}
+            onChangeText={setDescription}
+            placeholder={categoryName ? `e.g. ${categoryName} bill` : 'What was it for?'}
+          />
+          <Field
+            label="Vendor (optional)"
+            value={vendor}
+            onChangeText={setVendor}
+            placeholder="Shop / supplier"
+          />
+          <Field
+            label="Paid by"
+            value={paidBy}
+            onChangeText={setPaidBy}
+            placeholder="Suresh, Owner, Manager…"
+          />
+
+          <Text style={styles.sectionLabel}>Mode</Text>
+          <View style={{ flexDirection: 'row', gap: space.sm, marginBottom: space.md }}>
+            {(['CASH', 'UPI', 'BANK'] as const).map((m) => {
+              const active = mode === m;
+              return (
+                <Pressable
+                  key={m}
+                  onPress={() => setMode(m)}
+                  style={[styles.modeChip, active && styles.modeChipActive]}
+                >
+                  <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>
+                    {m}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {mode !== 'CASH' && (
+            <Field
+              label="Reference (optional)"
+              value={referenceNumber}
+              onChangeText={setReferenceNumber}
+              placeholder="UPI ref / cheque #"
+            />
+          )}
+
+          <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.sm }}>
+            <Button variant="ghost" label="Cancel" onPress={onClose} style={{ flex: 1 }} />
+            <Button
+              variant="primary"
+              iconName="checkmark-outline"
+              label={isPending ? 'Saving…' : 'Save expense'}
+              onPress={save}
+              loading={isPending}
+              block
+              style={{ flex: 2 }}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  quickAdd: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+  header: {
+    padding: space.lg,
+    paddingBottom: space.sm,
+    gap: space.sm,
+    backgroundColor: colors.bg,
   },
-  quickTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a', marginBottom: 8 },
-  steps: { flexDirection: 'row', alignItems: 'center' },
-  stepItem: { flexDirection: 'row', alignItems: 'center' },
-  stepDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#e2e8f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepDotActive: { backgroundColor: '#2563eb' },
-  stepNum: { fontSize: 11, fontWeight: '700', color: '#94a3b8' },
-  stepNumActive: { color: '#fff' },
-  stepLine: { width: 24, height: 2, backgroundColor: '#e2e8f0' },
-  stepLineDone: { backgroundColor: '#2563eb' },
-  catChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#f1f5f9',
-    borderRadius: 20,
+  scopeRow: { flexDirection: 'row', gap: space.xs },
+  scopeChip: {
+    paddingHorizontal: space.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#cbd5e1',
+    borderColor: colors.border,
   },
-  catName: { fontSize: 13, fontWeight: '600', color: '#334155' },
-  stepLabel: { fontSize: 13, color: '#64748b', marginBottom: 6 },
-  amountInput: {
-    height: 52,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0f172a',
-    backgroundColor: '#f8fafc',
-  },
-  btnPrimary: {
-    flex: 1,
-    height: 40,
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnSecondary: {
-    height: 40,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnDisabled: { opacity: 0.5 },
-  btnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  btnSecText: { color: '#64748b', fontWeight: '600', fontSize: 14 },
-  confirmLine: { fontSize: 14, color: '#374151', marginBottom: 2 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a', marginBottom: 12 },
-  expenseRow: {
+  scopeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  scopeChipText: { fontSize: fontSize.caption, fontWeight: '700', color: colors.textMuted },
+  scopeChipTextActive: { color: colors.white },
+
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    gap: space.md,
+    marginBottom: space.sm,
   },
-  expDesc: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
-  expMeta: { fontSize: 11, color: '#94a3b8', marginTop: 2 },
-  expAmt: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
-  scopeChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+  rowTitle: { fontSize: fontSize.bodyLg, fontWeight: '700', color: colors.text },
+  rowMeta: { fontSize: fontSize.caption, color: colors.textMuted, marginTop: 2 },
+  rowAmount: { fontSize: fontSize.body, fontWeight: '700', color: colors.text },
+
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalSheet: {
+    backgroundColor: colors.surface,
+    padding: space.lg,
+    paddingBottom: space.xxl,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    maxHeight: '95%',
   },
-  scopeChipActive: { backgroundColor: '#0F172A', borderColor: '#0F172A' },
-  scopeChipText: { fontSize: 11, fontWeight: '700', color: '#64748b' },
-  scopeChipTextActive: { color: '#fff' },
+  modalTitle: { fontSize: fontSize.h2, fontWeight: '700', color: colors.text },
+
+  catChip: {
+    paddingHorizontal: space.md,
+    minHeight: 36,
+    justifyContent: 'center',
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  catChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  catChipText: { fontSize: fontSize.small, fontWeight: '700', color: colors.textMuted },
+  catChipTextActive: { color: colors.white },
+
+  sectionLabel: {
+    fontSize: fontSize.small,
+    fontWeight: '700',
+    color: colors.textMuted,
+    marginBottom: space.xs,
+  },
+  modeChip: {
+    flex: 1,
+    minHeight: TOUCH_TARGET,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  modeChipText: { fontSize: fontSize.body, fontWeight: '700', color: colors.textMuted },
+  modeChipTextActive: { color: colors.white },
 });

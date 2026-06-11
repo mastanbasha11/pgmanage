@@ -6,6 +6,7 @@
  *   - stray form state leaking into the API call when type changes
  */
 import {
+  buildBookingBody,
   buildPaymentBody,
   mapPaymentTypeForApi,
   showDays,
@@ -126,5 +127,72 @@ describe('buildPaymentBody', () => {
     expect(buildPaymentBody({
       tenantId: 't-1', amountRupees: 9.99, type: 'RENT', mode: 'CASH',
     }).amount_paise).toBe(999);
+  });
+});
+
+describe('buildBookingBody (tenant-less guest revenue)', () => {
+  test('DAILY booking with all required fields', () => {
+    const body = buildBookingBody({
+      propertyId: 'prop-1',
+      guestName: 'Walk-in Guest',
+      guestPhone: '+919999900000',
+      roomLabel: '101-A',
+      kind: 'DAILY',
+      amountRupees: 1500,
+      mode: 'UPI',
+      referenceNumber: 'upi-1',
+      paidTo: 'Owner',
+      checkInDate: '2026-06-11',
+      checkOutDate: '2026-06-13',
+      collectedOn: '2026-06-11',
+      notes: 'Short stay 2 nights',
+    });
+    expect(body).toMatchObject({
+      property_id: 'prop-1',
+      guest_name: 'Walk-in Guest',
+      guest_phone: '+919999900000',
+      room_label: '101-A',
+      kind: 'DAILY',
+      amount_paise: 150_000,
+      payment_mode: 'UPI',
+      reference_number: 'upi-1',
+      paid_to: 'Owner',
+      check_in_date: '2026-06-11',
+      check_out_date: '2026-06-13',
+      collected_at: '2026-06-11',
+      notes: 'Short stay 2 nights',
+    });
+  });
+
+  test('ADVANCE booking omits check_out_date when not set', () => {
+    const body = buildBookingBody({
+      propertyId: 'prop-1',
+      guestName: 'Future Tenant',
+      roomLabel: '202-A',
+      kind: 'ADVANCE',
+      amountRupees: 5000,
+      mode: 'CASH',
+      checkInDate: '2026-07-01',
+      collectedOn: '2026-06-11',
+    });
+    expect(body.kind).toBe('ADVANCE');
+    expect(body.check_in_date).toBe('2026-07-01');
+    expect(body).not.toHaveProperty('check_out_date');
+    expect(body).not.toHaveProperty('guest_phone');
+  });
+
+  test('CASH booking does not include reference_number even if passed', () => {
+    const body = buildBookingBody({
+      propertyId: 'prop-1',
+      guestName: 'Guest',
+      roomLabel: '101-A',
+      kind: 'DAILY',
+      amountRupees: 1500,
+      mode: 'CASH',
+      referenceNumber: 'should-be-stripped',
+      checkInDate: '2026-06-11',
+      collectedOn: '2026-06-11',
+    });
+    expect(body).not.toHaveProperty('reference_number');
   });
 });
