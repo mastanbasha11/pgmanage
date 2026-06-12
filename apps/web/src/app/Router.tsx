@@ -21,6 +21,8 @@ import TeamPage from '@/pages/settings/TeamPage';
 import AuditLogsPage from '@/pages/audit-logs/AuditLogsPage';
 import WebsiteIntegrationPage from '@/pages/settings/WebsiteIntegrationPage';
 import WhatsAppPage from '@/pages/settings/WhatsAppPage';
+import PrivacyPage from '@/pages/legal/PrivacyPage';
+import TermsPage from '@/pages/legal/TermsPage';
 import TenantPortalApp from '@/pages/tenant-portal/TenantPortalApp';
 
 function PrivateRoute({ children }: { children: ReactNode }) {
@@ -126,6 +128,10 @@ export default function App() {
             }
           />
           <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+
+          {/* Public legal pages — referenced by Meta (WhatsApp) + Play Store */}
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
 
           {/* Tenant self-service portal (separate auth) */}
           <Route path="/portal/*" element={<TenantPortalApp />} />
