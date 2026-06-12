@@ -17,12 +17,16 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_db, get_org_schema_name
 from app.core.dependencies import OrgContext, get_org_context
 from app.core.exceptions import ConflictError, NotFoundError
 from app.services.audit_constants import Event
 from app.services.audit_service import diff_changes, log_event
 from app.services.s3_service import generate_presigned_upload_url
+from app.services.tenant_identity_service import (
+    archive_tenant_identity_link,
+    link_tenant_to_identity,
+)
 
 
 _PHONE_RE = re.compile(r"[^\d]")
@@ -257,6 +261,17 @@ async def checkin_tenant(
             "monthly_rent_paise": rp.monthly_rent_paise,
             "advance_paid_paise": rp.advance_paid_paise,
         },
+    )
+
+    # Mirror into the phone-keyed identity layer so the tenant app can sign
+    # this person in by phone alone (no need to know their org).
+    await link_tenant_to_identity(
+        db,
+        phone=body.phone,
+        email=body.email,
+        org_id=ctx.org_id,
+        schema_name=get_org_schema_name(ctx.org_id),
+        tenant_id=tenant_id,
     )
 
     await db.commit()
@@ -695,6 +710,10 @@ async def checkout_tenant(
         },
     )
 
+    # Tenant app can no longer authenticate into this org via this phone
+    # (unless another ACTIVE link exists in another org).
+    await archive_tenant_identity_link(db, org_id=ctx.org_id, tenant_id=tenant_id)
+
     await db.commit()
 
     return {
@@ -859,6 +878,24 @@ async def recheckin_tenant(
             "rejoin": True,
         },
     )
+
+    # Flip the identity link ACTIVE again (or create one if the tenant
+    # predates migration 019's backfill).
+    phone_row = (
+        await db.execute(
+            text("SELECT phone, email FROM tenants WHERE id = :id"),
+            {"id": str(tenant_id)},
+        )
+    ).mappings().fetchone()
+    if phone_row:
+        await link_tenant_to_identity(
+            db,
+            phone=phone_row["phone"],
+            email=phone_row["email"],
+            org_id=ctx.org_id,
+            schema_name=get_org_schema_name(ctx.org_id),
+            tenant_id=tenant_id,
+        )
 
     await db.commit()
     return {"tenant_id": str(tenant_id), "message": "Tenant re-checked in"}

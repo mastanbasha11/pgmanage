@@ -332,3 +332,31 @@ Your PGManage account has been approved. You can now log in:
 </div>
 """.strip()
     return send_email(to=owner_email, subject=subject, body_text=body_text, body_html=body_html)
+
+
+def send_tenant_otp_email(*, to_email: str, code: str, expires_minutes: int) -> bool:
+    """Email a 6-digit OTP to a tenant for portal/app login.
+
+    Used during the Meta App Review hold — WhatsApp OTPs aren't deliverable to
+    arbitrary numbers yet, so we fall back to email. Once Meta clears we'll
+    add a WhatsApp path alongside this (not replacing — some tenants prefer
+    email anyway).
+    """
+    subject = f"Your PGManage code: {code}"
+    body_text = (
+        f"Your PGManage login code is:\n\n  {code}\n\n"
+        f"It expires in {expires_minutes} minutes. If you didn't request it, ignore this email."
+    )
+    body_html = f"""
+<div style="font-family:system-ui,Helvetica,Arial,sans-serif;line-height:1.5">
+  <h2 style="color:#0F172A;margin:0 0 12px;">PGManage login code</h2>
+  <p style="color:#475569;margin:0 0 16px;">Use this code to sign in:</p>
+  <div style="font-size:32px;font-weight:800;letter-spacing:6px;color:#0D9488;
+              background:#F0FDFA;border:1px solid #99F6E4;border-radius:12px;
+              padding:16px 24px;display:inline-block;">{code}</div>
+  <p style="color:#94A3B8;margin:16px 0 0;font-size:12px;">
+    Expires in {expires_minutes} minutes. Didn't request it? Ignore this email.
+  </p>
+</div>
+""".strip()
+    return send_email(to=to_email, subject=subject, body_text=body_text, body_html=body_html)

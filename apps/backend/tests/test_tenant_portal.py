@@ -233,75 +233,214 @@ async def test_tenant_sees_sent_all_tenants_announcement(
     assert "Important Notice" in titles
 
 
-# ── OTP flow (requires Redis) ──────────────────────────────────────────────────
+# ── OTP flow (phone-first, multi-org safe) ────────────────────────────────────
+#
+# The new auth flow is:
+#   1. POST /tenant/auth/otp { phone }            -> generates code, emails it
+#   2. POST /tenant/auth/verify { phone, code }   -> returns JWT (single org)
+#                                                    or { ticket, orgs } (multi)
+#   3. POST /tenant/auth/select-org { ticket, org_id }  (multi only) -> JWT
+#
+# Tests below seed public.tenant_identity + tenant_identity_links manually,
+# since the test_tenant fixture predates migration 019.
 
-@pytest.mark.asyncio
-async def test_otp_request_nonexistent_org_returns_404(
-    client: AsyncClient, test_tenant: dict
-):
-    """OTP request for non-existent org slug → 404."""
-    response = await client.post(
-        "/api/v1/tenant/auth/otp",
-        json={
-            "phone": "+919999000000",  # doesn't matter
-            "property_id": str(test_tenant["property_id"]),
-            "org_slug": "non-existent-org-slug-xyz",
+
+async def _seed_identity(
+    db: AsyncSession,
+    *,
+    phone: str,
+    email: str | None,
+    org_id,
+    schema_name: str,
+    tenant_id,
+) -> str:
+    """Insert a tenant_identity row + ACTIVE link. Returns the identity id."""
+    row = (
+        await db.execute(
+            text(
+                """
+                INSERT INTO public.tenant_identity (phone, email)
+                VALUES (:p, :e)
+                ON CONFLICT (phone) DO UPDATE SET email = EXCLUDED.email
+                RETURNING id
+                """
+            ),
+            {"p": phone, "e": email},
+        )
+    ).scalar_one()
+    await db.execute(
+        text(
+            """
+            INSERT INTO public.tenant_identity_links
+                (identity_id, org_id, schema_name, tenant_id, status)
+            VALUES (:iid, :oid, :sch, :tid, 'ACTIVE')
+            ON CONFLICT (identity_id, org_id) DO UPDATE
+              SET schema_name = EXCLUDED.schema_name,
+                  tenant_id = EXCLUDED.tenant_id,
+                  status = 'ACTIVE'
+            """
+        ),
+        {
+            "iid": str(row),
+            "oid": str(org_id),
+            "sch": schema_name,
+            "tid": str(tenant_id),
         },
     )
-    assert response.status_code == 404
+    await db.commit()
+    return str(row)
 
 
 @pytest.mark.asyncio
-async def test_otp_request_valid_org_nonexistent_tenant_returns_404(
-    client: AsyncClient,
-    test_tenant: dict,
-    db: AsyncSession,
-):
-    """OTP request with wrong phone number → 404 (tenant not found)."""
-    # Get the org slug
-    result = await db.execute(
-        text("SELECT slug FROM public.organisations WHERE id = :id"),
-        {"id": str(test_tenant["org_id"])},
-    )
-    org_slug = result.scalar_one()
-    await db.commit()  # close implicit transaction before client call
-
-    response = await client.post(
+async def test_otp_request_unknown_phone_does_not_leak(client: AsyncClient):
+    """Unknown phone must NOT 404 — we don't want to leak which numbers are
+    registered. Response is 200 with delivery:none."""
+    r = await client.post(
         "/api/v1/tenant/auth/otp",
-        json={
-            "phone": "+919999999999",  # not a real tenant phone
-            "property_id": str(test_tenant["property_id"]),
-            "org_slug": org_slug,
-        },
+        json={"phone": "+919000099991"},
     )
-    # 404 because no active tenant with this phone
-    assert response.status_code == 404
+    assert r.status_code == 200
+    assert r.json()["delivery"] == "none"
 
 
 @pytest.mark.asyncio
-async def test_otp_verify_invalid_otp_returns_401(
-    client: AsyncClient,
-    test_tenant: dict,
-    db: AsyncSession,
+async def test_otp_request_known_phone_no_email_returns_409(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession
 ):
-    """Verifying with wrong OTP → 401."""
-    result = await db.execute(
-        text("SELECT slug FROM public.organisations WHERE id = :id"),
-        {"id": str(test_tenant["org_id"])},
+    """Identity without an email cannot receive the code via the v1 channels."""
+    await _seed_identity(
+        db,
+        phone="+919876543299",
+        email=None,
+        org_id=test_tenant["org_id"],
+        schema_name=test_tenant["schema_name"],
+        tenant_id=test_tenant["tenant_id"],
     )
-    org_slug = result.scalar_one()
-    await db.commit()  # close implicit transaction before client call
+    r = await client.post(
+        "/api/v1/tenant/auth/otp",
+        json={"phone": "+919876543299"},
+    )
+    assert r.status_code == 409
+    body = r.json()
+    # http_exception_handler unwraps {"error": {...}} envelopes (see
+    # app/core/exceptions.py http_exception_handler) — so body is the envelope.
+    assert body["error"]["code"] == "NO_DELIVERY_CHANNEL"
 
-    response = await client.post(
+
+@pytest.mark.asyncio
+async def test_otp_request_with_email_succeeds(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession
+):
+    """Known phone + email → 200, delivery=email, masked address in response."""
+    await _seed_identity(
+        db,
+        phone="+919876543299",
+        email="t.tenant@example.com",
+        org_id=test_tenant["org_id"],
+        schema_name=test_tenant["schema_name"],
+        tenant_id=test_tenant["tenant_id"],
+    )
+    r = await client.post(
+        "/api/v1/tenant/auth/otp",
+        json={"phone": "+919876543299"},
+    )
+    assert r.status_code == 200
+    j = r.json()
+    assert j["delivery"] == "email"
+    # Masked: first char + bullets + @domain
+    assert j["to"].endswith("@example.com")
+    assert "•" in j["to"]
+
+
+@pytest.mark.asyncio
+async def test_otp_verify_invalid_code_returns_401(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession
+):
+    """Wrong code → 401."""
+    await _seed_identity(
+        db,
+        phone="+919876543299",
+        email="t.tenant@example.com",
+        org_id=test_tenant["org_id"],
+        schema_name=test_tenant["schema_name"],
+        tenant_id=test_tenant["tenant_id"],
+    )
+    r = await client.post(
         "/api/v1/tenant/auth/verify",
-        json={
-            "phone": "+919876543299",
-            "otp": "000000",  # wrong OTP
-            "property_id": str(test_tenant["property_id"]),
-            "org_slug": org_slug,
-        },
+        json={"phone": "+919876543299", "code": "000000"},
     )
-    assert response.status_code == 401
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_otp_verify_correct_code_returns_jwt_single_org(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession
+):
+    """Single-org tenant: verify returns access_token directly."""
+    import redis.asyncio as aioredis
+
+    from app.core.config import settings
+
+    await _seed_identity(
+        db,
+        phone="+919876543299",
+        email="t.tenant@example.com",
+        org_id=test_tenant["org_id"],
+        schema_name=test_tenant["schema_name"],
+        tenant_id=test_tenant["tenant_id"],
+    )
+    # Inject a known code into Redis directly — saves dealing with SMTP.
+    r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    await r.setex("tenant_otp:+919876543299", 60, "123456")
+    await r.aclose()
+
+    resp = await client.post(
+        "/api/v1/tenant/auth/verify",
+        json={"phone": "+919876543299", "code": "123456"},
+    )
+    assert resp.status_code == 200, resp.text
+    j = resp.json()
+    assert "access_token" in j
+    assert j["token_type"] == "bearer"
+    assert j["org"]["id"] == str(test_tenant["org_id"])
+
+    # The token works against /tenant/me.
+    me = await client.get(
+        "/api/v1/tenant/me",
+        headers=auth_headers(j["access_token"]),
+    )
+    assert me.status_code == 200
+    assert me.json()["phone"] == "+919876543299"
+
+
+@pytest.mark.asyncio
+async def test_phone_normalisation_strips_country_code(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession
+):
+    """A tenant whose phone is stored as '+919876543299' must be findable
+    whether the user types '9876543299', '09876543299', or '919876543299'."""
+    import redis.asyncio as aioredis
+
+    from app.core.config import settings
+
+    # Flush rate-limit counters — /tenant/auth/* is capped at 5/min and we
+    # make several requests here on the shared testclient IP.
+    r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    await r.flushdb()
+    await r.aclose()
+
+    await _seed_identity(
+        db,
+        phone="+919876543299",
+        email="t.tenant@example.com",
+        org_id=test_tenant["org_id"],
+        schema_name=test_tenant["schema_name"],
+        tenant_id=test_tenant["tenant_id"],
+    )
+    for variant in ("9876543299", "09876543299", "919876543299"):
+        resp = await client.post("/api/v1/tenant/auth/otp", json={"phone": variant})
+        assert resp.status_code == 200, (variant, resp.text)
+        assert resp.json()["delivery"] == "email", variant
 
 
 # ── Cross-role isolation ───────────────────────────────────────────────────────

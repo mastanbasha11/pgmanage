@@ -127,6 +127,39 @@ async def db_setup():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Phone-keyed tenant identity (migration 019, mirrored here so tests
+        # don't depend on alembic state).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS public.tenant_identity (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                phone VARCHAR(20) NOT NULL UNIQUE,
+                email VARCHAR(255),
+                preferred_lang VARCHAR(5) NOT NULL DEFAULT 'en',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_login_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS public.tenant_identity_links (
+                identity_id UUID NOT NULL REFERENCES public.tenant_identity(id) ON DELETE CASCADE,
+                org_id UUID NOT NULL,
+                schema_name VARCHAR(100) NOT NULL,
+                tenant_id UUID,
+                request_id UUID,
+                status VARCHAR(20) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (identity_id, org_id),
+                CHECK (
+                    (status = 'ACTIVE'  AND tenant_id IS NOT NULL) OR
+                    (status = 'PENDING' AND request_id IS NOT NULL) OR
+                    status = 'ARCHIVED'
+                )
+            )
+        """))
+        # Truncate identity tables on session start so phone UNIQUE doesn't
+        # collide with leftover rows from prior runs.
+        await conn.execute(text("TRUNCATE TABLE public.tenant_identity_links"))
+        await conn.execute(text("TRUNCATE TABLE public.tenant_identity CASCADE"))
     yield
     await test_engine.dispose()
 
@@ -135,9 +168,20 @@ async def db_setup():
 
 @pytest_asyncio.fixture
 async def db(db_setup) -> AsyncGenerator[AsyncSession, None]:
-    """Yields an async session; closed after each test."""
+    """Yields an async session; closed after each test.
+
+    After yield, wipes the phone-keyed identity tables — they're public-scope
+    so they survive between tests, and any reuse of the hardcoded fixture
+    phone (+919876543299) would hit a UNIQUE conflict.
+    """
     async with TestSessionLocal() as session:
         yield session
+        try:
+            await session.execute(text("TRUNCATE TABLE public.tenant_identity_links"))
+            await session.execute(text("TRUNCATE TABLE public.tenant_identity CASCADE"))
+            await session.commit()
+        except Exception:
+            await session.rollback()
 
 
 # ── Organisation fixture ───────────────────────────────────────────────────────
