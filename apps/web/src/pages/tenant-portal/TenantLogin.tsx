@@ -33,7 +33,19 @@ export default function TenantLogin() {
     setError('');
     setLoading(true);
     try {
-      const res = await api.post<{ access_token: string }>('/tenant/auth/verify', { phone, otp });
+      // Backend was renamed to `code` in the phone-first refactor (see
+      // tenant_portal.py). Multi-org tenants get a different shape — the
+      // web portal is a thin fallback so we just send them to the app.
+      const res = await api.post<
+        | { access_token: string }
+        | { needs_org_pick: true; ticket: string; orgs: { id: string; name: string }[] }
+      >('/tenant/auth/verify', { phone, code: otp });
+      if ('needs_org_pick' in res.data) {
+        setError(
+          'You belong to multiple PGs. Please use the PGManage Resident app to sign in.',
+        );
+        return;
+      }
       localStorage.setItem('tenant_access_token', res.data.access_token);
       navigate('/portal/home');
     } catch (err) {
