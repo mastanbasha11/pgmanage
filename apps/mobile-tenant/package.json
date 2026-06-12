@@ -1,0 +1,60 @@
+{
+  "name": "@pgmanage/mobile-tenant",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "prebuild": "expo prebuild --platform android --clean",
+    "build:eas:apk": "eas build --platform android --profile preview --non-interactive",
+    "build:eas:aab": "eas build --platform android --profile production --non-interactive"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^14.0.0",
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "@tanstack/react-query": "^5.40.0",
+    "axios": "^1.7.2",
+    "date-fns": "^3.6.0",
+    "expo": "~51.0.0",
+    "expo-constants": "~16.0.0",
+    "expo-linking": "~6.3.0",
+    "expo-localization": "~15.0.3",
+    "expo-router": "~3.5.0",
+    "expo-secure-store": "~13.0.2",
+    "expo-splash-screen": "~0.27.0",
+    "expo-status-bar": "~1.12.0",
+    "expo-updates": "~0.25.28",
+    "i18n-js": "^4.4.3",
+    "react": "18.2.0",
+    "react-native": "0.74.5",
+    "react-native-gesture-handler": "~2.16.1",
+    "react-native-reanimated": "~3.10.1",
+    "react-native-safe-area-context": "4.10.5",
+    "react-native-screens": "3.31.1",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@testing-library/react-native": "^12.5.1",
+    "@types/jest": "^29.5.12",
+    "@types/react": "~18.2.0",
+    "jest": "^29.7.0",
+    "jest-expo": "~51.0.4",
+    "react-test-renderer": "18.2.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "~5.3.3"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "setupFiles": ["./jest.setup.ts"],
+    "testMatch": ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.test.tsx"],
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|i18n-js|axios))"
+    ]
+  }
+}
