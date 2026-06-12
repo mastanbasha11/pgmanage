@@ -1,7 +1,13 @@
-# Tenant Portal — Build Plan & Spec Review
+# Tenant App — Build Plan & Spec Review
 
+> **Surface clarification (2026-06-12, post-spec):** "tenant app" =
+> native Android + iOS application, NOT the existing `/portal/*` web pages.
+> All UX, sequencing, and architecture decisions below assume mobile-first
+> native build. The existing web `/portal/*` becomes a thin web fallback,
+> not the primary surface.
+>
 > Response to the build spec dated 2026-06-12. Goal: ship a world-class tenant
-> portal without over-scoping the first cut. Plan first, code after sign-off.
+> app without over-scoping the first cut. Plan first, code after sign-off.
 
 ---
 
@@ -32,6 +38,76 @@ After those changes, I'd split the work into three phases:
 
 The rest of this doc covers v1 in detail, sketches v2, defers v3 to a separate
 plan once v1+v2 ship.
+
+---
+
+## 1.5 Architecture decision — separate Expo app
+
+Now that the target is native Android + iOS, three options for where the
+tenant app lives in the monorepo:
+
+| Option | Layout | Pros | Cons |
+|--------|--------|------|------|
+| **A. Combined codebase** — route-gate by JWT role | `apps/mobile/app/(staff)/...` and `apps/mobile/app/(tenant)/...` in the existing project | One repo, one test suite, trivial lib sharing | Same APK/IPA for both audiences. "PGManage" name + icon is ambiguous (staff vs tenant). Bundle bloat. Different release cadences cause friction. App-store ASO mismatched (tenant searches != owner searches). |
+| **B. Separate Expo project** — `apps/mobile-tenant/` | New Expo app, separate `app.json`, separate `eas.json`, separate bundle id `in.pgmanage.tenant`. Lib code copied initially; extract to `packages/mobile-shared/` once both apps are live. | Clean App Store / Play Store listing per audience. Tenant icon + name ("PGManage Resident" or similar). Smaller bundle per app. Independent release cadence. Staff app keeps shipping unaffected. | One-time scaffolding cost (~half a day). Two EAS projects to babysit. Some library duplication until extraction. |
+| **C. Flavored builds** — same codebase, env-driven entry point | `EXPO_PUBLIC_APP_FLAVOR=staff\|tenant` in `eas.json` profiles; different `app.json` per flavor | One codebase. | expo-router is file-system-based; tree-shaking won't drop unused routes. Bundle stays ~bloated. Build matrix complexity. |
+
+**Recommendation: B.** Separate Expo project at `apps/mobile-tenant/`. The
+audiences are mutually exclusive (a person is either staff or tenant, basically
+never both at one PG), the brand should be different, and the App Store
+listing copy is different. The half-day of scaffolding pays off the first
+time we ship a staff-only fix and don't have to coordinate releases.
+
+### What gets copied vs shared
+
+Initial scaffold (day 1) — copy these into `apps/mobile-tenant/`:
+
+| Module | Action |
+|--------|--------|
+| `lib/theme.ts` | Copy. Same brand for both apps; if it ever diverges we'll fork. |
+| `lib/api.ts` | Copy + adapt — base URL same (`/api/v1`), token storage same, but the tenant client uses the tenant audience (`/tenant/*` paths) plus the new identity-level endpoints. |
+| `lib/storage.ts` | Copy as-is. Tenant tokens go to SecureStore exactly like staff tokens. |
+| `lib/i18n.ts` | Copy + new tenant-specific dictionary keys (`res.*` keys aren't needed; new `dash.tenant.*` etc.). en/hi/te from day 1. |
+| `lib/voice.ts` | Copy. Optional voice-guidance carries over for accessibility. |
+| `components/ui.tsx` | Copy. Same Screen / Card / Button / Field / KpiCard primitives — visual consistency across the two apps is nice. |
+| `lib/store.ts` | Fork. Tenant store has different shape (no `selectedPropertyId`, no `canAccessFinancials()`; instead has `activeOrgLink` for the multi-org case). |
+| `app/*` | Fresh. No staff routes carry over. The existing `apps/mobile/app/tenant-portal/index.tsx` (203 lines, stub from earlier) gets deleted — not worth porting. |
+| `package.json` deps | Same baseline + `expo-image-picker` (ID upload), `expo-print` (receipt PDFs locally if we want), `expo-document-picker` (if we add doc upload). |
+| `eas.json`, `app.json`, `babel.config.js`, `metro.config.js`, `tsconfig.json` | Fresh per app — different bundle id, icon, name, project id. |
+
+### Extraction milestone
+
+After v1 ships (~1 week post-launch), extract the genuinely-shared modules
+to a workspace package:
+
+```
+packages/
+  mobile-shared/    # NEW
+    theme.ts
+    storage.ts
+    api-base.ts     # shared interceptors / refresh logic
+    ui.tsx          # design-system primitives
+    i18n-base.ts    # base dictionary; each app extends with its own keys
+```
+
+Both apps depend on `@pgmanage/mobile-shared` via workspace protocol. Don't
+do this BEFORE shipping v1 — it's a refactor that adds risk without
+shipping value.
+
+### App identity
+
+| | Staff app (existing) | Tenant app (new) |
+|---|---------------------|-----------------|
+| Bundle id (Android) | `com.pgmanage.app` | `in.pgmanage.resident` |
+| Bundle id (iOS) | `com.pgmanage.app` | `in.pgmanage.resident` |
+| Name | PGManage | PGManage Resident (or MyPG — owner picks) |
+| Icon | Brand teal P (existing) | Different glyph — needs designer or quick variant |
+| Splash bg | Slate-900 | Teal-600 (lighter, friendlier — tenant audience) |
+| Play Store category | Business | House & Home |
+| Target audience copy | "For PG owners and managers" | "For PG residents — see rent, raise complaints, pay online" |
+
+Open question — answered in §6 below — what should the tenant app actually
+be called? "PGManage Resident" / "MyPG" / "Loop" (white-labelled?).
 
 ---
 
@@ -303,28 +379,66 @@ PUT  /properties/{id}/menu               # bulk-set whole week
 POST /tenants/{id}/issue-otp-code        # owner-issued one-time code path
 ```
 
-### 3.4 Web screens — v1
+### 3.4 Native screens — v1 (apps/mobile-tenant/)
 
-PWA at `/portal/*`, mobile-first. Reuse the existing `TenantPortalApp.tsx`
-shell.
+Expo SDK 51 + expo-router. File-based routes mirror the staff app's
+patterns so anyone reading both codebases recognises the layout.
 
 ```
-/portal/login                  Phone + (after OTP request) code entry
-/portal/login/select-org       Org picker when multiple active links
-/portal/                       Action-stack home: due, complaints, announcements
-/portal/payments               History list with filters
-/portal/payments/:id           Detail with receipt download
-/portal/ledger                 Month grid view
-/portal/complaints             List + 'Raise' FAB
-/portal/complaints/new         Form
-/portal/complaints/:id         Thread + status + reply
-/portal/announcements          List
-/portal/announcements/:id      Detail with mark-as-read
-/portal/info                   WiFi + house rules + manager
-/portal/menu                   Weekly grid, today highlighted
-/portal/profile                Own info, lang switcher, sign out
-/portal/notice                 Notice-to-vacate form / status
+apps/mobile-tenant/app/
+  _layout.tsx                  Root stack + ErrorBoundary + QueryClient
+  index.tsx                    Synchronous redirect → /auth/login or /tabs (same
+                               cold-start fix we did for the staff app)
+  auth/
+    login.tsx                  Phone entry → OTP request → code entry
+    select-org.tsx             Org-picker when multiple active links
+  tabs/
+    _layout.tsx                Bottom tab bar (4 tabs, see below)
+    index.tsx                  Home (action-stack dashboard)
+    payments.tsx               Payments list + filters
+    complaints.tsx             Complaints list + raise FAB
+    more.tsx                   Settings + info + menu + sign out (carve-out tab)
+  payments/[id].tsx            Detail with PDF receipt download
+  ledger.tsx                   Month-by-month grid view (linked from Home & Payments)
+  complaints/new.tsx           Raise form with photo picker
+  complaints/[id].tsx          Thread view + reply + confirm-resolve
+  announcements/index.tsx      List
+  announcements/[id].tsx       Detail with mark-as-read
+  info.tsx                     Property info: WiFi + house rules + manager
+  menu.tsx                     7-day food menu grid, today highlighted
+  notice.tsx                   Notice-to-vacate form + status
+  profile.tsx                  Own info, language switcher, sign out
 ```
+
+#### Tab bar layout
+
+5-tab phone-bar maximum (same constraint as the staff app); pick the 4 most
+frequently-used + a More:
+
+| Tab | Icon | Why this one |
+|-----|------|-------------|
+| **Home** | `home-outline` | Action-stack dashboard — the only screen tenants need to open the app for. |
+| **Payments** | `cash-outline` | Highest-recurring tenant intent — "what do I owe / what have I paid". |
+| **Complaints** | `chatbox-outline` | Second-highest intent. Quick raise + status. |
+| **More** | `menu-outline` | Wraps: announcements / info / menu / notice / profile. |
+
+(Skipped a dedicated "Announcements" tab — they're low-frequency. They show
+up as cards on Home when unread, and live under More for browsing history.)
+
+#### Web `/portal/*` fallback
+
+The existing web pages (`apps/web/src/pages/tenant-portal/TenantLogin.tsx`,
+`TenantHome.tsx`, `TenantPortalApp.tsx`) stay but are downgraded to a
+**"web fallback for tenants who can't install the app"** path. They get the
+minimum to work but are not the primary target. Specifically:
+
+- Keep login + ledger + payment history + complaints there.
+- Don't extend them with the new dashboard / menu / info / notice features.
+- Add a banner: *"Get the PGManage Resident app — better experience, push
+  notifications, offline support"* with Play Store + App Store links.
+
+Reason: probably 5% of tenants have very low-end phones where installing
+the app is painful. The web fallback is a courtesy, not a parallel build.
 
 ### 3.5 Owner-side additions — v1
 
@@ -457,46 +571,71 @@ Owner inbox at `/app/requests` (new top-level nav):
 
 ## 5. Sequencing
 
-Aiming for ~5 working days for v1, with two engineers if possible (one
-backend + one frontend mostly in parallel after day 1).
+Going native shifts the timeline. Realistic ~8 working days for v1 with one
+engineer (~5 with two in parallel — one backend, one mobile).
 
-| Day | Backend | Frontend | Notes |
-|----|---------|---------|-------|
-| **1** | Migration: `tenant_identity` + `tenant_identity_links` tables. Backfill script. Update OTP request/verify endpoints to use them (drop the `org_slug` requirement). One-time-code path. | Wireframes for login + dashboard. Theme + i18n setup mirroring mobile. | Auth is the hard blocker — get it right. |
-| **2** | `property_info` + `food_menu` tables + endpoints. `complaint_updates` table + endpoints. Receipt PDF generator (reportlab). | Login screen + org-picker + dashboard skeleton. | Backend ahead by a day so frontend never blocks. |
-| **3** | Notice-to-vacate endpoint. Statement PDF endpoint. Tests for each new helper. | Payments list + detail + receipt download. Complaints list + raise. | |
-| **4** | Owner-side endpoints (Settings → Tenant Portal card). Owner UI in /app/. | Complaints thread + confirm-resolution. Announcements with read state. | Owner-side changes are small but real. |
-| **5** | Hardening: tenant-can't-read-other-org tests. Rate-limits on OTP. Audit log coverage. | Static info + menu + notice + profile + i18n polish. Deploy + smoke test. | Full E2E pass on real backend. |
+| Day | Backend | Mobile (apps/mobile-tenant/) | Notes |
+|----|---------|----------------------------|-------|
+| **1** | Migration 019: `tenant_identity` + `tenant_identity_links`. Backfill script that walks every org schema's `tenants` and seeds identity rows. Update `/tenant/auth/otp` to phone-first (drop `org_slug`). | `npx create-expo-app apps/mobile-tenant` + Expo SDK 51 + expo-router. Copy theme/storage/ui/i18n/voice/api from `apps/mobile`. ErrorBoundary + root index redirect. Jest setup. | Backend day-1 also includes one-time-code path so frontend can stub-auth offline. |
+| **2** | `property_info` + `food_menu` + `complaint_updates` tables + endpoints. Receipt PDF generator (reportlab). | Login screen → OTP request → code entry → org-picker. Tabs scaffolding. | |
+| **3** | Notice-to-vacate endpoint. Statement PDF endpoint. Reply endpoint on complaints. Tests for each helper. | Home dashboard (action-stack cards). Payments list + filters. | |
+| **4** | Owner-side: `/properties/{id}/info` + `/properties/{id}/menu` endpoints. Auto-create `tenant_identity_links` on `POST /tenants` (existing check-in flow). | Payments detail + PDF receipt download (Linking). Ledger month-grid screen. | Auto-create-identity-on-checkin is the bridge — without it, OWNERS can't onboard a tenant who'll then log into the app. |
+| **5** | Hardening: tenant-can't-read-other-org integration tests. OTP rate-limits. Audit log coverage. | Complaints list + raise (with photo picker) + thread + confirm-resolve. | |
+| **6** | — | Announcements with read state. Info / Menu screens. Notice-to-vacate form. | All read-heavy; fast day. |
+| **7** | — | Profile + language switcher + sign out. Empty states, error states, loading states. i18n polish (en/hi/te). | |
+| **8** | — | Owner-side UI: Settings → Tenant Portal card (WiFi / house rules / manager / menu editor) in `apps/web`. EAS Build + first APK / IPA. | Owner UI is small; mostly form work in existing settings page. |
 
-After v1 ships, we get user feedback for 3-5 days while we start v2 (new
-tenant onboarding) in parallel.
+After v1 ships, get tenant feedback for ~1 week while v2 (new-tenant
+onboarding via invite link) starts in parallel.
+
+### App-store / Play-store readiness checklist for v1
+
+Before publishing, in addition to the build:
+
+- Privacy policy URL on `pgmanage.in/privacy` (the same one needed for staff
+  app + Meta App Review). One page covers both apps.
+- Tenant app icon + feature graphic + 4-6 screenshots per device class.
+  We can ship a v1 icon that's a quick variant of the staff icon; designer
+  polish later.
+- Play Store: separate listing under same Google Play Console account.
+- App Store: separate listing under same Apple Developer account.
+- Both apps share the same backend, so no new infrastructure.
 
 ---
 
 ## 6. Open questions for you to decide before I start
 
-1. **OTP delivery for v1.** WhatsApp App Review still pending. Pick one:
-   - **A.** Email magic-link OTP only for v1; owner records tenant email during check-in. Most tenants give email; the few who don't get the owner-issued code path.
+1. **Architecture: separate Expo project at `apps/mobile-tenant/`** (recommendation B in §1.5)?
+   Or do you prefer one of the alternatives (A combined, C flavored)?
+   **My recommendation: B.** Separate listings + clean per-audience branding
+   are worth the half-day of scaffolding.
+
+2. **OTP delivery for v1.** WhatsApp App Review still pending. Pick one:
+   - **A.** Email magic-link OTP for v1; owner records tenant email during check-in. Most tenants give email; the few who don't get the owner-issued code path.
    - **B.** Pay for an SMS gateway (Twilio ~₹0.50/SMS, MSG91 ~₹0.20/SMS) — wire it as the v1 channel; switch to WhatsApp once Meta clears.
    - **C.** Owner-issued codes only — owner taps "Issue code" per tenant, shares it via personal WhatsApp. Most-friction but zero-cost and zero-dependency.
    - **My recommendation: A**, with owner-issued codes as the fallback when a tenant has no email on file.
 
-2. **Public properties directory.** Confirm you're OK with cutting this from
-   v1 entirely. (It's a marketing-layer build, not a portal build.)
+3. **Tenant app name + bundle id.** Pick one:
+   - **PGManage Resident** · `in.pgmanage.resident` — keeps brand parity, makes role clear in the store listing.
+   - **MyPG** · `in.pgmanage.mypg` — punchy, tenant-flavoured, easier to search for.
+   - **A custom white-label name** (e.g. "Loop Living") — premium feel but means per-property white-labelling work, defer to v3.
+   - **My recommendation: PGManage Resident** for v1; revisit if owners want white-label.
 
-3. **Languages at launch.** EN + HI + TE for the portal, like mobile? Or
-   start EN-only and add HI/TE in v1.5?
+4. **Public properties directory.** Confirm you're OK with cutting this from
+   v1 entirely. (It's a marketing-layer build, not a tenant-app build. v2 of
+   the tenant app uses invite links instead.)
 
-4. **PWA vs separate native tenant app.** Recommend PWA only for v1 — the
-   existing tenant-portal lives at `/portal/*` and can be PWA-installable in
-   under a day. A native tenant app is a separate ~2-week build that adds
-   little vs a polished PWA for this audience. Confirm.
+5. **Languages at launch.** EN + HI + TE on day one (recommended — same
+   stack as the staff app), or EN-only first?
 
-5. **Where the portal lives.** Currently `/portal/*` on `pgmanage.in`. Spec
-   doesn't push back, so I'll keep it. (Alternative: `tenant.pgmanage.in`
-   subdomain — more isolation, more DNS work. Defer.)
+6. **Web `/portal/*` fate.** Three options:
+   - **A.** Keep as a thin "tenant who can't install the app" fallback (recommended). Just login + ledger + payments + complaints. Banner pushes app install.
+   - **B.** Delete entirely. Force everyone to the native app.
+   - **C.** Keep at full parity with the native app. Doubles maintenance.
+   - **My recommendation: A.**
 
-6. **Agreement template versioning.** When an owner updates the agreement
+7. **Agreement template versioning.** When an owner updates the agreement
    text, do we (a) force every existing tenant to re-accept on next login,
    (b) only ask new tenants, (c) leave it to the owner to chase manually?
    Recommend (a) — simple "Agreement updated — please review" banner with
@@ -506,7 +645,10 @@ tenant onboarding) in parallel.
 
 ## 7. What I'd build first if you say go right now
 
-Day-1 commitments (~6 hours):
+Day-1 commitments (~6 hours), assuming **B + A + PGManage Resident +
+cut directory + EN-day-one + keep web fallback**:
+
+Backend:
 
 - Migration 019: `public.tenant_identity` + `public.tenant_identity_links` +
   backfill script that walks every org schema's `tenants` table and seeds
@@ -514,11 +656,28 @@ Day-1 commitments (~6 hours):
 - Update `/api/v1/tenant/auth/otp` to drop the `org_slug` requirement and
   return a list of orgs the phone matches.
 - Add `/api/v1/tenant/auth/select-org` for the multi-org case.
-- A POC of email-OTP delivery via the existing SMTP service.
-- One end-to-end test: tenant phone → request OTP → verify → JWT → fetches
-  their own ledger.
+- Wire email-OTP delivery via the existing Brevo SMTP service. Template:
+  "Your PGManage code is {code}. Expires in 5 minutes."
 
-If that lands cleanly, the rest of v1 follows from the table above.
+Mobile (new project):
+
+- `npx create-expo-app apps/mobile-tenant` + Expo SDK 51 (match staff app) +
+  expo-router 3.5 + TanStack Query v5 + Zustand + axios.
+- Copy `lib/theme.ts`, `lib/storage.ts`, `lib/voice.ts`, `lib/i18n.ts` (with
+  tenant-specific dictionary added), `lib/api.ts` (adapted for `/tenant/*`),
+  `components/ui.tsx`, `jest.setup.ts` from `apps/mobile/`.
+- Fresh `lib/store.ts` — tenant-shaped state (no `selectedPropertyId`;
+  `activeOrgLink` instead).
+- `app.json` with bundle id `in.pgmanage.resident`, name `PGManage Resident`,
+  icon (quick variant of the staff icon).
+- `eas.json` profiles (development / preview / production) mirroring staff
+  app's structure.
+- ErrorBoundary + root `app/index.tsx` synchronous redirect.
+- Jest setup mirroring staff app — first unit tests as we build.
+- One end-to-end smoke test: tenant phone → request OTP → verify → JWT →
+  fetch own ledger. Goes from API to native screen in one pass.
+
+If that lands cleanly on day 1, the rest of v1 follows from the table above.
 
 ---
 
