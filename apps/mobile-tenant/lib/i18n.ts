@@ -44,9 +44,38 @@ const en = {
   'common.signout': 'Sign out',
   'common.loading': 'Loading…',
   'common.error': 'Something went wrong.',
+  'common.see_all': 'See all',
+  'common.empty_default_title': 'Nothing here yet',
+  'common.empty_default_message': 'When there’s something new, it’ll show up here.',
+
+  // Status pill labels — shared vocabulary, used by Pay, Tickets, Referrals.
+  'status.paid': 'Paid',
+  'status.due': 'Due',
+  'status.overdue': 'Overdue',
+  'status.partial': 'Partial',
+  'status.in_progress': 'In progress',
+  'status.resolved': 'Resolved',
+  'status.raised': 'Raised',
+  'status.assigned': 'Assigned',
+  'status.reopened': 'Reopened',
+  'status.pending': 'Pending',
+  'status.credited': 'Credited',
+  'status.invited': 'Invited',
+  'status.signed_up': 'Signed up',
+  'status.moved_in': 'Moved in',
+
+  // Theme settings — surfaced in Phase 9 Profile screen.
+  'theme.title': 'Appearance',
+  'theme.system': 'Use system',
+  'theme.light': 'Light',
+  'theme.dark': 'Dark',
 };
 
-const hi: typeof en = {
+// Hindi + Telugu dictionaries are deliberately Partial — i18n.enableFallback
+// (set below) means any missing key resolves to the English copy. As new
+// strings get added per phase, translations land alongside the screen
+// that uses them; this keeps Phase 1 unblocked without forcing a sweep.
+const hi: Partial<typeof en> = {
   'auth.welcome': 'स्वागत है',
   'auth.signin_prompt': 'अपने पंजीकृत फ़ोन नंबर से साइन-इन करें',
   'auth.phone_label': 'फ़ोन नंबर',
@@ -80,7 +109,7 @@ const hi: typeof en = {
   'common.error': 'कुछ ग़लत हो गया.',
 };
 
-const te: typeof en = {
+const te: Partial<typeof en> = {
   'auth.welcome': 'స్వాగతం',
   'auth.signin_prompt': 'మీ నమోదిత ఫోన్ నంబర్‌తో సైన్ ఇన్ చేయండి',
   'auth.phone_label': 'ఫోన్ నంబర్',

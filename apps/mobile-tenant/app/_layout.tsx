@@ -19,9 +19,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, ActivityIndicator } from 'react-native';
 
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { ToastHost } from '../components/ui';
 import { useAppStore } from '../lib/store';
 import { secureStorage } from '../lib/storage';
-import { colors } from '../lib/theme';
+import { ThemeProvider, useTheme } from '../lib/theme';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,7 +55,8 @@ function AuthGuard() {
   return null;
 }
 
-export default function RootLayout() {
+function Boot({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
   const setSession = useAppStore((s) => s.setSession);
   const [ready, setReady] = useState(false);
 
@@ -68,23 +70,40 @@ export default function RootLayout() {
 
   if (!ready) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.bg,
+        }}
+      >
         <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
+  return <>{children}</>;
+}
 
+export default function RootLayout() {
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
-          <QueryClientProvider client={queryClient}>
-            <AuthGuard />
-            <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
-              <Stack.Screen name="auth" />
-              <Stack.Screen name="home" />
-            </Stack>
-          </QueryClientProvider>
+          <ThemeProvider>
+            <QueryClientProvider client={queryClient}>
+              <Boot>
+                <AuthGuard />
+                <Stack
+                  screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
+                >
+                  <Stack.Screen name="auth" />
+                  <Stack.Screen name="home" />
+                </Stack>
+                <ToastHost />
+              </Boot>
+            </QueryClientProvider>
+          </ThemeProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>
