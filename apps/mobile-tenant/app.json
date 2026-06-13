@@ -46,10 +46,14 @@
     "extra": {
       "router": {
         "origin": false
+      },
+      "eas": {
+        "projectId": "aba700fd-fd20-4fec-9d87-d47f6dee6feb"
       }
     },
     "runtimeVersion": {
       "policy": "appVersion"
-    }
+    },
+    "owner": "mastan_loop"
   }
 }
