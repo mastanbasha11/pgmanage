@@ -67,6 +67,8 @@ interface ResidentDetail {
   id_type?: string;
   id_number?: string;
   id_proof_url?: string;
+  vehicle_type?: 'NONE' | 'TWO_WHEELER' | 'FOUR_WHEELER';
+  vehicle_registration?: string | null;
 }
 
 interface Payment {
@@ -481,6 +483,12 @@ function EditTenantModal({
   const [occupation, setOccupation] = useState(tenant.occupation ?? '');
   const [hometown, setHometown] = useState(tenant.hometown ?? '');
   const [permanentAddress, setPermanentAddress] = useState(tenant.permanent_address ?? '');
+  const [vehicleType, setVehicleType] = useState<'NONE' | 'TWO_WHEELER' | 'FOUR_WHEELER'>(
+    tenant.vehicle_type ?? 'NONE',
+  );
+  const [vehicleRegistration, setVehicleRegistration] = useState(
+    tenant.vehicle_registration ?? '',
+  );
   const [expectedMoveOut, setExpectedMoveOut] = useState(tenant.expected_move_out_date ?? '');
   const [error, setError] = useState('');
 
@@ -490,6 +498,10 @@ function EditTenantModal({
 
   async function save() {
     setError('');
+    if (vehicleType !== 'NONE' && !vehicleRegistration.trim()) {
+      setError('Vehicle registration is required when a vehicle type is set.');
+      return;
+    }
     try {
       await mutateAsync({
         name: name.trim(),
@@ -503,6 +515,9 @@ function EditTenantModal({
         occupation: occupation.trim() || null,
         hometown: hometown.trim() || null,
         permanent_address: permanentAddress.trim() || null,
+        vehicle_type: vehicleType,
+        vehicle_registration:
+          vehicleType === 'NONE' ? null : vehicleRegistration.trim().toUpperCase(),
         expected_move_out_date: expectedMoveOut || null,
       });
       onSaved();
@@ -559,6 +574,27 @@ function EditTenantModal({
               onChangeText={setEmergencyRelation}
               placeholder="Father, Mother…"
             />
+
+            <Text style={editStyles.section}>Vehicle (for gate security)</Text>
+            <Field
+              label="Type (NONE / TWO_WHEELER / FOUR_WHEELER)"
+              value={vehicleType}
+              onChangeText={(v) => {
+                const upper = (v.trim().toUpperCase() as typeof vehicleType) || 'NONE';
+                setVehicleType(upper === 'TWO_WHEELER' || upper === 'FOUR_WHEELER' ? upper : 'NONE');
+                if (upper === 'NONE') setVehicleRegistration('');
+              }}
+              autoCapitalize="characters"
+            />
+            {vehicleType !== 'NONE' && (
+              <Field
+                label="Registration number"
+                placeholder="KA 01 AB 1234"
+                value={vehicleRegistration}
+                onChangeText={setVehicleRegistration}
+                autoCapitalize="characters"
+              />
+            )}
 
             <Text style={editStyles.section}>Other</Text>
             <Field label="Occupation" value={occupation} onChangeText={setOccupation} />

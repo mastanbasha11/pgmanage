@@ -553,3 +553,106 @@ async def test_tenant_token_cannot_create_payments(
         },
     )
     assert response.status_code == 403
+
+
+# ── KYC: PATCH /tenant/me/kyc ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_tenant_me_returns_vehicle_and_kyc_complete_flag(
+    client: AsyncClient, tenant_portal_token: str, test_tenant: dict
+):
+    """/me surfaces vehicle fields + a derived kyc_complete flag the
+    resident app uses to decide whether to show the onboarding flow."""
+    r = await client.get("/api/v1/tenant/me", headers=auth_headers(tenant_portal_token))
+    assert r.status_code == 200
+    body = r.json()
+    # Vehicle defaults from the migration backfill.
+    assert body["vehicle_type"] == "NONE"
+    assert body["vehicle_registration"] is None
+    # Fixture has name + emergency contact, vehicle answer present → complete.
+    assert body["kyc_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_tenant_kyc_patch_updates_vehicle(
+    client: AsyncClient, tenant_portal_token: str
+):
+    """Resident sets vehicle_type=TWO_WHEELER with a registration."""
+    r = await client.patch(
+        "/api/v1/tenant/me/kyc",
+        headers=auth_headers(tenant_portal_token),
+        json={"vehicle_type": "TWO_WHEELER", "vehicle_registration": "KA 01 AB 1234"},
+    )
+    assert r.status_code == 200
+    me = await client.get("/api/v1/tenant/me", headers=auth_headers(tenant_portal_token))
+    assert me.json()["vehicle_type"] == "TWO_WHEELER"
+    assert me.json()["vehicle_registration"] == "KA 01 AB 1234"
+
+
+@pytest.mark.asyncio
+async def test_tenant_kyc_patch_rejects_vehicle_without_registration(
+    client: AsyncClient, tenant_portal_token: str
+):
+    """TWO_WHEELER / FOUR_WHEELER must include a registration plate."""
+    r = await client.patch(
+        "/api/v1/tenant/me/kyc",
+        headers=auth_headers(tenant_portal_token),
+        json={"vehicle_type": "FOUR_WHEELER", "vehicle_registration": "   "},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VEHICLE_REGISTRATION_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_tenant_kyc_patch_clears_registration_when_type_none(
+    client: AsyncClient, tenant_portal_token: str
+):
+    """Switching to NONE clears any prior plate (no stale data on the row)."""
+    # First set a plate
+    await client.patch(
+        "/api/v1/tenant/me/kyc",
+        headers=auth_headers(tenant_portal_token),
+        json={"vehicle_type": "TWO_WHEELER", "vehicle_registration": "KA 01 AB 1234"},
+    )
+    # Then say "no vehicle"
+    r = await client.patch(
+        "/api/v1/tenant/me/kyc",
+        headers=auth_headers(tenant_portal_token),
+        json={"vehicle_type": "NONE"},
+    )
+    assert r.status_code == 200
+    me = await client.get("/api/v1/tenant/me", headers=auth_headers(tenant_portal_token))
+    assert me.json()["vehicle_type"] == "NONE"
+    assert me.json()["vehicle_registration"] is None
+
+
+@pytest.mark.asyncio
+async def test_tenant_kyc_patch_updates_emergency_contact(
+    client: AsyncClient, tenant_portal_token: str
+):
+    """Emergency contact fields editable via KYC endpoint."""
+    r = await client.patch(
+        "/api/v1/tenant/me/kyc",
+        headers=auth_headers(tenant_portal_token),
+        json={
+            "emergency_contact_name": "Mom",
+            "emergency_contact_phone": "+919000000099",
+            "emergency_contact_relation": "Parent",
+        },
+    )
+    assert r.status_code == 200
+    me = await client.get("/api/v1/tenant/me", headers=auth_headers(tenant_portal_token))
+    assert me.json()["emergency_contact_name"] == "Mom"
+
+
+@pytest.mark.asyncio
+async def test_tenant_kyc_patch_requires_tenant_token(
+    client: AsyncClient, test_owner: dict
+):
+    """Staff token can't hit /tenant/me/kyc → 403."""
+    r = await client.patch(
+        "/api/v1/tenant/me/kyc",
+        headers=auth_headers(test_owner["token"]),
+        json={"vehicle_type": "NONE"},
+    )
+    assert r.status_code == 403

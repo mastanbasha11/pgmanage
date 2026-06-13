@@ -1,23 +1,37 @@
 /**
- * Step 2 of sign-in: enter the 6-digit code.
+ * 6-digit code entry. Rebuilt on the new UI kit.
  *
- * On success:
- *   - Single-org tenant → token saved to SecureStore + setSession → router
- *     replaces to /home.
- *   - Multi-org tenant → forward to /auth/select-org with the ticket +
- *     org list as params.
+ * When the backend is in inline-OTP mode (pre-WhatsApp/SMS) we surface
+ * the code in a hero card above the field AND pre-fill the input so the
+ * user can just tap Verify. The card disappears the moment the server
+ * stops returning a `code` field.
+ *
+ * Post-verify routing depends on whether the user's KYC is complete
+ * (server-derived). New users land on /onboarding; existing users on
+ * /home.
  */
 import { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import axios from 'axios';
 
-import { Button, Field, Screen } from '../../components/ui';
-import { isMultiOrg, verifyOtp, requestOtp, getApiError } from '../../lib/api';
+import {
+  Button,
+  Card,
+  Field,
+  Screen,
+  toast,
+} from '../../components/ui';
+import {
+  isMultiOrg,
+  verifyOtp,
+  requestOtp,
+  getApiError,
+} from '../../lib/api';
 import { secureStorage } from '../../lib/storage';
 import { useAppStore } from '../../lib/store';
 import { t } from '../../lib/i18n';
-import { colors, radius, space, type as fontSize } from '../../lib/theme';
+import { useTheme } from '../../lib/theme';
 
 export default function CodeScreen() {
   const params = useLocalSearchParams<{
@@ -31,10 +45,8 @@ export default function CodeScreen() {
   const router = useRouter();
   const setSession = useAppStore((s) => s.setSession);
 
-  // When the backend returns a code inline (pre-SMS test mode), pre-fill
-  // the input so the user can just tap Verify. We also show the code in
-  // a banner above the field — explicit is better than implicit, and a
-  // tester will want to see it.
+  const { colors, fontSize, fontWeight, lineHeight, space } = useTheme();
+
   const [inlineCode, setInlineCode] = useState(params.inlineCode ?? '');
   const [notice, setNotice] = useState(params.notice ?? '');
   const [code, setCode] = useState(params.inlineCode ?? '');
@@ -44,7 +56,10 @@ export default function CodeScreen() {
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
-    const id = setInterval(() => setSecondsLeft((s) => Math.max(s - 1, 0)), 1000);
+    const id = setInterval(
+      () => setSecondsLeft((s) => Math.max(s - 1, 0)),
+      1000,
+    );
     return () => clearInterval(id);
   }, [secondsLeft]);
 
@@ -57,14 +72,22 @@ export default function CodeScreen() {
     try {
       const r = await verifyOtp(phone, code);
       if (isMultiOrg(r)) {
-        router.replace({
-          pathname: '/auth/select-org',
-          params: { ticket: r.ticket, orgs: JSON.stringify(r.orgs) },
-        });
+        // Resident app is single-property for Phase 2 — but if someone
+        // installed the app and the server still returns a multi-org
+        // response, we direct them at the staff (PG owner) rather than
+        // building a picker.
+        Alert.alert(
+          t('common.error'),
+          'Multiple PGs found. Please ask your PG owner to clarify your account.',
+        );
         return;
       }
       await secureStorage.setAccessToken(r.access_token);
       setSession(r.access_token);
+      toast.success('Signed in');
+      // Routing decision (onboarding vs home) happens in the post-login
+      // navigation guard reading useProfile().kycComplete. We replace to
+      // /home; the guard pushes /onboarding/welcome if needed.
       router.replace('/home');
     } catch (err) {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
@@ -80,14 +103,13 @@ export default function CodeScreen() {
     setResending(true);
     try {
       const r = await requestOtp(phone);
-      // If we're still in inline mode, refresh the displayed code +
-      // prefilled input so the banner stays in sync.
       if (r.code) {
         setInlineCode(r.code);
         setCode(r.code);
         if (r.notice) setNotice(r.notice);
       }
       setSecondsLeft(60);
+      toast.info('Code resent');
     } catch (err) {
       Alert.alert(t('common.error'), getApiError(err));
     } finally {
@@ -98,19 +120,65 @@ export default function CodeScreen() {
   return (
     <Screen>
       <View style={styles.hero}>
-        <Text style={styles.title}>{t('auth.code_label')}</Text>
+        <Text
+          style={{
+            color: colors.text,
+            fontSize: fontSize.h1,
+            lineHeight: lineHeight.h1,
+            fontWeight: fontWeight.extrabold,
+          }}
+        >
+          {t('auth.code_label')}
+        </Text>
         {to ? (
-          <Text style={styles.subtitle}>{t('auth.code_sent_email', { to })}</Text>
-        ) : null}
+          <Text
+            style={{
+              color: colors.textMuted,
+              fontSize: fontSize.body,
+              lineHeight: lineHeight.body,
+              marginTop: space.sm,
+            }}
+          >
+            {t('auth.code_sent_email', { to })}
+          </Text>
+        ) : (
+          <Text
+            style={{
+              color: colors.textMuted,
+              fontSize: fontSize.body,
+              lineHeight: lineHeight.body,
+              marginTop: space.sm,
+            }}
+          >
+            Sent to {phone}
+          </Text>
+        )}
       </View>
 
       {inlineCode ? (
-        <View style={styles.codeBanner}>
-          <Text style={styles.codeBannerLabel}>
+        <Card variant="hero" style={{ marginBottom: space.xl }}>
+          <Text
+            style={{
+              color: colors.textMuted,
+              fontSize: fontSize.small,
+              textAlign: 'center',
+              marginBottom: space.xs,
+            }}
+          >
             {notice || 'Your code'}
           </Text>
-          <Text style={styles.codeBannerValue}>{inlineCode}</Text>
-        </View>
+          <Text
+            style={{
+              color: colors.accent,
+              fontSize: 36,
+              fontWeight: fontWeight.extrabold,
+              letterSpacing: 8,
+              textAlign: 'center',
+            }}
+          >
+            {inlineCode}
+          </Text>
+        </Card>
       ) : null}
 
       <Field
@@ -125,13 +193,21 @@ export default function CodeScreen() {
 
       <View style={{ height: space.lg }} />
 
-      <Button label={t('auth.verify')} onPress={verify} loading={submitting} block />
+      <Button
+        label={t('auth.verify')}
+        onPress={verify}
+        loading={submitting}
+        size="lg"
+        block
+      />
 
       <View style={{ height: space.md }} />
 
       <Button
         label={
-          secondsLeft > 0 ? `${t('auth.resend')} (${secondsLeft}s)` : t('auth.resend')
+          secondsLeft > 0
+            ? `${t('auth.resend')} (${secondsLeft}s)`
+            : t('auth.resend')
         }
         onPress={resend}
         loading={resending}
@@ -144,34 +220,5 @@ export default function CodeScreen() {
 }
 
 const styles = StyleSheet.create({
-  hero: { marginTop: space.xxl, marginBottom: space.xl },
-  title: { color: colors.text, fontSize: fontSize.h1, fontWeight: '800' },
-  subtitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.body,
-    marginTop: space.sm,
-  },
-  // Banner that appears in inline-OTP mode (pre-SMS) so the user can
-  // see and copy the code without leaving the app.
-  codeBanner: {
-    backgroundColor: '#F0FDFA', // teal-50 — readable + on-brand
-    borderColor: '#5EEAD4',
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: space.lg,
-    marginBottom: space.lg,
-    alignItems: 'center',
-  },
-  codeBannerLabel: {
-    color: colors.textMuted,
-    fontSize: fontSize.small,
-    marginBottom: space.xs,
-    textAlign: 'center',
-  },
-  codeBannerValue: {
-    color: colors.accent,
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: 6,
-  },
+  hero: { marginTop: 32, marginBottom: 24 },
 });

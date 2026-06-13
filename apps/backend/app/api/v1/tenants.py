@@ -94,7 +94,18 @@ class TenantCreate(BaseModel):
     move_in_date: date
     expected_move_out_date: date | None = None
     notes: str | None = None
+    # Vehicle is collected at check-in (also editable post hoc). The resident
+    # app's KYC step can update later via PATCH /tenant/kyc.
+    vehicle_type: str = "NONE"
+    vehicle_registration: str | None = None
     rent_plan: RentPlanCreate
+
+    @field_validator("vehicle_type")
+    @classmethod
+    def _check_vehicle_type(cls, v: str) -> str:
+        if v not in {"NONE", "TWO_WHEELER", "FOUR_WHEELER"}:
+            raise ValueError("vehicle_type must be NONE, TWO_WHEELER, or FOUR_WHEELER")
+        return v
 
 
 class CheckoutRequest(BaseModel):
@@ -168,13 +179,16 @@ async def checkin_tenant(
                 id_type, id_number, emergency_contact_name, emergency_contact_phone,
                 emergency_contact_relation, occupation, employer_name, hometown,
                 permanent_address, move_in_date, expected_move_out_date, status,
+                vehicle_type, vehicle_registration,
                 notes, created_by
             )
             VALUES (
                 :org_id, :pid, :bed_id, :name, :phone, :email,
                 CAST(:id_type AS id_type_enum), :id_number, :ec_name, :ec_phone, :ec_rel,
                 :occupation, :employer, :hometown, :address,
-                :move_in, :move_out, 'ACTIVE'::tenant_status_enum, :notes, :creator
+                :move_in, :move_out, 'ACTIVE'::tenant_status_enum,
+                CAST(:vtype AS vehicle_type_enum), :vreg,
+                :notes, :creator
             )
             RETURNING id
         """),
@@ -187,6 +201,8 @@ async def checkin_tenant(
             "employer": body.employer_name, "hometown": body.hometown,
             "address": body.permanent_address, "move_in": body.move_in_date,
             "move_out": body.expected_move_out_date, "notes": body.notes,
+            "vtype": body.vehicle_type,
+            "vreg": (body.vehicle_registration or "").strip() or None,
             "creator": str(ctx.user_id),
         },
     )
@@ -399,11 +415,23 @@ class TenantUpdate(BaseModel):
     permanent_address: str | None = None
     expected_move_out_date: date | None = None
     notes: str | None = None
+    # Vehicle is on the tenants row; safe to update at any time.
+    vehicle_type: str | None = None
+    vehicle_registration: str | None = None
     # Rent-plan fields editable after check-in. They land on the active rent_plan
     # row, not on the tenants row.
     security_deposit_paise: int | None = None
     advance_paid_paise: int | None = None
     non_refundable_advance_paise: int | None = None
+
+    @field_validator("vehicle_type")
+    @classmethod
+    def _check_vehicle_type(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in {"NONE", "TWO_WHEELER", "FOUR_WHEELER"}:
+            raise ValueError("vehicle_type must be NONE, TWO_WHEELER, or FOUR_WHEELER")
+        return v
 
 
 class RefundUpdate(BaseModel):
@@ -514,6 +542,8 @@ async def update_tenant(
     for k in updates:
         if k == "id_type":
             set_parts.append("id_type = CAST(:id_type AS id_type_enum)")
+        elif k == "vehicle_type":
+            set_parts.append("vehicle_type = CAST(:vehicle_type AS vehicle_type_enum)")
         else:
             set_parts.append(f"{k} = :{k}")
     set_clause = ", ".join(set_parts)

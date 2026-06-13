@@ -43,6 +43,8 @@ const atHour = (d: Date, h: number, m = 0) => {
 
 // ── Identity ────────────────────────────────────────────────────────────
 
+// Mutable on purpose: the resident-app KYC mutation rewrites parts of
+// this in mock mode so the UI demos the round-trip without a backend.
 export const mockProfile: Profile = {
   id: 'tenant-1',
   name: 'Aditya Sai Kumar',
@@ -73,6 +75,9 @@ export const mockProfile: Profile = {
     billingDay: 5,
   },
   walletBalancePaise: 150_000, // ₹1,500 from prior referrals
+  emergency: null,        // intentionally blank so the demo enters onboarding
+  vehicle: { type: 'NONE', registration: null },
+  kycComplete: false,
 };
 
 // ── Dues / Ledger ───────────────────────────────────────────────────────

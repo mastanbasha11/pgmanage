@@ -55,6 +55,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         ("notif_status_enum", "'SENT','FAILED','PENDING'"),
         ("audit_action_enum", "'INSERT','UPDATE','DELETE'"),
         ("booking_kind_enum", "'DAILY','ADVANCE'"),
+        ("vehicle_type_enum", "'NONE','TWO_WHEELER','FOUR_WHEELER'"),
     ]
 
     for type_name, values in enum_types:
@@ -187,6 +188,8 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             expected_move_out_date DATE, actual_move_out_date DATE,
             notice_given_date DATE,
             status tenant_status_enum NOT NULL DEFAULT 'ACTIVE',
+            vehicle_type vehicle_type_enum NOT NULL DEFAULT 'NONE',
+            vehicle_registration VARCHAR(20),
             notes TEXT,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

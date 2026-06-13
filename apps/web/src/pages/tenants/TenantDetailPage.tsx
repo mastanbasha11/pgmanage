@@ -436,6 +436,16 @@ export default function TenantDetailPage() {
                 <Field label="Emergency phone" value={tenant.emergency_contact_phone} />
               )}
               {tenant.id_number && <Field label="ID number" value={tenant.id_number} />}
+              {tenant.vehicle_type && tenant.vehicle_type !== 'NONE' && (
+                <Field
+                  label="Vehicle"
+                  value={`${
+                    tenant.vehicle_type === 'TWO_WHEELER'
+                      ? 'Two-wheeler'
+                      : 'Four-wheeler'
+                  } · ${tenant.vehicle_registration ?? '—'}`}
+                />
+              )}
               {tenant.occupation && <Field label="Occupation" value={tenant.occupation} />}
               {tenant.hometown && <Field label="Hometown" value={tenant.hometown} />}
               {tenant.expected_move_out_date && (
@@ -1073,6 +1083,8 @@ interface EditableTenant {
   occupation?: string;
   hometown?: string;
   permanent_address?: string;
+  vehicle_type?: 'NONE' | 'TWO_WHEELER' | 'FOUR_WHEELER';
+  vehicle_registration?: string;
   expected_move_out_date?: string;
   notes?: string;
 }
@@ -1100,6 +1112,8 @@ function EditTenantDialog({
     occupation: tenant.occupation ?? '',
     hometown: tenant.hometown ?? '',
     permanent_address: tenant.permanent_address ?? '',
+    vehicle_type: (tenant.vehicle_type ?? 'NONE') as 'NONE' | 'TWO_WHEELER' | 'FOUR_WHEELER',
+    vehicle_registration: tenant.vehicle_registration ?? '',
     expected_move_out_date: tenant.expected_move_out_date ?? '',
     notes: tenant.notes ?? '',
   });
@@ -1120,11 +1134,31 @@ function EditTenantDialog({
         occupation: tenant.occupation,
         hometown: tenant.hometown,
         permanent_address: tenant.permanent_address,
+        vehicle_type: tenant.vehicle_type,
+        vehicle_registration: tenant.vehicle_registration,
         expected_move_out_date: tenant.expected_move_out_date,
         notes: tenant.notes,
       };
       for (const [k, v] of Object.entries(form)) {
         if (v !== '' && v !== orig[k]) payload[k] = v;
+      }
+      // Switching to NONE explicitly clears the plate so the row doesn't
+      // keep a stale reading.
+      if (form.vehicle_type === 'NONE' && tenant.vehicle_registration) {
+        payload.vehicle_registration = undefined;
+        payload.vehicle_type = 'NONE';
+      }
+      // Refuse to ship "TWO_WHEELER + blank plate" combos client-side.
+      if (form.vehicle_type !== 'NONE' && !form.vehicle_registration.trim()) {
+        toast({
+          title: 'Registration required',
+          description: 'Enter the vehicle registration number.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (payload.vehicle_registration) {
+        payload.vehicle_registration = payload.vehicle_registration.trim().toUpperCase();
       }
       if (Object.keys(payload).length === 0) {
         toast({ title: 'No changes' });
@@ -1252,6 +1286,49 @@ function EditTenantDialog({
               onChange={(e) => setForm({ ...form, permanent_address: e.target.value })}
             />
           </div>
+          <hr className="my-2" />
+          <p className="text-xs font-medium text-muted-foreground">Vehicle (for gate security)</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Type</Label>
+              <Select
+                value={form.vehicle_type}
+                onValueChange={(v) =>
+                  setForm({
+                    ...form,
+                    vehicle_type: v as 'NONE' | 'TWO_WHEELER' | 'FOUR_WHEELER',
+                    // Clear plate immediately on switch-to-none so the user
+                    // sees the UI reflect the eventual server state.
+                    vehicle_registration: v === 'NONE' ? '' : form.vehicle_registration,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NONE">No vehicle</SelectItem>
+                  <SelectItem value="TWO_WHEELER">Two-wheeler</SelectItem>
+                  <SelectItem value="FOUR_WHEELER">Four-wheeler</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {form.vehicle_type !== 'NONE' && (
+              <div>
+                <Label className="text-xs">Registration number</Label>
+                <Input
+                  value={form.vehicle_registration}
+                  onChange={(e) =>
+                    setForm({ ...form, vehicle_registration: e.target.value })
+                  }
+                  placeholder="KA 01 AB 1234"
+                  autoCapitalize="characters"
+                  className="uppercase"
+                />
+              </div>
+            )}
+          </div>
+          <hr className="my-2" />
           <div>
             <Label className="text-xs">Expected move-out</Label>
             <Input

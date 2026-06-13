@@ -23,6 +23,15 @@ describe('mock seed', () => {
     expect(mockProfile.walletBalancePaise).toBeGreaterThanOrEqual(0);
   });
 
+  it('profile starts with kycComplete=false so the demo enters onboarding', () => {
+    // Set explicitly in the seed so the resident-app first-run demo
+    // walks the new user through the onboarding flow. Once /onboarding
+    // posts the KYC, this flips true and home becomes the landing screen.
+    expect(mockProfile.kycComplete).toBe(false);
+    expect(mockProfile.vehicle.type).toBe('NONE');
+    expect(mockProfile.emergency).toBeNull();
+  });
+
   it('current dues total equals the sum of line amounts', () => {
     const sum = mockDues.lines.reduce((s, l) => s + l.amountPaise, 0);
     expect(mockDues.totalPaise).toBe(sum);

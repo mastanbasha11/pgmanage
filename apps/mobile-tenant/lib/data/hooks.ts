@@ -11,7 +11,13 @@
  *   useThingQuery   → fetches one thing
  *   useThingMutation → writes a thing (Phase 4+)
  */
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQueryClient,
+  useQuery,
+  type UseMutationResult,
+  type UseQueryResult,
+} from '@tanstack/react-query';
 
 import { api } from '../api';
 
@@ -36,6 +42,7 @@ import {
 import type {
   AppNotification,
   Event,
+  KycUpdate,
   LedgerEntry,
   MealServing,
   Notice,
@@ -108,3 +115,70 @@ export const useNotifications = makeHook<AppNotification[]>(
   mockNotifications,
   '/tenant/notifications',
 );
+
+// ── Mutations ───────────────────────────────────────────────────────────────
+
+/**
+ * useUpdateKyc — POSTs the resident-app onboarding answers.
+ *
+ * In mock mode the mutation rewrites the seed Profile in-place so the home
+ * screen reflects the new state after the round-trip. In live mode it hits
+ * PATCH /tenant/me/kyc. Either way the cached `useProfile` query is
+ * invalidated so a Home pull-to-refresh would pick up the change too.
+ */
+export function useUpdateKyc(): UseMutationResult<Profile, unknown, KycUpdate> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (update: KycUpdate) => {
+      if (useMockEnabled()) {
+        await fakeLatency();
+        // Apply to the in-memory seed so subsequent useProfile() returns
+        // the patched record.
+        if (update.name) mockProfile.name = update.name;
+        if (
+          update.emergencyContactName ||
+          update.emergencyContactPhone ||
+          update.emergencyContactRelation
+        ) {
+          mockProfile.emergency = {
+            name: update.emergencyContactName ?? mockProfile.emergency?.name ?? '',
+            phone: update.emergencyContactPhone ?? mockProfile.emergency?.phone ?? '',
+            relation:
+              update.emergencyContactRelation ?? mockProfile.emergency?.relation ?? '',
+          };
+        }
+        if (update.vehicleType) {
+          mockProfile.vehicle = {
+            type: update.vehicleType,
+            registration:
+              update.vehicleType === 'NONE'
+                ? null
+                : update.vehicleRegistration ?? mockProfile.vehicle.registration ?? null,
+          };
+        }
+        // Derived flag — matches backend tenant_me logic.
+        mockProfile.kycComplete = Boolean(
+          mockProfile.name &&
+            mockProfile.emergency?.name &&
+            mockProfile.emergency?.phone &&
+            mockProfile.vehicle.type,
+        );
+        return mockProfile;
+      }
+      // Live: backend expects snake_case fields.
+      await api.patch('/tenant/me/kyc', {
+        name: update.name,
+        emergency_contact_name: update.emergencyContactName,
+        emergency_contact_phone: update.emergencyContactPhone,
+        emergency_contact_relation: update.emergencyContactRelation,
+        vehicle_type: update.vehicleType,
+        vehicle_registration: update.vehicleRegistration,
+      });
+      const r = await api.get<Profile>('/tenant/me');
+      return r.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: k.profile });
+    },
+  });
+}

@@ -14,6 +14,14 @@
 
 // ── Identity ─────────────────────────────────────────────────────────────
 
+export type VehicleType = 'NONE' | 'TWO_WHEELER' | 'FOUR_WHEELER';
+
+export interface EmergencyContact {
+  name: string;
+  phone: string;
+  relation: string;
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -24,6 +32,19 @@ export interface Profile {
   room: RoomSummary;
   lease: LeaseSummary;
   walletBalancePaise: number;
+  emergency: EmergencyContact | null;
+  vehicle: { type: VehicleType; registration?: string | null };
+  /** Server-derived. False until the resident has completed onboarding. */
+  kycComplete: boolean;
+}
+
+export interface KycUpdate {
+  name?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  emergencyContactRelation?: string;
+  vehicleType?: VehicleType;
+  vehicleRegistration?: string;
 }
 
 export interface PropertySummary {

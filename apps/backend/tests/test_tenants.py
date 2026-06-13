@@ -127,6 +127,79 @@ async def test_checkin_requires_auth(client: AsyncClient, test_property: dict):
 
 
 @pytest.mark.asyncio
+async def test_checkin_persists_vehicle_when_provided(
+    client: AsyncClient, test_owner: dict, test_property: dict, db: AsyncSession
+):
+    """Check-in payload accepts vehicle_type + vehicle_registration and
+    writes them onto the tenants row."""
+    bed_id = test_property["bed_ids"][0]
+    payload = {
+        **_checkin_payload(bed_id),
+        "vehicle_type": "TWO_WHEELER",
+        "vehicle_registration": "KA 01 AB 1234",
+    }
+    response = await client.post(
+        "/api/v1/tenants",
+        headers=auth_headers(test_owner["token"]),
+        json=payload,
+    )
+    assert response.status_code == 201, response.text
+    tenant_id = response.json()["tenant_id"]
+
+    schema = test_property["schema_name"]
+    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+    row = (
+        await db.execute(
+            text("SELECT vehicle_type, vehicle_registration FROM tenants WHERE id = :id"),
+            {"id": tenant_id},
+        )
+    ).mappings().fetchone()
+    assert row["vehicle_type"] == "TWO_WHEELER"
+    assert row["vehicle_registration"] == "KA 01 AB 1234"
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_checkin_defaults_vehicle_to_none_when_omitted(
+    client: AsyncClient, test_owner: dict, test_property: dict, db: AsyncSession
+):
+    """Pre-existing clients that don't send vehicle fields land on NONE."""
+    bed_id = test_property["bed_ids"][0]
+    response = await client.post(
+        "/api/v1/tenants",
+        headers=auth_headers(test_owner["token"]),
+        json=_checkin_payload(bed_id),
+    )
+    assert response.status_code == 201
+    tenant_id = response.json()["tenant_id"]
+    schema = test_property["schema_name"]
+    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+    row = (
+        await db.execute(
+            text("SELECT vehicle_type FROM tenants WHERE id = :id"),
+            {"id": tenant_id},
+        )
+    ).mappings().fetchone()
+    assert row["vehicle_type"] == "NONE"
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_checkin_rejects_invalid_vehicle_type(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """Garbage in the vehicle_type field is 422'd by Pydantic, not 500'd by PG."""
+    bed_id = test_property["bed_ids"][0]
+    payload = {**_checkin_payload(bed_id), "vehicle_type": "ROCKET"}
+    response = await client.post(
+        "/api/v1/tenants",
+        headers=auth_headers(test_owner["token"]),
+        json=payload,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_checkin_supervisor_can_checkin(
     client: AsyncClient, test_supervisor: dict, test_property: dict
 ):

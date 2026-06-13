@@ -1,16 +1,28 @@
 /**
- * Root route — synchronous Redirect so the user never sees the "Unmatched
- * Route" sitemap on cold start (same bug we hit in the staff app).
+ * Root route — synchronous Redirect so the user never sees the
+ * "Unmatched Route" sitemap on cold start.
  *
- * The token state was hydrated from SecureStore in `_layout.tsx`'s root
- * effect before `ready` flips true and this component is reachable, so
- * reading directly from the store here is correct.
+ * Branches:
+ *   - No token             → /auth/login
+ *   - Token + profile loading → wait (render nothing; loaders show in the
+ *     destination screens)
+ *   - Token + kycComplete=false → /onboarding/welcome
+ *   - Token + kycComplete=true  → /home
  */
 import { Redirect } from 'expo-router';
 
+import { useProfile } from '../lib/data/hooks';
 import { useAppStore } from '../lib/store';
 
 export default function Index() {
   const token = useAppStore((s) => s.accessToken);
-  return <Redirect href={token ? '/home' : '/auth/login'} />;
+  const { data: profile, isLoading } = useProfile();
+
+  if (!token) return <Redirect href="/auth/login" />;
+  // Profile must be loaded before we can route — otherwise we'd flicker
+  // home then bounce to onboarding. Returning null shows the splash
+  // background; the request resolves in ~250ms with the mock.
+  if (isLoading || !profile) return null;
+  if (!profile.kycComplete) return <Redirect href="/onboarding/welcome" />;
+  return <Redirect href="/home" />;
 }

@@ -29,7 +29,7 @@ from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -369,6 +369,7 @@ async def tenant_me(ctx: TenantContext = Depends(get_current_tenant), db: AsyncS
             SELECT t.id, t.name, t.phone, t.email, t.move_in_date, t.expected_move_out_date,
                    t.occupation, t.employer_name, t.hometown,
                    t.emergency_contact_name, t.emergency_contact_phone, t.emergency_contact_relation,
+                   t.vehicle_type, t.vehicle_registration,
                    b.bed_label, r.room_number, r.display_name as room_name,
                    f.display_name as floor_name, p.name as property_name, p.address_line1
             FROM tenants t
@@ -383,7 +384,96 @@ async def tenant_me(ctx: TenantContext = Depends(get_current_tenant), db: AsyncS
     tenant = result.mappings().fetchone()
     if not tenant:
         raise NotFoundError("Tenant")
-    return dict(tenant)
+    out = dict(tenant)
+    # `kyc_complete` is the single signal the resident app uses to decide
+    # whether to show the onboarding flow. A row counts as complete iff
+    # the user has confirmed their vehicle answer (NONE is a valid answer)
+    # AND has emergency contact + name on file — those are the bits the
+    # onboarding flow walks through. We synthesize this server-side so the
+    # client doesn't reimplement the rule.
+    has_emergency = bool(
+        (out.get("emergency_contact_name") or "").strip()
+        and (out.get("emergency_contact_phone") or "").strip()
+    )
+    has_vehicle_answer = out.get("vehicle_type") is not None
+    out["kyc_complete"] = bool(has_emergency and has_vehicle_answer and out.get("name"))
+    return out
+
+
+class TenantKycUpdate(BaseModel):
+    name: str | None = None
+    emergency_contact_name: str | None = None
+    emergency_contact_phone: str | None = None
+    emergency_contact_relation: str | None = None
+    vehicle_type: str | None = None
+    vehicle_registration: str | None = None
+
+    @field_validator("vehicle_type")
+    @classmethod
+    def _check_vehicle_type(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in {"NONE", "TWO_WHEELER", "FOUR_WHEELER"}:
+            raise ValueError("vehicle_type must be NONE, TWO_WHEELER, or FOUR_WHEELER")
+        return v
+
+
+@router.patch("/me/kyc", summary="Tenant: update own KYC fields (name / emergency / vehicle)")
+async def tenant_update_kyc(
+    body: TenantKycUpdate,
+    ctx: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Resident-app onboarding endpoint. Restricted to the fields a tenant
+    can reasonably self-update — name corrections, emergency contact,
+    vehicle. ID type / number / address still flow through the staff API
+    so the owner stays in the loop on identity fields.
+
+    Vehicle registration is cleared when type=NONE so a tenant who sold
+    their bike doesn't leave a stale plate number on the row.
+    """
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        raise HTTPException(400, "No fields to update")
+
+    # If they say they have no vehicle, blank the registration regardless of
+    # what was sent. Avoids "TWO_WHEELER + null plate" or "NONE + stale plate".
+    if updates.get("vehicle_type") == "NONE":
+        updates["vehicle_registration"] = None
+    if updates.get("vehicle_type") in {"TWO_WHEELER", "FOUR_WHEELER"} and not (
+        updates.get("vehicle_registration") or ""
+    ).strip():
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "VEHICLE_REGISTRATION_REQUIRED",
+                    "message": (
+                        "Vehicle registration is required when vehicle_type is "
+                        "TWO_WHEELER or FOUR_WHEELER."
+                    ),
+                }
+            },
+        )
+
+    set_parts: list[str] = []
+    for k in updates:
+        if k == "vehicle_type":
+            set_parts.append("vehicle_type = CAST(:vehicle_type AS vehicle_type_enum)")
+        else:
+            set_parts.append(f"{k} = :{k}")
+    set_clause = ", ".join(set_parts)
+
+    await db.execute(
+        text(
+            f"UPDATE tenants SET {set_clause}, updated_at = NOW() "
+            f"WHERE id = :id AND is_deleted = false"
+        ),
+        {**updates, "id": str(ctx.tenant_id)},
+    )
+    await db.commit()
+    return {"message": "KYC updated"}
 
 
 @router.get("/ledger", summary="Tenant: own rent ledger")

@@ -47,9 +47,20 @@ function AuthGuard() {
 
   useEffect(() => {
     if (!navState?.key) return;
-    const inAuth = segments[0] === 'auth';
-    if (!token && !inAuth) router.replace('/auth/login');
-    if (token && inAuth) router.replace('/home');
+    const root = segments[0];
+    const inAuth = root === 'auth';
+    const inOnboarding = root === 'onboarding';
+    if (!token && !inAuth) {
+      router.replace('/auth/login');
+      return;
+    }
+    // Once signed in, the post-verify routing (home vs onboarding) is
+    // owned by `app/index.tsx` — it reads kycComplete and Redirects
+    // synchronously on mount. We bail this guard out so it doesn't fight
+    // that redirect during the brief moment the code screen lands on /.
+    if (token && inAuth && !inOnboarding) {
+      router.replace('/');
+    }
   }, [token, segments, router, navState?.key]);
 
   return null;
@@ -98,6 +109,7 @@ export default function RootLayout() {
                   screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
                 >
                   <Stack.Screen name="auth" />
+                  <Stack.Screen name="onboarding" />
                   <Stack.Screen name="home" />
                 </Stack>
                 <ToastHost />

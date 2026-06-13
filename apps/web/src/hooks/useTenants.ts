@@ -70,6 +70,8 @@ export interface CheckinPayload {
   emergency_contact_relation: string;
   occupation?: string;
   permanent_address?: string;
+  vehicle_type?: 'NONE' | 'TWO_WHEELER' | 'FOUR_WHEELER';
+  vehicle_registration?: string;
   move_in_date: string;
   expected_move_out_date?: string;
   notes?: string;

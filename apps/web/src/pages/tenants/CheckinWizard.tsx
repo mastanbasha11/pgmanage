@@ -25,30 +25,43 @@ import { useProperties } from '@/hooks/useProperties';
 import { useToast } from '@/hooks/useToast';
 import { rupeesToPaise, formatPaise, cn, normaliseIndianPhone, PHONE_HELP } from '@/lib/utils';
 
-const STEPS = ['Personal', 'Identity', 'Emergency', 'Bed', 'Rent', 'Confirm'];
+const STEPS = ['Personal', 'Identity', 'Emergency', 'Vehicle', 'Bed', 'Rent', 'Confirm'];
 
-const schema = z.object({
-  name: z.string().min(2, 'Name required'),
-  phone: z.string().refine((v) => normaliseIndianPhone(v) !== null, PHONE_HELP),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
-  id_type: z.enum(['AADHAR', 'PASSPORT', 'DRIVING_LICENSE', 'OTHER']),
-  id_number: z.string().min(4, 'ID number required'),
-  emergency_contact_name: z.string().min(2, 'Name required'),
-  emergency_contact_phone: z
-    .string()
-    .refine((v) => normaliseIndianPhone(v) !== null, PHONE_HELP),
-  emergency_contact_relation: z.string().min(2, 'Relation required'),
-  property_id: z.string().uuid('Select a property'),
-  bed_id: z.string().uuid('Select a bed'),
-  move_in_date: z.string().min(1, 'Date required'),
-  monthly_rent_rupees: z.coerce.number().positive('Rent required'),
-  security_deposit_rupees: z.coerce.number().min(0).default(0),
-  advance_rupees: z.coerce.number().min(0).default(0),
-  non_refundable_advance_rupees: z.coerce.number().min(0).default(0),
-  billing_day: z.coerce.number().int().min(1).max(28).default(1),
-  food_included: z.boolean().default(false),
-  food_charges_rupees: z.coerce.number().min(0).default(0),
-});
+const schema = z
+  .object({
+    name: z.string().min(2, 'Name required'),
+    phone: z.string().refine((v) => normaliseIndianPhone(v) !== null, PHONE_HELP),
+    email: z.string().email('Invalid email').optional().or(z.literal('')),
+    id_type: z.enum(['AADHAR', 'PASSPORT', 'DRIVING_LICENSE', 'OTHER']),
+    id_number: z.string().min(4, 'ID number required'),
+    emergency_contact_name: z.string().min(2, 'Name required'),
+    emergency_contact_phone: z
+      .string()
+      .refine((v) => normaliseIndianPhone(v) !== null, PHONE_HELP),
+    emergency_contact_relation: z.string().min(2, 'Relation required'),
+    // Vehicle. Registration required when type is not NONE — see refine() below.
+    vehicle_type: z.enum(['NONE', 'TWO_WHEELER', 'FOUR_WHEELER']).default('NONE'),
+    vehicle_registration: z.string().optional().or(z.literal('')),
+    property_id: z.string().uuid('Select a property'),
+    bed_id: z.string().uuid('Select a bed'),
+    move_in_date: z.string().min(1, 'Date required'),
+    monthly_rent_rupees: z.coerce.number().positive('Rent required'),
+    security_deposit_rupees: z.coerce.number().min(0).default(0),
+    advance_rupees: z.coerce.number().min(0).default(0),
+    non_refundable_advance_rupees: z.coerce.number().min(0).default(0),
+    billing_day: z.coerce.number().int().min(1).max(28).default(1),
+    food_included: z.boolean().default(false),
+    food_charges_rupees: z.coerce.number().min(0).default(0),
+  })
+  .refine(
+    (d) =>
+      d.vehicle_type === 'NONE' ||
+      (d.vehicle_registration ?? '').trim().length >= 4,
+    {
+      message: 'Registration number required',
+      path: ['vehicle_registration'],
+    },
+  );
 
 type FormData = z.infer<typeof schema>;
 
@@ -83,6 +96,8 @@ export default function CheckinWizard({ open, onClose }: Props) {
       non_refundable_advance_rupees: 0,
       food_included: false,
       food_charges_rupees: 0,
+      vehicle_type: 'NONE',
+      vehicle_registration: '',
       move_in_date: new Date().toISOString().slice(0, 10),
     },
   });
@@ -124,6 +139,11 @@ export default function CheckinWizard({ open, onClose }: Props) {
         emergency_contact_name: data.emergency_contact_name,
         emergency_contact_phone: ecPhone,
         emergency_contact_relation: data.emergency_contact_relation,
+        vehicle_type: data.vehicle_type,
+        vehicle_registration:
+          data.vehicle_type === 'NONE'
+            ? undefined
+            : (data.vehicle_registration ?? '').trim().toUpperCase(),
         move_in_date: data.move_in_date,
         rent_plan: {
           monthly_rent_paise: rupeesToPaise(data.monthly_rent_rupees),
@@ -176,6 +196,7 @@ export default function CheckinWizard({ open, onClose }: Props) {
     ['name', 'phone', 'email'],
     ['id_type', 'id_number'],
     ['emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation'],
+    ['vehicle_type', 'vehicle_registration'],
     ['property_id', 'bed_id'],
     ['move_in_date', 'monthly_rent_rupees', 'billing_day'],
     [],
@@ -379,6 +400,47 @@ export default function CheckinWizard({ open, onClose }: Props) {
           )}
 
           {step === 3 && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                For gate security. Vehicle plate is matched against the resident
+                list on entry.
+              </p>
+              <div>
+                <Label>Do they have a vehicle? *</Label>
+                <Select
+                  value={watch('vehicle_type')}
+                  onValueChange={(v) => setValue('vehicle_type', v as FormData['vehicle_type'])}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NONE">No vehicle</SelectItem>
+                    <SelectItem value="TWO_WHEELER">Two-wheeler</SelectItem>
+                    <SelectItem value="FOUR_WHEELER">Four-wheeler</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {watch('vehicle_type') !== 'NONE' && (
+                <div>
+                  <Label>Registration number *</Label>
+                  <Input
+                    {...register('vehicle_registration')}
+                    placeholder="KA 01 AB 1234"
+                    autoCapitalize="characters"
+                    className="uppercase"
+                  />
+                  {errors.vehicle_registration && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.vehicle_registration.message}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 4 && (
             <BedPickerStep
               properties={propertiesData?.items ?? []}
               propertyId={selectedPropertyId}
@@ -395,7 +457,7 @@ export default function CheckinWizard({ open, onClose }: Props) {
             />
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="space-y-3">
               <div>
                 <Label>Move-in Date *</Label>
@@ -475,7 +537,7 @@ export default function CheckinWizard({ open, onClose }: Props) {
             </div>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <div className="rounded-lg border p-4 space-y-3 text-sm bg-muted/30">
               <p className="font-medium flex items-center gap-2">
                 <BedDouble className="h-4 w-4 text-accent" />
@@ -489,6 +551,16 @@ export default function CheckinWizard({ open, onClose }: Props) {
                 <dt>ID</dt>
                 <dd className="text-foreground">
                   {watch('id_type')} · {watch('id_number')}
+                </dd>
+                <dt>Vehicle</dt>
+                <dd className="text-foreground">
+                  {watch('vehicle_type') === 'NONE'
+                    ? 'None'
+                    : `${
+                        watch('vehicle_type') === 'TWO_WHEELER'
+                          ? 'Two-wheeler'
+                          : 'Four-wheeler'
+                      } · ${(watch('vehicle_registration') || '').toUpperCase() || '—'}`}
                 </dd>
                 <dt>Bed</dt>
                 <dd className="text-foreground">

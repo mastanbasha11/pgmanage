@@ -69,6 +69,33 @@ const en = {
   'theme.system': 'Use system',
   'theme.light': 'Light',
   'theme.dark': 'Dark',
+
+  // Onboarding.
+  'onboarding.welcome.headline': 'Welcome, {{name}}',
+  'onboarding.welcome.subtitle':
+    'Let’s get you set up at {{property}}. Three quick steps — under a minute.',
+  'onboarding.welcome.cta': 'Let’s go',
+  'onboarding.step_label': 'Step {{step}} of {{total}}',
+  'onboarding.profile.title': 'About you',
+  'onboarding.profile.emergency_heading': 'Emergency contact',
+  'onboarding.profile.emergency_subtitle': 'Someone we can call if you ever need help.',
+  'onboarding.vehicle.title': 'Your vehicle',
+  'onboarding.vehicle.subtitle':
+    'We share your plate with gate security so they can recognise you on entry.',
+  'onboarding.vehicle.none': 'No vehicle',
+  'onboarding.vehicle.two_wheeler': 'Two-wheeler',
+  'onboarding.vehicle.four_wheeler': 'Four-wheeler',
+  'onboarding.vehicle.registration': 'Registration number',
+  'onboarding.id.title': 'ID proof',
+  'onboarding.id.headline': 'Already with your PG owner',
+  'onboarding.id.subtitle':
+    'Your manager captured your ID at check-in. You can skip this for now; if you ever need to re-upload, you’ll find it under Profile → ID proof.',
+  'onboarding.id.upload_soon':
+    'Aadhaar / passport / DL upload from your phone is coming in the next release.',
+  'onboarding.finish': 'Finish setup',
+  'onboarding.continue': 'Continue',
+  'onboarding.toast.signed_in': 'Signed in',
+  'onboarding.toast.all_set': 'You’re all set',
 };
 
 // Hindi + Telugu dictionaries are deliberately Partial — i18n.enableFallback
