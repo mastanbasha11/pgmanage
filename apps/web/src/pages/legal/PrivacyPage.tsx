@@ -14,7 +14,7 @@ export default function PrivacyPage() {
       <h2>1. Who we are</h2>
       <p>
         PGManage is operated by LOOP Colving PG. For any privacy question or request you can reach
-        us at <a href="mailto:thotaadityasaikumar@outlook.com">thotaadityasaikumar@outlook.com</a>.
+        us at <a href="mailto:stay@theloopliving.in">stay@theloopliving.in</a>.
       </p>
 
       <h2>2. Information we collect</h2>
@@ -136,7 +136,7 @@ export default function PrivacyPage() {
       <h2>11. Contact</h2>
       <p>
         Questions about this Policy or your data? Email{' '}
-        <a href="mailto:thotaadityasaikumar@outlook.com">thotaadityasaikumar@outlook.com</a>.
+        <a href="mailto:stay@theloopliving.in">stay@theloopliving.in</a>.
       </p>
     </LegalLayout>
   );

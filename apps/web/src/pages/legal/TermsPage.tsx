@@ -101,7 +101,7 @@ export default function TermsPage() {
       <h2>12. Contact</h2>
       <p>
         Questions about these Terms? Email{' '}
-        <a href="mailto:thotaadityasaikumar@outlook.com">thotaadityasaikumar@outlook.com</a>.
+        <a href="mailto:stay@theloopliving.in">stay@theloopliving.in</a>.
       </p>
     </LegalLayout>
   );

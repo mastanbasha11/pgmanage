@@ -44,8 +44,8 @@ export default function LegalLayout({
       <footer className="border-t">
         <div className="mx-auto max-w-3xl px-6 py-6 text-sm text-muted-foreground">
           © 2026 LOOP Colving PG · PGManage ·{' '}
-          <a href="mailto:thotaadityasaikumar@outlook.com" className="text-accent hover:underline">
-            thotaadityasaikumar@outlook.com
+          <a href="mailto:stay@theloopliving.in" className="text-accent hover:underline">
+            stay@theloopliving.in
           </a>
         </div>
       </footer>
