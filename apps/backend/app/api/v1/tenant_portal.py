@@ -122,6 +122,49 @@ async def tenant_request_otp(body: TenantOTPRequest, db: AsyncSession = Depends(
             "expires_in": settings.OTP_EXPIRE_SECONDS,
         }
 
+    code = generate_otp()
+    r = get_redis()
+    key = f"tenant_otp:{phone}"
+    await r.setex(key, settings.OTP_EXPIRE_SECONDS, code)
+    await r.aclose()
+
+    if settings.is_local:
+        # Dev-friendly: print the code so we don't need real SMTP to test.
+        print(f"[TENANT OTP] {phone} → {code}")
+
+    # Email delivery — best-effort. Attempted whenever an email is on file,
+    # even in inline mode, so the user has a paper trail. Failure here
+    # never blocks the response.
+    email_delivered = False
+    if identity["email"]:
+        try:
+            email_delivered = bool(
+                send_tenant_otp_email(
+                    to_email=identity["email"],
+                    code=code,
+                    expires_minutes=max(settings.OTP_EXPIRE_SECONDS // 60, 1),
+                )
+            )
+        except Exception:
+            email_delivered = False
+
+    if settings.TENANT_OTP_INLINE:
+        # Pre-WhatsApp/SMS: surface the code in the response so the app can
+        # display it on-screen and prefill the OTP input. Flip the setting
+        # OFF the moment a real delivery channel is live — exposing the
+        # code in-band has no auth value beyond the dev-mode shortcut.
+        return {
+            "delivery": "inline",
+            "code": code,
+            "to": _mask_email(identity["email"]) if identity["email"] else None,
+            "email_delivered": email_delivered,
+            "expires_in": settings.OTP_EXPIRE_SECONDS,
+            "notice": (
+                "Test mode: code shown in app. SMS/WhatsApp coming soon."
+            ),
+        }
+
+    # Inline disabled (post-launch) — require a real delivery channel.
     if not identity["email"]:
         raise HTTPException(
             status_code=409,
@@ -136,27 +179,9 @@ async def tenant_request_otp(body: TenantOTPRequest, db: AsyncSession = Depends(
             },
         )
 
-    code = generate_otp()
-    r = get_redis()
-    key = f"tenant_otp:{phone}"
-    await r.setex(key, settings.OTP_EXPIRE_SECONDS, code)
-    await r.aclose()
-
-    if settings.is_local:
-        # Dev-friendly: print the code so we don't need real SMTP to test.
-        print(f"[TENANT OTP] {phone} → {code}")
-
-    send_tenant_otp_email(
-        to_email=identity["email"],
-        code=code,
-        expires_minutes=max(settings.OTP_EXPIRE_SECONDS // 60, 1),
-    )
-
-    # Mask the email for the response so the UI can show "code sent to a••@x.com"
-    masked = _mask_email(identity["email"])
     return {
         "delivery": "email",
-        "to": masked,
+        "to": _mask_email(identity["email"]),
         "expires_in": settings.OTP_EXPIRE_SECONDS,
     }
 

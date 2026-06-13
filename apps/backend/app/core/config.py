@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     OTP_EXPIRE_SECONDS: int = 600  # 10 minutes
     OTP_MAX_ATTEMPTS: int = 3
     OTP_RATE_LIMIT_PER_MINUTE: int = 5
+    # Pre-WhatsApp/SMS interim: tenant-app /tenant/auth/otp returns the code
+    # in the response body so the app can show it on-screen. Flip OFF once
+    # a real delivery channel (WhatsApp Cloud or an SMS vendor) is live —
+    # there'd be no auth value left if anyone with the phone number could
+    # see the code. Email delivery still runs alongside this when an email
+    # is on file (best-effort, non-blocking).
+    TENANT_OTP_INLINE: bool = True
 
     # ── AWS ───────────────────────────────────────────────────────────────────
     AWS_REGION: str = "ap-south-1"

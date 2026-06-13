@@ -243,6 +243,30 @@ async def test_tenant_sees_sent_all_tenants_announcement(
 #
 # Tests below seed public.tenant_identity + tenant_identity_links manually,
 # since the test_tenant fixture predates migration 019.
+#
+# settings.TENANT_OTP_INLINE controls whether /auth/otp returns the code
+# inline (pre-WhatsApp/SMS mode) or 409s on no-email. Tests pin the flag
+# explicitly per case so they pass regardless of the default.
+
+from app.core.config import settings as _settings
+
+
+@pytest.fixture
+def _otp_inline_off():
+    """Force post-launch behaviour (no inline code) for this test."""
+    prev = _settings.TENANT_OTP_INLINE
+    _settings.TENANT_OTP_INLINE = False
+    yield
+    _settings.TENANT_OTP_INLINE = prev
+
+
+@pytest.fixture
+def _otp_inline_on():
+    """Force pre-launch behaviour (code in response) for this test."""
+    prev = _settings.TENANT_OTP_INLINE
+    _settings.TENANT_OTP_INLINE = True
+    yield
+    _settings.TENANT_OTP_INLINE = prev
 
 
 async def _seed_identity(
@@ -304,10 +328,11 @@ async def test_otp_request_unknown_phone_does_not_leak(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_otp_request_known_phone_no_email_returns_409(
-    client: AsyncClient, test_tenant: dict, db: AsyncSession
+async def test_otp_request_known_phone_no_email_returns_409_when_inline_off(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession, _otp_inline_off
 ):
-    """Identity without an email cannot receive the code via the v1 channels."""
+    """With inline-mode OFF (post-WhatsApp/SMS), identity without an email
+    cannot receive a code → 409."""
     await _seed_identity(
         db,
         phone="+919876543299",
@@ -321,17 +346,42 @@ async def test_otp_request_known_phone_no_email_returns_409(
         json={"phone": "+919876543299"},
     )
     assert r.status_code == 409
-    body = r.json()
     # http_exception_handler unwraps {"error": {...}} envelopes (see
     # app/core/exceptions.py http_exception_handler) — so body is the envelope.
-    assert body["error"]["code"] == "NO_DELIVERY_CHANNEL"
+    assert r.json()["error"]["code"] == "NO_DELIVERY_CHANNEL"
 
 
 @pytest.mark.asyncio
-async def test_otp_request_with_email_succeeds(
-    client: AsyncClient, test_tenant: dict, db: AsyncSession
+async def test_otp_request_no_email_inline_on_returns_code(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession, _otp_inline_on
 ):
-    """Known phone + email → 200, delivery=email, masked address in response."""
+    """Pre-launch (inline ON): no email is fine — the code rides in the
+    response so the app can show it on-screen."""
+    await _seed_identity(
+        db,
+        phone="+919876543299",
+        email=None,
+        org_id=test_tenant["org_id"],
+        schema_name=test_tenant["schema_name"],
+        tenant_id=test_tenant["tenant_id"],
+    )
+    r = await client.post(
+        "/api/v1/tenant/auth/otp",
+        json={"phone": "+919876543299"},
+    )
+    assert r.status_code == 200
+    j = r.json()
+    assert j["delivery"] == "inline"
+    assert isinstance(j["code"], str) and len(j["code"]) == 6 and j["code"].isdigit()
+    assert j["to"] is None  # no email on file
+    assert j["email_delivered"] is False
+
+
+@pytest.mark.asyncio
+async def test_otp_request_with_email_inline_off_emails(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession, _otp_inline_off
+):
+    """Post-launch (inline OFF) + email on file → delivery=email."""
     await _seed_identity(
         db,
         phone="+919876543299",
@@ -347,9 +397,36 @@ async def test_otp_request_with_email_succeeds(
     assert r.status_code == 200
     j = r.json()
     assert j["delivery"] == "email"
-    # Masked: first char + bullets + @domain
     assert j["to"].endswith("@example.com")
     assert "•" in j["to"]
+
+
+@pytest.mark.asyncio
+async def test_otp_request_with_email_inline_on_returns_code_and_attempts_email(
+    client: AsyncClient, test_tenant: dict, db: AsyncSession, _otp_inline_on
+):
+    """Pre-launch (inline ON) + email on file: code returned inline AND
+    the email send is attempted (best-effort)."""
+    await _seed_identity(
+        db,
+        phone="+919876543299",
+        email="t.tenant@example.com",
+        org_id=test_tenant["org_id"],
+        schema_name=test_tenant["schema_name"],
+        tenant_id=test_tenant["tenant_id"],
+    )
+    r = await client.post(
+        "/api/v1/tenant/auth/otp",
+        json={"phone": "+919876543299"},
+    )
+    assert r.status_code == 200
+    j = r.json()
+    assert j["delivery"] == "inline"
+    assert len(j["code"]) == 6
+    assert j["to"].endswith("@example.com")
+    # SMTP isn't configured in tests, so the send call returns False —
+    # but the code path was exercised.
+    assert "email_delivered" in j
 
 
 @pytest.mark.asyncio
@@ -440,7 +517,9 @@ async def test_phone_normalisation_strips_country_code(
     for variant in ("9876543299", "09876543299", "919876543299"):
         resp = await client.post("/api/v1/tenant/auth/otp", json={"phone": variant})
         assert resp.status_code == 200, (variant, resp.text)
-        assert resp.json()["delivery"] == "email", variant
+        # `delivery` is inline (default) or email (when inline is off) —
+        # both indicate the phone was successfully resolved to an identity.
+        assert resp.json()["delivery"] in {"inline", "email"}, variant
 
 
 # ── Cross-role isolation ───────────────────────────────────────────────────────

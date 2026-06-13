@@ -15,12 +15,25 @@ export default function TenantLogin() {
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // When the backend is in inline-OTP mode (pre-SMS) the code rides in
+  // the response — show it above the field and pre-fill so the user can
+  // just hit Verify. Once SMS/WhatsApp is wired the backend stops
+  // returning `code` and this banner disappears automatically.
+  const [inlineCode, setInlineCode] = useState<string | null>(null);
 
   async function requestOtp() {
     setError('');
+    setInlineCode(null);
     setLoading(true);
     try {
-      await api.post('/tenant/auth/otp', { phone });
+      const res = await api.post<{
+        delivery: 'inline' | 'email' | 'none';
+        code?: string;
+      }>('/tenant/auth/otp', { phone });
+      if (res.data.code) {
+        setInlineCode(res.data.code);
+        setOtp(res.data.code);
+      }
       setStep('otp');
     } catch (err) {
       setError(getApiError(err));
@@ -91,6 +104,16 @@ export default function TenantLogin() {
               <p className="text-sm text-muted-foreground text-center">
                 OTP sent to <strong>{phone}</strong>
               </p>
+              {inlineCode && (
+                <div className="rounded-lg border border-teal-300 bg-teal-50 p-4 text-center">
+                  <div className="text-xs text-muted-foreground mb-1">
+                    Test mode — SMS/WhatsApp coming soon
+                  </div>
+                  <div className="text-3xl font-extrabold tracking-[0.4em] text-teal-700">
+                    {inlineCode}
+                  </div>
+                </div>
+              )}
               <div>
                 <Label>Enter OTP</Label>
                 <Input

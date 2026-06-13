@@ -17,18 +17,27 @@ import { isMultiOrg, verifyOtp, requestOtp, getApiError } from '../../lib/api';
 import { secureStorage } from '../../lib/storage';
 import { useAppStore } from '../../lib/store';
 import { t } from '../../lib/i18n';
-import { colors, space, type as fontSize } from '../../lib/theme';
+import { colors, radius, space, type as fontSize } from '../../lib/theme';
 
 export default function CodeScreen() {
-  const { phone, to } = useLocalSearchParams<{
+  const params = useLocalSearchParams<{
     phone: string;
     to?: string;
     delivery?: string;
+    inlineCode?: string;
+    notice?: string;
   }>();
+  const { phone, to } = params;
   const router = useRouter();
   const setSession = useAppStore((s) => s.setSession);
 
-  const [code, setCode] = useState('');
+  // When the backend returns a code inline (pre-SMS test mode), pre-fill
+  // the input so the user can just tap Verify. We also show the code in
+  // a banner above the field — explicit is better than implicit, and a
+  // tester will want to see it.
+  const [inlineCode, setInlineCode] = useState(params.inlineCode ?? '');
+  const [notice, setNotice] = useState(params.notice ?? '');
+  const [code, setCode] = useState(params.inlineCode ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(60);
@@ -70,7 +79,14 @@ export default function CodeScreen() {
     if (!phone) return;
     setResending(true);
     try {
-      await requestOtp(phone);
+      const r = await requestOtp(phone);
+      // If we're still in inline mode, refresh the displayed code +
+      // prefilled input so the banner stays in sync.
+      if (r.code) {
+        setInlineCode(r.code);
+        setCode(r.code);
+        if (r.notice) setNotice(r.notice);
+      }
       setSecondsLeft(60);
     } catch (err) {
       Alert.alert(t('common.error'), getApiError(err));
@@ -87,6 +103,15 @@ export default function CodeScreen() {
           <Text style={styles.subtitle}>{t('auth.code_sent_email', { to })}</Text>
         ) : null}
       </View>
+
+      {inlineCode ? (
+        <View style={styles.codeBanner}>
+          <Text style={styles.codeBannerLabel}>
+            {notice || 'Your code'}
+          </Text>
+          <Text style={styles.codeBannerValue}>{inlineCode}</Text>
+        </View>
+      ) : null}
 
       <Field
         label={t('auth.code_label')}
@@ -125,5 +150,28 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: fontSize.body,
     marginTop: space.sm,
+  },
+  // Banner that appears in inline-OTP mode (pre-SMS) so the user can
+  // see and copy the code without leaving the app.
+  codeBanner: {
+    backgroundColor: '#F0FDFA', // teal-50 — readable + on-brand
+    borderColor: '#5EEAD4',
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: space.lg,
+    marginBottom: space.lg,
+    alignItems: 'center',
+  },
+  codeBannerLabel: {
+    color: colors.textMuted,
+    fontSize: fontSize.small,
+    marginBottom: space.xs,
+    textAlign: 'center',
+  },
+  codeBannerValue: {
+    color: colors.accent,
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: 6,
   },
 });

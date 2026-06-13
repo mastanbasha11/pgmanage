@@ -11,7 +11,6 @@
 import { useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import axios from 'axios';
 
 import { Button, Field, Screen } from '../../components/ui';
 import { requestOtp, getApiError } from '../../lib/api';
@@ -35,15 +34,20 @@ export default function LoginScreen() {
     try {
       const r = await requestOtp(normalised);
       await prefStorage.setIdentityPhone(normalised);
+      // Pass inline code through so the code screen can prefill + show
+      // it. When SMS/WhatsApp goes live the backend stops returning
+      // `code` and the same screen falls back to plain input.
       router.push({
         pathname: '/auth/code',
-        params: { phone: normalised, to: r.to ?? '', delivery: r.delivery },
+        params: {
+          phone: normalised,
+          to: r.to ?? '',
+          delivery: r.delivery,
+          inlineCode: r.code ?? '',
+          notice: r.notice ?? '',
+        },
       });
     } catch (err) {
-      if (axios.isAxiosError(err) && err.response?.status === 409) {
-        Alert.alert(t('common.error'), t('auth.no_email_help'));
-        return;
-      }
       Alert.alert(t('common.error'), getApiError(err));
     } finally {
       setSending(false);

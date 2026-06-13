@@ -51,8 +51,24 @@ export function getApiError(err: unknown): string {
 // ── Typed request helpers (V1 surface only) ─────────────────────────────────
 
 export interface OtpRequestResponse {
-  delivery: 'email' | 'none';
-  to?: string;
+  /**
+   *  - 'inline' (pre-WhatsApp/SMS, current default): backend includes
+   *    `code` in the response so the app can show it on-screen and
+   *    prefill the OTP input.
+   *  - 'email':  backend emailed the code; UI prompts user to check inbox.
+   *  - 'none':   phone isn't registered (response shape is identical to a
+   *    success to prevent enumeration); UI proceeds to the code screen and
+   *    /verify will return 401.
+   */
+  delivery: 'inline' | 'email' | 'none';
+  /** Present only when delivery=inline. The literal 6-digit OTP. */
+  code?: string;
+  /** Masked email — present when an email is on file (inline or email mode). */
+  to?: string | null;
+  /** Whether the best-effort email send succeeded (inline mode only). */
+  email_delivered?: boolean;
+  /** Optional human-readable banner string from the server. */
+  notice?: string;
   expires_in: number;
 }
 
