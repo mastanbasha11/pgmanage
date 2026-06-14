@@ -116,6 +116,46 @@ export const useNotifications = makeHook<AppNotification[]>(
   '/tenant/notifications',
 );
 
+// ── Menu (live-only — even in mock mode, hits the real backend) ─────────────
+//
+// The menu domain is special: the *whole point* is to see what the owner
+// just uploaded in the admin webapp. Mock data would defeat that. So
+// useCurrentMenu always hits /tenant/menu/current. 404 = no menu yet,
+// rendered as a friendly empty state in the UI.
+
+export interface CurrentMenuResponse {
+  id: string;
+  week_start_date: string;
+  s3_key: string;
+  content_type: string;
+  title?: string | null;
+  url: string;
+  is_current_week: boolean;
+  uploaded_at: string;
+}
+
+export function useCurrentMenu(): UseQueryResult<CurrentMenuResponse | null> {
+  return useQuery({
+    queryKey: ['menu', 'current'],
+    queryFn: async () => {
+      try {
+        const r = await api.get<CurrentMenuResponse>('/tenant/menu/current');
+        return r.data;
+      } catch (err) {
+        // 404 = no menu uploaded yet. UI renders a friendly empty state.
+        if (
+          (err as { response?: { status?: number } })?.response?.status === 404
+        ) {
+          return null;
+        }
+        throw err;
+      }
+    },
+    // Menus change at most weekly — be lenient about caching.
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // ── Mutations ───────────────────────────────────────────────────────────────
 
 /**

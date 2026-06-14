@@ -25,6 +25,7 @@ Meta App Review clears. Codes are 6 digits, 5-minute TTL, Redis-backed.
 from __future__ import annotations
 
 import json
+from datetime import date
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
@@ -43,6 +44,7 @@ from app.core.security import (
     verify_otp,
 )
 from app.services.email_service import send_tenant_otp_email
+from app.services.inbox_service import record_event as record_inbox_event
 
 router = APIRouter(prefix="/tenant")
 
@@ -418,6 +420,138 @@ class TenantKycUpdate(BaseModel):
         return v
 
 
+class TenantNoticeRequest(BaseModel):
+    """Tenant gives notice-to-vacate from the resident app."""
+    move_out_date: date
+
+    @field_validator("move_out_date")
+    @classmethod
+    def _check_future(cls, v: date) -> date:
+        if v < date.today():
+            raise ValueError("move_out_date cannot be in the past")
+        return v
+
+
+@router.post(
+    "/me/notice",
+    summary="Tenant: give notice to vacate (30-day rule applied)",
+)
+async def tenant_give_notice(
+    body: TenantNoticeRequest,
+    ctx: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Sets `notice_given_date` on the tenant + records `expected_move_out_date`.
+    Per the locked PG policy (see project memory
+    project-notice-to-vacate-policy):
+
+      - notice ≥ 30 days before move-out → advance refundable at checkout
+      - notice <  30 days                → advance forfeit
+
+    We don't *enforce* the forfeit in this endpoint (the staff checkout
+    flow owns the actual refund accounting) — we just record the dates
+    and the audit-log entry includes the policy outcome so the owner
+    sees it. Resident app shows the warning client-side before they
+    submit. Cancel-notice is a follow-up endpoint.
+    """
+    today = date.today()
+    days_notice = (body.move_out_date - today).days
+    advance_refundable = days_notice >= 30
+
+    row = (
+        await db.execute(
+            text("SELECT id, name, property_id, notice_given_date FROM tenants WHERE id = :id"),
+            {"id": str(ctx.tenant_id)},
+        )
+    ).mappings().fetchone()
+    if not row:
+        raise NotFoundError("Tenant")
+    if row["notice_given_date"] is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "code": "NOTICE_ALREADY_GIVEN",
+                    "message": "You have already given notice.",
+                }
+            },
+        )
+
+    await db.execute(
+        text(
+            """
+            UPDATE tenants
+               SET notice_given_date = :today,
+                   expected_move_out_date = :move_out,
+                   updated_at = NOW()
+             WHERE id = :id
+            """
+        ),
+        {
+            "today": today,
+            "move_out": body.move_out_date,
+            "id": str(ctx.tenant_id),
+        },
+    )
+
+    # Audit-log + activity-log so the staff app surfaces it on the tenant
+    # detail page and the Admin Inbox feed (Phase 10).
+    await db.execute(
+        text(
+            """
+            INSERT INTO audit_log (
+                org_id, property_id, actor_id, actor_role, action, table_name,
+                record_id, new_values
+            )
+            VALUES (
+                :org_id, :pid, :actor, 'TENANT', 'UPDATE'::audit_action_enum,
+                'tenants', :rid, CAST(:new_vals AS jsonb)
+            )
+            """
+        ),
+        {
+            "org_id": str(ctx.org_id),
+            "pid": str(row["property_id"]),
+            "actor": str(ctx.tenant_id),
+            "rid": str(ctx.tenant_id),
+            "new_vals": json.dumps(
+                {
+                    "notice_given_date": str(today),
+                    "expected_move_out_date": str(body.move_out_date),
+                    "days_notice": days_notice,
+                    "advance_refundable": advance_refundable,
+                    "source": "resident_app",
+                }
+            ),
+        },
+    )
+
+    # Inbox event so the owner sees this in the new Inbox feed.
+    await record_inbox_event(
+        db,
+        org_id=ctx.org_id,
+        kind="NOTICE_GIVEN",
+        tenant_id=ctx.tenant_id,
+        property_id=row["property_id"],
+        summary=f"{row['name']} gave notice — moving out {body.move_out_date.isoformat()}",
+        payload={
+            "move_out_date": body.move_out_date.isoformat(),
+            "days_notice": days_notice,
+            "advance_refundable": advance_refundable,
+        },
+        deep_link=f"/tenants/{ctx.tenant_id}",
+    )
+
+    await db.commit()
+    return {
+        "message": "Notice recorded",
+        "move_out_date": body.move_out_date.isoformat(),
+        "days_notice": days_notice,
+        "advance_refundable": advance_refundable,
+    }
+
+
 @router.patch("/me/kyc", summary="Tenant: update own KYC fields (name / emergency / vehicle)")
 async def tenant_update_kyc(
     body: TenantKycUpdate,
@@ -472,6 +606,27 @@ async def tenant_update_kyc(
         ),
         {**updates, "id": str(ctx.tenant_id)},
     )
+
+    # Surface the change in the Admin Inbox so the owner notices.
+    name_row = (
+        await db.execute(
+            text("SELECT name, property_id FROM tenants WHERE id = :id"),
+            {"id": str(ctx.tenant_id)},
+        )
+    ).mappings().fetchone()
+    if name_row:
+        fields_changed = ", ".join(updates.keys())
+        await record_inbox_event(
+            db,
+            org_id=ctx.org_id,
+            kind="KYC_UPDATED",
+            tenant_id=ctx.tenant_id,
+            property_id=name_row["property_id"],
+            summary=f"{name_row['name']} updated profile ({fields_changed})",
+            payload={k: v for k, v in updates.items() if isinstance(v, (str, int, bool))},
+            deep_link=f"/tenants/{ctx.tenant_id}",
+        )
+
     await db.commit()
     return {"message": "KYC updated"}
 
@@ -534,6 +689,24 @@ async def tenant_raise_complaint(
         },
     )
     complaint_id = result.scalar_one()
+
+    # Inbox event for the owner.
+    tenant_name_row = (
+        await db.execute(
+            text("SELECT name FROM tenants WHERE id = :id"),
+            {"id": str(ctx.tenant_id)},
+        )
+    ).scalar_one_or_none()
+    await record_inbox_event(
+        db,
+        org_id=ctx.org_id,
+        kind="COMPLAINT_NEW",
+        tenant_id=ctx.tenant_id,
+        property_id=ctx.property_id,
+        summary=f"{tenant_name_row or 'Tenant'} raised a {body.category.lower()} complaint",
+        payload={"category": body.category, "complaint_id": str(complaint_id)},
+        deep_link=f"/complaints",
+    )
     await db.commit()
     return {"complaint_id": str(complaint_id), "message": "Complaint submitted. We'll respond shortly."}
 

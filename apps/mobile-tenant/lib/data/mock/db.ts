@@ -12,6 +12,7 @@
  */
 import type {
   AppNotification,
+  DuesSummary,
   Event,
   LedgerEntry,
   MealServing,
@@ -127,12 +128,12 @@ export const mockDuesLines = [
   },
 ];
 
-export const mockDues = {
+export const mockDues: DuesSummary = {
   monthLabel: 'June 2026',
   totalPaise: mockDuesLines.reduce((s, l) => s + l.amountPaise, 0),
   dueDate: iso(addDays(5)),
   daysUntilDue: 5,
-  status: 'due' as const,
+  status: 'due',
   walletAppliedPaise: 0,
   lines: mockDuesLines,
 };

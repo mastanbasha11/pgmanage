@@ -56,6 +56,10 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         ("audit_action_enum", "'INSERT','UPDATE','DELETE'"),
         ("booking_kind_enum", "'DAILY','ADVANCE'"),
         ("vehicle_type_enum", "'NONE','TWO_WHEELER','FOUR_WHEELER'"),
+        (
+            "inbox_event_kind_enum",
+            "'COMPLAINT_NEW','COMPLAINT_REOPENED','NOTICE_GIVEN','KYC_UPDATED','FEEDBACK','OTHER'",
+        ),
     ]
 
     for type_name, values in enum_types:
@@ -392,6 +396,22 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         f"""CREATE UNIQUE INDEX IF NOT EXISTS menu_uploads_active_uk
             ON "{schema}".menu_uploads(property_id, week_start_date)
             WHERE is_active = true""",
+        # Unified inbox feed of tenant-initiated events. See migration 022.
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".tenant_inbox_events (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id UUID NOT NULL,
+            property_id UUID,
+            tenant_id UUID,
+            kind inbox_event_kind_enum NOT NULL,
+            summary VARCHAR(500) NOT NULL,
+            payload JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            deep_link VARCHAR(300),
+            read_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        f"""CREATE INDEX IF NOT EXISTS tenant_inbox_events_unread_idx
+            ON "{schema}".tenant_inbox_events(created_at DESC)
+            WHERE read_at IS NULL""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".bookings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             org_id UUID NOT NULL,
