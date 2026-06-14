@@ -1,28 +1,18 @@
 /**
- * Root route — synchronous Redirect so the user never sees the
- * "Unmatched Route" sitemap on cold start.
+ * Root route — synchronous Redirect.
  *
- * Branches:
- *   - No token             → /auth/login
- *   - Token + profile loading → wait (render nothing; loaders show in the
- *     destination screens)
- *   - Token + kycComplete=false → /onboarding/welcome
- *   - Token + kycComplete=true  → /home
+ * Post-login UX rule: once we have a token, the user lands on Home. KYC
+ * completion is a Home nudge, NOT a routing gate. Forcing an onboarding
+ * flow between OTP-verify and Home felt jarring + makes the app look
+ * incomplete on first impression. See project memory:
+ * project-resident-post-login-ux.
  */
 import { Redirect } from 'expo-router';
 
-import { useProfile } from '../lib/data/hooks';
 import { useAppStore } from '../lib/store';
 
 export default function Index() {
   const token = useAppStore((s) => s.accessToken);
-  const { data: profile, isLoading } = useProfile();
-
   if (!token) return <Redirect href="/auth/login" />;
-  // Profile must be loaded before we can route — otherwise we'd flicker
-  // home then bounce to onboarding. Returning null shows the splash
-  // background; the request resolves in ~250ms with the mock.
-  if (isLoading || !profile) return null;
-  if (!profile.kycComplete) return <Redirect href="/onboarding/welcome" />;
   return <Redirect href="/home" />;
 }

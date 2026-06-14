@@ -47,19 +47,17 @@ function AuthGuard() {
 
   useEffect(() => {
     if (!navState?.key) return;
-    const root = segments[0];
-    const inAuth = root === 'auth';
-    const inOnboarding = root === 'onboarding';
+    const inAuth = segments[0] === 'auth';
     if (!token && !inAuth) {
       router.replace('/auth/login');
       return;
     }
-    // Once signed in, the post-verify routing (home vs onboarding) is
-    // owned by `app/index.tsx` — it reads kycComplete and Redirects
-    // synchronously on mount. We bail this guard out so it doesn't fight
-    // that redirect during the brief moment the code screen lands on /.
-    if (token && inAuth && !inOnboarding) {
-      router.replace('/');
+    if (token && inAuth) {
+      // Logged in but on an auth screen — bounce to /home via the root
+      // Redirect. Onboarding is now OPT-IN (Home pushes /onboarding/welcome
+      // when the user taps the KYC nudge card) so there's no special
+      // case for it here.
+      router.replace('/home');
     }
   }, [token, segments, router, navState?.key]);
 
