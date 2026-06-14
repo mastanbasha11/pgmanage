@@ -35,12 +35,10 @@ import { useToast } from '@/hooks/useToast';
 import { useAuthStore } from '@/store/auth';
 import { useProperties } from '@/hooks/useProperties';
 import {
-  uploadFileToS3,
-  useCreateMenu,
   useDeleteMenu,
   useMenuFileUrl,
-  useMenuUploadUrl,
   useMenus,
+  useUploadMenu,
   type MenuUpload,
 } from '@/hooks/useMenu';
 
@@ -65,8 +63,7 @@ export default function MenuPage() {
   );
 
   const menusQ = useMenus(propertyId);
-  const uploadUrlM = useMenuUploadUrl();
-  const createMenuM = useCreateMenu();
+  const uploadM = useUploadMenu();
   const fileUrlM = useMenuFileUrl();
   const deleteMenuM = useDeleteMenu();
 
@@ -96,18 +93,11 @@ export default function MenuPage() {
     }
     setUploading(true);
     try {
-      const presigned = await uploadUrlM.mutateAsync({
-        property_id: propertyId,
-        filename: file.name,
-      });
-      await uploadFileToS3(presigned, file);
-      await createMenuM.mutateAsync({
+      await uploadM.mutateAsync({
         property_id: propertyId,
         week_start_date: weekStart,
-        s3_key: presigned.s3_key,
-        content_type: presigned.content_type,
-        original_filename: file.name,
         title: title.trim() || undefined,
+        file,
       });
       toast({
         title: 'Menu uploaded',

@@ -1,25 +1,22 @@
 /**
  * Weekly menu uploads — admin-side TanStack Query hooks.
  *
- * Flow for uploading a new menu file:
+ * One-step upload: POST /menu/upload as multipart/form-data. The
+ * backend streams the file to disk under the EC2 UPLOAD_ROOT (same as
+ * tenant ID-proofs) — no S3, no presigned URLs.
  *
- *   1. Call useMenuUploadUrl() to mint a presigned PUT URL + s3_key.
- *   2. PUT the File directly to S3 with the returned content-type.
- *   3. Call useCreateMenu() with the returned s3_key + metadata to
- *      persist the row.
- *
- * `useCreateMenu` invalidates the list query on success so the new
- * upload appears immediately.
+ * Preview URLs come from POST /menu/{id}/file-url, which mints a
+ * 5-minute token-signed URL we can stick into window.open() without
+ * passing the JWT.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
 import { api } from '@/lib/api';
 
 export interface MenuUpload {
   id: string;
   property_id: string;
-  week_start_date: string; // ISO date
-  s3_key: string;
+  week_start_date: string;
+  s3_key: string; // filesystem-relative path, kept under the legacy name
   content_type: string;
   original_filename?: string | null;
   title?: string | null;
@@ -27,48 +24,27 @@ export interface MenuUpload {
   uploaded_at: string;
 }
 
-interface PresignedUpload {
-  upload_url: string;
-  s3_key: string;
-  expires_in: number;
-  content_type: string;
-}
-
-interface CreatePayload {
+interface UploadArgs {
   property_id: string;
   week_start_date: string;
-  s3_key: string;
-  content_type: string;
-  original_filename?: string;
   title?: string;
+  file: File;
 }
 
-/** Step 1 — request a presigned PUT URL. */
-export function useMenuUploadUrl() {
-  return useMutation<PresignedUpload, unknown, { property_id: string; filename: string }>(
-    {
-      mutationFn: (body) => api.post('/menu/upload-url', body).then((r) => r.data),
-    },
-  );
-}
-
-/** Step 2 — PUT the file directly to S3. Skips the api axios instance
- * because the presigned URL is to S3, not our backend, and the
- * Authorization header (Bearer JWT) would fail the request. */
-export async function uploadFileToS3(
-  presigned: PresignedUpload,
-  file: File,
-): Promise<void> {
-  await axios.put(presigned.upload_url, file, {
-    headers: { 'Content-Type': presigned.content_type },
-  });
-}
-
-/** Step 3 — persist the row. */
-export function useCreateMenu() {
+export function useUploadMenu() {
   const qc = useQueryClient();
-  return useMutation<{ id: string; week_start_date: string }, unknown, CreatePayload>({
-    mutationFn: (body) => api.post('/menu', body).then((r) => r.data),
+  return useMutation<{ id: string; week_start_date: string }, unknown, UploadArgs>({
+    mutationFn: async ({ property_id, week_start_date, title, file }) => {
+      const form = new FormData();
+      form.append('property_id', property_id);
+      form.append('week_start_date', week_start_date);
+      if (title) form.append('title', title);
+      form.append('file', file);
+      const r = await api.post('/menu/upload', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return r.data;
+    },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['menu', vars.property_id] });
     },

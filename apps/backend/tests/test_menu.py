@@ -1,15 +1,9 @@
-"""Tests for the weekly menu upload API.
-
-We don't exercise the S3 path in tests (no real bucket); we exercise the
-DB lifecycle: create → list → re-upload (deactivates prior) → delete →
-tenant fetches the most recent active row.
-
-The presigned-URL endpoint is exercised but its returned URL is a
-LocalStack/boto stub — we only assert the response shape.
-"""
+"""Tests for the filesystem-backed weekly menu upload API."""
 from __future__ import annotations
 
+import io
 from datetime import date, timedelta
+from pathlib import Path
 import uuid
 
 import pytest
@@ -24,290 +18,244 @@ def _monday_of(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-# ── Staff endpoints ────────────────────────────────────────────────────────
+def _pdf_bytes(content: bytes = b'%PDF-1.4 fake') -> bytes:
+    return content
 
 
-@pytest.mark.asyncio
-async def test_menu_upload_url_returns_presigned_shape(
-    client: AsyncClient, test_owner: dict, test_property: dict
+async def _upload(
+    client: AsyncClient,
+    token: str,
+    property_id,
+    *,
+    filename: str = 'menu.pdf',
+    week_start: date | None = None,
+    title: str | None = None,
+    content: bytes | None = None,
+    content_type: str = 'application/pdf',
 ):
-    r = await client.post(
-        "/api/v1/menu/upload-url",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_property["property_id"]),
-            "filename": "june-week-3.pdf",
-        },
+    week = (week_start or _monday_of(date.today())).isoformat()
+    files = {'file': (filename, content or _pdf_bytes(), content_type)}
+    data: dict[str, str] = {
+        'property_id': str(property_id),
+        'week_start_date': week,
+    }
+    if title is not None:
+        data['title'] = title
+    return await client.post(
+        '/api/v1/menu/upload',
+        headers=auth_headers(token),
+        data=data,
+        files=files,
     )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    for key in ("upload_url", "s3_key", "expires_in", "content_type"):
-        assert key in body
-    assert body["content_type"] == "application/pdf"
-    # Namespaced under the org's path so a leaked URL can't traverse.
-    assert str(test_property["org_id"]) in body["s3_key"]
-    assert str(test_property["property_id"]) in body["s3_key"]
+
+
+# ── Upload ──────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_menu_upload_persists_row_and_writes_file(
+    client: AsyncClient, test_owner: dict, test_property: dict, tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr('app.api.v1.menu.UPLOAD_ROOT', tmp_path)
+    r = await _upload(client, test_owner['token'], test_property['property_id'])
+    assert r.status_code == 201, r.text
+    menu_id = r.json()['id']
+    # File landed on disk under {org}/menu/{id}.pdf
+    target = tmp_path / str(test_property['org_id']) / 'menu' / f'{menu_id}.pdf'
+    assert target.exists()
+    assert target.read_bytes().startswith(b'%PDF')
 
 
 @pytest.mark.asyncio
-async def test_menu_upload_url_rejects_unsupported_extension(
+async def test_menu_upload_normalises_to_monday(
+    client: AsyncClient, test_owner: dict, test_property: dict, tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr('app.api.v1.menu.UPLOAD_ROOT', tmp_path)
+    wed = _monday_of(date.today()) + timedelta(days=2)
+    r = await _upload(client, test_owner['token'], test_property['property_id'], week_start=wed)
+    assert r.status_code == 201
+    assert r.json()['week_start_date'] == _monday_of(wed).isoformat()
+
+
+@pytest.mark.asyncio
+async def test_menu_upload_rejects_unsupported_extension(
     client: AsyncClient, test_owner: dict, test_property: dict
 ):
-    r = await client.post(
-        "/api/v1/menu/upload-url",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_property["property_id"]),
-            "filename": "menu.docx",
-        },
+    r = await _upload(
+        client, test_owner['token'], test_property['property_id'],
+        filename='menu.docx', content_type='application/msword',
     )
     assert r.status_code == 422
+    assert r.json()['error']['code'] == 'UNSUPPORTED_FILE_TYPE'
 
 
 @pytest.mark.asyncio
-async def test_menu_create_and_list(
-    client: AsyncClient, test_owner: dict, test_property: dict
+async def test_menu_upload_rejects_oversize(
+    client: AsyncClient, test_owner: dict, test_property: dict, tmp_path: Path, monkeypatch
 ):
-    monday = _monday_of(date.today())
-    r = await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_property["property_id"]),
-            "week_start_date": monday.isoformat(),
-            "s3_key": "fake/key/menu.pdf",
-            "content_type": "application/pdf",
-            "original_filename": "menu.pdf",
-            "title": "Week of " + monday.isoformat(),
-        },
+    monkeypatch.setattr('app.api.v1.menu.UPLOAD_ROOT', tmp_path)
+    monkeypatch.setattr('app.api.v1.menu.MAX_UPLOAD_BYTES', 1024)
+    r = await _upload(
+        client, test_owner['token'], test_property['property_id'],
+        content=b'x' * 2048,
     )
-    assert r.status_code == 201, r.text
+    assert r.status_code == 413
+    assert r.json()['error']['code'] == 'FILE_TOO_LARGE'
 
-    lst = await client.get(
-        f"/api/v1/menu?property_id={test_property['property_id']}",
-        headers=auth_headers(test_owner["token"]),
-    )
-    assert lst.status_code == 200
-    items = lst.json()["items"]
-    assert len(items) == 1
-    assert items[0]["title"] == "Week of " + monday.isoformat()
-    assert items[0]["content_type"] == "application/pdf"
 
+# ── Re-upload (deactivates prior) ──────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_menu_create_normalises_to_monday(
-    client: AsyncClient, test_owner: dict, test_property: dict, db: AsyncSession
+async def test_menu_reupload_deactivates_prior(
+    client: AsyncClient, test_owner: dict, test_property: dict, db: AsyncSession,
+    tmp_path: Path, monkeypatch,
 ):
-    """Owner picks a Wednesday — we should store the Monday of that week."""
-    a_wednesday = date.today() - timedelta(days=date.today().weekday()) + timedelta(days=2)
-    expected_monday = _monday_of(a_wednesday)
-
-    r = await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_property["property_id"]),
-            "week_start_date": a_wednesday.isoformat(),
-            "s3_key": "fake/key/menu.pdf",
-            "content_type": "application/pdf",
-        },
-    )
-    assert r.status_code == 201
-    assert r.json()["week_start_date"] == expected_monday.isoformat()
-
-
-@pytest.mark.asyncio
-async def test_menu_re_upload_deactivates_prior(
-    client: AsyncClient, test_owner: dict, test_property: dict, db: AsyncSession
-):
-    """Uploading a new file for the same week deactivates the previous row."""
-    monday = _monday_of(date.today())
-    common_payload = {
-        "property_id": str(test_property["property_id"]),
-        "week_start_date": monday.isoformat(),
-        "content_type": "application/pdf",
-    }
-    r1 = await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={**common_payload, "s3_key": "fake/key/v1.pdf"},
-    )
+    monkeypatch.setattr('app.api.v1.menu.UPLOAD_ROOT', tmp_path)
+    r1 = await _upload(client, test_owner['token'], test_property['property_id'], content=b'%PDF-A')
     assert r1.status_code == 201
-    first_id = r1.json()["id"]
+    first_id = r1.json()['id']
+    r2 = await _upload(client, test_owner['token'], test_property['property_id'], content=b'%PDF-B')
+    assert r2.status_code == 201
+    second_id = r2.json()['id']
+    assert first_id != second_id
 
-    r2 = await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={**common_payload, "s3_key": "fake/key/v2.pdf"},
-    )
-    assert r2.status_code == 201, r2.text
-    second_id = r2.json()["id"]
-    assert second_id != first_id
-
-    # Only the second row should be active.
-    schema = test_property["schema_name"]
+    schema = test_property['schema_name']
     await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
-    rows = (
-        await db.execute(
-            text("SELECT id, is_active FROM menu_uploads WHERE week_start_date = :ws"),
-            {"ws": monday},
-        )
+    actives = (
+        await db.execute(text("SELECT id FROM menu_uploads WHERE is_active = true"))
     ).mappings().fetchall()
-    actives = [r for r in rows if r["is_active"]]
     assert len(actives) == 1
-    assert str(actives[0]["id"]) == second_id
+    assert str(actives[0]['id']) == second_id
     await db.commit()
 
 
+# ── List + delete ─────────────────────────────────────────────────────────
+
+
 @pytest.mark.asyncio
-async def test_menu_delete_soft_deactivates(
-    client: AsyncClient, test_owner: dict, test_property: dict, db: AsyncSession
+async def test_menu_list_and_delete(
+    client: AsyncClient, test_owner: dict, test_property: dict, tmp_path: Path, monkeypatch
 ):
-    monday = _monday_of(date.today())
-    r = await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_property["property_id"]),
-            "week_start_date": monday.isoformat(),
-            "s3_key": "fake/key/del.pdf",
-            "content_type": "application/pdf",
-        },
+    monkeypatch.setattr('app.api.v1.menu.UPLOAD_ROOT', tmp_path)
+    r = await _upload(client, test_owner['token'], test_property['property_id'], title='Week 1')
+    menu_id = r.json()['id']
+
+    lst = await client.get(
+        f'/api/v1/menu?property_id={test_property["property_id"]}',
+        headers=auth_headers(test_owner['token']),
     )
-    menu_id = r.json()["id"]
+    assert lst.status_code == 200
+    assert len(lst.json()['items']) == 1
+    assert lst.json()['items'][0]['title'] == 'Week 1'
 
     d = await client.delete(
-        f"/api/v1/menu/{menu_id}",
-        headers=auth_headers(test_owner["token"]),
+        f'/api/v1/menu/{menu_id}', headers=auth_headers(test_owner['token']),
     )
     assert d.status_code == 200
 
-    # Soft-delete: row exists but is_active=false.
-    schema = test_property["schema_name"]
-    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
-    row = (
-        await db.execute(
-            text("SELECT is_active FROM menu_uploads WHERE id = :id"),
-            {"id": menu_id},
-        )
-    ).mappings().fetchone()
-    assert row is not None
-    assert row["is_active"] is False
-    await db.commit()
-
-    # And re-uploading the same week works (partial unique index frees).
-    r2 = await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_property["property_id"]),
-            "week_start_date": monday.isoformat(),
-            "s3_key": "fake/key/replacement.pdf",
-            "content_type": "application/pdf",
-        },
-    )
+    # Re-upload same week now works again.
+    r2 = await _upload(client, test_owner['token'], test_property['property_id'], title='Replacement')
     assert r2.status_code == 201
 
 
+# ── File-URL token-signed serve ───────────────────────────────────────────
+
+
 @pytest.mark.asyncio
-async def test_menu_create_rejects_bad_content_type(
-    client: AsyncClient, test_owner: dict, test_property: dict
+async def test_menu_file_url_and_public_serve(
+    client: AsyncClient, test_owner: dict, test_property: dict, tmp_path: Path, monkeypatch
 ):
-    r = await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_property["property_id"]),
-            "week_start_date": _monday_of(date.today()).isoformat(),
-            "s3_key": "fake/key/menu.exe",
-            "content_type": "application/x-msdownload",
-        },
+    monkeypatch.setattr('app.api.v1.menu.UPLOAD_ROOT', tmp_path)
+    r = await _upload(client, test_owner['token'], test_property['property_id'])
+    menu_id = r.json()['id']
+
+    # Mint a URL
+    u = await client.get(
+        f'/api/v1/menu/{menu_id}/file-url',
+        headers=auth_headers(test_owner['token']),
     )
-    assert r.status_code == 422
+    assert u.status_code == 200
+    url = u.json()['url']
+    assert url.startswith('/api/v1/menu/file/')
+
+    # Open the URL with NO auth — token IS the auth.
+    s = await client.get(url)
+    assert s.status_code == 200
+    assert s.headers['content-type'].startswith('application/pdf')
+    assert s.content.startswith(b'%PDF')
 
 
 @pytest.mark.asyncio
-async def test_menu_endpoints_require_staff_role(client: AsyncClient, tenant_portal_token: str):
-    """Tenant tokens cannot hit staff menu endpoints — 403."""
+async def test_menu_file_serve_invalid_token_returns_404(client: AsyncClient):
+    r = await client.get('/api/v1/menu/file/nonsense')
+    assert r.status_code == 404
+
+
+# ── Role gates ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_menu_upload_requires_staff_role(client: AsyncClient, tenant_portal_token: str):
     r = await client.post(
-        "/api/v1/menu/upload-url",
+        '/api/v1/menu/upload',
         headers=auth_headers(tenant_portal_token),
-        json={"property_id": str(uuid.uuid4()), "filename": "x.pdf"},
+        data={'property_id': str(uuid.uuid4()), 'week_start_date': '2026-06-01'},
+        files={'file': ('x.pdf', b'%PDF', 'application/pdf')},
     )
     assert r.status_code == 403
 
 
-# ── Tenant endpoint ────────────────────────────────────────────────────────
+# ── Tenant /tenant/menu/current ────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_tenant_menu_current_returns_active_menu(
-    client: AsyncClient,
-    test_owner: dict,
-    test_tenant: dict,
-    tenant_portal_token: str,
+async def test_tenant_current_menu_returns_token_url(
+    client: AsyncClient, test_owner: dict, test_tenant: dict,
+    tenant_portal_token: str, tmp_path: Path, monkeypatch,
 ):
-    """After the owner uploads, the tenant sees the current week's menu."""
-    monday = _monday_of(date.today())
-    await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_tenant["property_id"]),
-            "week_start_date": monday.isoformat(),
-            "s3_key": "fake/key/this-week.pdf",
-            "content_type": "application/pdf",
-            "title": "This week",
-        },
-    )
+    monkeypatch.setattr('app.api.v1.menu.UPLOAD_ROOT', tmp_path)
+    await _upload(client, test_owner['token'], test_tenant['property_id'], title='This week')
     r = await client.get(
-        "/api/v1/tenant/menu/current",
+        '/api/v1/tenant/menu/current',
         headers=auth_headers(tenant_portal_token),
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["title"] == "This week"
-    assert body["is_current_week"] is True
-    assert "url" in body and body["url"].startswith("http")
+    assert body['title'] == 'This week'
+    assert body['is_current_week'] is True
+    assert body['url'].startswith('/api/v1/menu/file/')
+
+    # That URL is publicly fetchable.
+    s = await client.get(body['url'])
+    assert s.status_code == 200
+    assert s.content.startswith(b'%PDF')
 
 
 @pytest.mark.asyncio
-async def test_tenant_menu_falls_back_to_prior_week(
-    client: AsyncClient,
-    test_owner: dict,
-    test_tenant: dict,
-    tenant_portal_token: str,
+async def test_tenant_current_menu_falls_back_to_prior_week(
+    client: AsyncClient, test_owner: dict, test_tenant: dict,
+    tenant_portal_token: str, tmp_path: Path, monkeypatch,
 ):
-    """If this week has no menu, the tenant gets the most recent prior week
-    with is_current_week=False so the UI can say 'last week's menu'."""
+    monkeypatch.setattr('app.api.v1.menu.UPLOAD_ROOT', tmp_path)
     last_monday = _monday_of(date.today()) - timedelta(days=7)
-    await client.post(
-        "/api/v1/menu",
-        headers=auth_headers(test_owner["token"]),
-        json={
-            "property_id": str(test_tenant["property_id"]),
-            "week_start_date": last_monday.isoformat(),
-            "s3_key": "fake/key/last-week.pdf",
-            "content_type": "application/pdf",
-            "title": "Last week",
-        },
+    await _upload(
+        client, test_owner['token'], test_tenant['property_id'],
+        week_start=last_monday, title='Last week',
     )
     r = await client.get(
-        "/api/v1/tenant/menu/current",
+        '/api/v1/tenant/menu/current',
         headers=auth_headers(tenant_portal_token),
     )
     assert r.status_code == 200
-    body = r.json()
-    assert body["title"] == "Last week"
-    assert body["is_current_week"] is False
+    assert r.json()['title'] == 'Last week'
+    assert r.json()['is_current_week'] is False
 
 
 @pytest.mark.asyncio
-async def test_tenant_menu_404_when_nothing_uploaded(
+async def test_tenant_current_menu_404_when_empty(
     client: AsyncClient, tenant_portal_token: str
 ):
     r = await client.get(
-        "/api/v1/tenant/menu/current",
+        '/api/v1/tenant/menu/current',
         headers=auth_headers(tenant_portal_token),
     )
     assert r.status_code == 404

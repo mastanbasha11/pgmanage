@@ -140,7 +140,15 @@ export function useCurrentMenu(): UseQueryResult<CurrentMenuResponse | null> {
     queryFn: async () => {
       try {
         const r = await api.get<CurrentMenuResponse>('/tenant/menu/current');
-        return r.data;
+        // Backend returns a relative URL ("/api/v1/menu/file/<token>").
+        // The mobile app's Linking.openURL needs a full origin; the
+        // browser would resolve a relative URL against the page, but
+        // the RN bridge doesn't have one. Prepend the API base, less
+        // the trailing /api/v1 since the URL already includes it.
+        const base = (
+          process.env.EXPO_PUBLIC_API_URL ?? 'https://pgmanage.in/api/v1'
+        ).replace(/\/api\/v1\/?$/, '');
+        return { ...r.data, url: `${base}${r.data.url}` };
       } catch (err) {
         // 404 = no menu uploaded yet. UI renders a friendly empty state.
         if (

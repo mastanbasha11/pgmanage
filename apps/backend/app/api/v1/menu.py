@@ -1,39 +1,50 @@
-"""Weekly menu uploads.
+"""Weekly menu uploads — filesystem-backed.
 
-Owner uploads a PDF or image per (property, week_start_date). Resident
-app fetches the current week's file. See migration 021 + project memory
-[[project-admin-menu-upload]].
+Owner uploads a single file per (property, week_start_date). Files live
+on the EC2 disk under {UPLOAD_ROOT}/{org_id}/menu/{menu_id}.{ext} —
+same pattern as tenant ID-proofs (apps/backend/app/api/v1/tenants.py).
+Project memory: [[project-admin-menu-upload]].
 
 Endpoints (staff side, OWNER / PARTNER / SUPERVISOR):
 
-  POST   /menu/upload-url           Get a presigned PUT URL.
-  POST   /menu                      Record the uploaded file.
-  GET    /menu?property_id=...      List menus for a property.
-  GET    /menu/{id}/file-url        Get a presigned GET URL (for preview).
-  DELETE /menu/{id}                 Soft-deactivate; S3 file kept for audit.
+  POST   /menu/upload          multipart/form-data; persist + write file.
+  GET    /menu?property_id=    list active menus newest-first.
+  GET    /menu/{id}/file-url   mint a 5-min token; returns a URL the
+                               browser/app can open without an auth header.
+  DELETE /menu/{id}            soft-deactivate row + best-effort unlink.
 
-Endpoint (tenant side):
+Public endpoint (token-authenticated):
 
-  GET    /tenant/menu/current       Resident app — current week's menu
-                                    for the tenant's property + a
-                                    presigned GET URL ready to render.
+  GET    /menu/file/{token}    stream the file. Token is the auth — it
+                               proves the requester already had a staff
+                               or tenant JWT when minting the URL.
 
-The active-menu uniqueness (one row per (property, week_start_date)
-where is_active=true) is enforced by a partial unique index. The POST
-/menu endpoint deactivates a prior active row before inserting the new
-one — re-uploading the same week is a normal flow.
+Tenant endpoint:
+
+  GET    /tenant/menu/current  resident-app: current week's file with a
+                               ready-to-render `url` field; falls back
+                               to the most recent prior week.
+
+The active-row-per-(property, week) invariant is enforced by the partial
+unique index. Re-uploading the same week deactivates the prior row in
+the upload handler before insert.
 """
 from __future__ import annotations
 
+import os
+import secrets
 from datetime import date, timedelta
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, field_validator
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.config import settings
+from app.core.database import get_db, set_schema, get_org_schema_name
 from app.core.dependencies import (
     OrgContext,
     TenantContext,
@@ -42,106 +53,96 @@ from app.core.dependencies import (
     require_roles,
 )
 from app.core.exceptions import NotFoundError
-from app.services.s3_service import (
-    delete_object,
-    generate_presigned_upload_url,
-    generate_presigned_view_url,
-)
 
 router = APIRouter()
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
+UPLOAD_ROOT = Path(os.getenv("UPLOAD_ROOT", "/app/uploads"))
+MENU_DIR = "menu"
+ALLOWED_EXTS = {"pdf", "jpg", "jpeg", "png", "webp"}
 ALLOWED_CONTENT_TYPES = {
     "application/pdf",
     "image/jpeg",
     "image/png",
     "image/webp",
 }
+EXT_TO_CONTENT_TYPE = {
+    "pdf": "application/pdf",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
+TOKEN_TTL_SECONDS = 300  # 5 minutes — enough time to open + scroll the file
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB cap
 
 
 def _monday_of(d: date) -> date:
-    """Snap any date to the Monday of its ISO week. Owners may pick any
-    day; we store the Monday so 'week_start' is unambiguous and the
-    partial unique index actually prevents duplicates."""
+    """Snap any date to the Monday of its ISO week."""
     return d - timedelta(days=d.weekday())
 
 
-# ── Request / response models ────────────────────────────────────────────────
-
-class MenuUploadUrlRequest(BaseModel):
-    property_id: UUID
-    filename: str
-
-    @field_validator("filename")
-    @classmethod
-    def _check_filename(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("filename is required")
-        ext = v.rsplit(".", 1)[-1].lower() if "." in v else ""
-        if ext not in {"pdf", "jpg", "jpeg", "png", "webp"}:
-            raise ValueError("Only PDF, JPG, PNG, or WEBP files are accepted.")
-        return v
+def _menu_target(org_id: UUID | str, menu_id: UUID | str, ext: str) -> Path:
+    return UPLOAD_ROOT / str(org_id) / MENU_DIR / f"{menu_id}.{ext}"
 
 
-class MenuCreate(BaseModel):
-    property_id: UUID
-    week_start_date: date
-    s3_key: str
-    content_type: str
-    original_filename: str | None = None
-    title: str | None = None
-
-    @field_validator("content_type")
-    @classmethod
-    def _check_content_type(cls, v: str) -> str:
-        if v not in ALLOWED_CONTENT_TYPES:
-            raise ValueError(
-                f"content_type must be one of {sorted(ALLOWED_CONTENT_TYPES)}"
-            )
-        return v
+def _redis():
+    return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
 # ── Staff endpoints ─────────────────────────────────────────────────────────
 
 @router.post(
-    "/menu/upload-url",
-    summary="Owner: get a presigned PUT URL for a new menu file",
+    "/menu/upload",
+    status_code=201,
+    summary="Owner: upload a weekly menu file (multipart)",
 )
-async def menu_get_upload_url(
-    body: MenuUploadUrlRequest,
-    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER", "SUPERVISOR"])),
-):
-    """
-    Returns { upload_url, s3_key, content_type, expires_in }.
-    Frontend PUTs the file directly to S3, then calls POST /menu with
-    the returned s3_key to persist the menu row.
-    """
-    return await generate_presigned_upload_url(
-        org_id=ctx.org_id,
-        property_id=body.property_id,
-        resource_type="menu",
-        filename=body.filename,
-    )
-
-
-@router.post("/menu", status_code=201, summary="Owner: record an uploaded menu")
-async def menu_create(
-    body: MenuCreate,
+async def menu_upload(
+    property_id: UUID = Form(...),
+    week_start_date: date = Form(...),
+    title: str | None = Form(None),
+    file: UploadFile = File(...),
     ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER", "SUPERVISOR"])),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Persist the row pointing at the just-uploaded S3 object. Deactivates
-    any prior active menu for the same (property, week) — the partial
-    unique index would reject otherwise.
-    """
-    week_start = _monday_of(body.week_start_date)
+    """Single-step upload: file body lands on the EC2 disk; row is
+    persisted referencing the relative path."""
+    filename = file.filename or "menu.pdf"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "UNSUPPORTED_FILE_TYPE",
+                    "message": "Only PDF, JPG, PNG, or WEBP files are accepted.",
+                }
+            },
+        )
 
-    # Deactivate prior active menu for the same week, if any. We do this
-    # explicitly (vs ON CONFLICT) because the partial unique index has
-    # the WHERE clause; ON CONFLICT requires matching the index name.
+    # We trust the extension over the client-sent content_type for storage
+    # (mobile UAs often send application/octet-stream); but reject obvious
+    # mismatches for sanity.
+    content_type = EXT_TO_CONTENT_TYPE[ext]
+
+    # Read the file body. UploadFile streams from a SpooledTemporaryFile;
+    # .read() pulls it all into memory. Capped at 10 MB.
+    body = await file.read()
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error": {
+                    "code": "FILE_TOO_LARGE",
+                    "message": f"Max upload size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                }
+            },
+        )
+
+    week_start = _monday_of(week_start_date)
+
+    # Deactivate prior active row for the same week. The partial unique
+    # index would otherwise reject the insert below.
     await db.execute(
         text(
             """
@@ -150,32 +151,45 @@ async def menu_create(
              WHERE property_id = :pid AND week_start_date = :ws AND is_active = true
             """
         ),
-        {"pid": str(body.property_id), "ws": week_start},
+        {"pid": str(property_id), "ws": week_start},
     )
-    result = await db.execute(
-        text(
-            """
-            INSERT INTO menu_uploads (
-                org_id, property_id, week_start_date, s3_key,
-                content_type, original_filename, title, uploaded_by
-            ) VALUES (
-                :org_id, :pid, :ws, :key, :ct, :fn, :title, :uploader
-            )
-            RETURNING id
-            """
-        ),
-        {
-            "org_id": str(ctx.org_id),
-            "pid": str(body.property_id),
-            "ws": week_start,
-            "key": body.s3_key,
-            "ct": body.content_type,
-            "fn": body.original_filename,
-            "title": body.title,
-            "uploader": str(ctx.user_id),
-        },
+
+    # Insert with a placeholder s3_key — we don't know the menu_id yet,
+    # which is what we name the file. Update after the row is in.
+    new_id = (
+        await db.execute(
+            text(
+                """
+                INSERT INTO menu_uploads (
+                    org_id, property_id, week_start_date, s3_key,
+                    content_type, original_filename, title, uploaded_by
+                ) VALUES (
+                    :org_id, :pid, :ws, '', :ct, :fn, :title, :uploader
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "org_id": str(ctx.org_id),
+                "pid": str(property_id),
+                "ws": week_start,
+                "ct": content_type,
+                "fn": filename,
+                "title": title,
+                "uploader": str(ctx.user_id),
+            },
+        )
+    ).scalar_one()
+
+    target = _menu_target(ctx.org_id, new_id, ext)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
+
+    rel_path = str(target.relative_to(UPLOAD_ROOT))
+    await db.execute(
+        text("UPDATE menu_uploads SET s3_key = :key WHERE id = :id"),
+        {"key": rel_path, "id": str(new_id)},
     )
-    new_id = result.scalar_one()
     await db.commit()
     return {"id": str(new_id), "week_start_date": week_start.isoformat()}
 
@@ -187,7 +201,6 @@ async def menu_list(
     ctx: OrgContext = Depends(get_org_context),  # noqa: ARG001
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns the most recent `limit` active menu rows, newest week first."""
     rows = (
         await db.execute(
             text(
@@ -206,28 +219,46 @@ async def menu_list(
     return {"items": [dict(r) for r in rows]}
 
 
-@router.get("/menu/{menu_id}/file-url", summary="Owner: get a presigned GET URL")
+async def _mint_file_token(menu_id: UUID, org_id: UUID) -> str:
+    """One token = right to read one menu_id for TOKEN_TTL_SECONDS. We
+    store both menu_id and the org schema in Redis so the public serve
+    endpoint can find the row without an auth dependency.
+    """
+    token = secrets.token_urlsafe(24)
+    schema = get_org_schema_name(org_id)
+    r = _redis()
+    await r.setex(f"menu_file_token:{token}", TOKEN_TTL_SECONDS, f"{schema}:{menu_id}")
+    await r.aclose()
+    return token
+
+
+@router.get("/menu/{menu_id}/file-url", summary="Owner: short-lived file URL")
 async def menu_file_url(
     menu_id: UUID,
-    ctx: OrgContext = Depends(get_org_context),  # noqa: ARG001
+    ctx: OrgContext = Depends(get_org_context),
     db: AsyncSession = Depends(get_db),
 ):
+    """
+    Mints a 5-minute token-signed URL. The returned URL opens cleanly in
+    a browser tab (or `Linking.openURL` on mobile) without needing the
+    JWT — the token IS the auth.
+    """
     row = (
         await db.execute(
-            text("SELECT s3_key FROM menu_uploads WHERE id = :id AND is_active = true"),
+            text("SELECT id FROM menu_uploads WHERE id = :id AND is_active = true"),
             {"id": str(menu_id)},
         )
     ).mappings().fetchone()
     if not row:
         raise NotFoundError("Menu")
-    url = await generate_presigned_view_url(row["s3_key"])
-    return {"url": url}
+    token = await _mint_file_token(menu_id, ctx.org_id)
+    return {"url": f"/api/v1/menu/file/{token}"}
 
 
-@router.delete("/menu/{menu_id}", summary="Owner: delete a menu (soft + S3)")
+@router.delete("/menu/{menu_id}", summary="Owner: soft-delete + unlink the file")
 async def menu_delete(
     menu_id: UUID,
-    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),  # noqa: ARG001
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
     db: AsyncSession = Depends(get_db),
 ):
     row = (
@@ -238,19 +269,58 @@ async def menu_delete(
     ).mappings().fetchone()
     if not row:
         raise NotFoundError("Menu")
-    # Soft-deactivate in DB so the partial unique index opens up for a
-    # re-upload. Best-effort hard-delete from S3 so we don't pay for
-    # storage on dropped menus.
     await db.execute(
         text("UPDATE menu_uploads SET is_active = false WHERE id = :id"),
         {"id": str(menu_id)},
     )
     await db.commit()
+    # Best-effort unlink (storage GC).
     try:
-        await delete_object(row["s3_key"])
+        if row["s3_key"]:
+            full = UPLOAD_ROOT / row["s3_key"]
+            full.unlink(missing_ok=True)
     except Exception:
         pass
     return {"message": "Menu removed"}
+
+
+# ── Public token-signed serve ───────────────────────────────────────────────
+
+@router.get("/menu/file/{token}", summary="Public: stream menu file via token")
+async def menu_file_serve(token: str, db: AsyncSession = Depends(get_db)):
+    """
+    No auth dependency — the token itself is the auth. Minting happens
+    through the staff/tenant endpoints which DO authenticate.
+    """
+    r = _redis()
+    raw = await r.get(f"menu_file_token:{token}")
+    await r.aclose()
+    if not raw or ":" not in raw:
+        raise HTTPException(status_code=404, detail="Link expired or invalid")
+    schema, menu_id = raw.split(":", 1)
+
+    # Manually scope this session to the right org — no auth dep ran.
+    await set_schema(db, schema)
+    row = (
+        await db.execute(
+            text(
+                "SELECT s3_key, content_type, original_filename "
+                "FROM menu_uploads WHERE id = :id"
+            ),
+            {"id": menu_id},
+        )
+    ).mappings().fetchone()
+    if not row or not row["s3_key"]:
+        raise HTTPException(status_code=404, detail="Menu file missing")
+
+    full = UPLOAD_ROOT / row["s3_key"]
+    if not full.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    return FileResponse(
+        str(full),
+        media_type=row["content_type"],
+        filename=row["original_filename"] or full.name,
+    )
 
 
 # ── Tenant-side endpoint ────────────────────────────────────────────────────
@@ -260,18 +330,8 @@ async def tenant_current_menu(
     ctx: TenantContext = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Returns the active menu for the current ISO week of the tenant's
-    property, with a presigned GET URL ready for the app to render. If
-    no menu has been uploaded for this week, falls back to the most
-    recent prior week so the resident never sees a blank screen
-    mid-week. Returns 404 if nothing has ever been uploaded.
-    """
     today = date.today()
     monday = _monday_of(today)
-
-    # Prefer current week. If absent, fall back to the most recent past
-    # week we have on file.
     row = (
         await db.execute(
             text(
@@ -290,10 +350,8 @@ async def tenant_current_menu(
     if not row:
         raise NotFoundError("Menu")
 
-    url = await generate_presigned_view_url(row["s3_key"])
+    token = await _mint_file_token(row["id"], ctx.org_id)
     out = dict(row)
-    out["url"] = url
-    # `is_current_week` lets the resident UI say "Current menu" vs
-    # "Last week's menu (this week not posted yet)".
+    out["url"] = f"/api/v1/menu/file/{token}"
     out["is_current_week"] = row["week_start_date"] == monday
     return out
