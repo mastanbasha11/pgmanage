@@ -522,6 +522,95 @@ async def test_phone_normalisation_strips_country_code(
         assert resp.json()["delivery"] in {"inline", "email"}, variant
 
 
+# ── Tenant: current month dues + payments + stub endpoints ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_tenant_dues_current_returns_breakdown(
+    client: AsyncClient, test_tenant: dict, tenant_portal_token: str
+):
+    """The test_tenant fixture has monthly_rent_paise=700000 and no food /
+    other charges, so dues should be just the rent line."""
+    r = await client.get(
+        "/api/v1/tenant/me/dues/current",
+        headers=auth_headers(tenant_portal_token),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total_paise"] == 700000
+    assert body["lines"][0]["kind"] == "rent"
+    assert body["lines"][0]["amount_paise"] == 700000
+    assert body["status"] in {"due", "overdue", "paid", "partial"}
+    assert "month_label" in body
+    assert "due_date" in body
+    assert "days_until_due" in body
+
+
+@pytest.mark.asyncio
+async def test_tenant_payments_returns_their_own(
+    client: AsyncClient,
+    test_tenant: dict,
+    tenant_portal_token: str,
+    test_owner: dict,
+):
+    """After the owner records a payment, the tenant sees it on /me/payments."""
+    payload = {
+        "tenant_id": str(test_tenant["tenant_id"]),
+        "amount_paise": 700000,
+        "payment_type": "RENT",
+        "payment_mode": "UPI",
+        "reference_number": "UPI/TEST/1234",
+    }
+    create = await client.post(
+        "/api/v1/payments",
+        headers=auth_headers(test_owner["token"]),
+        json=payload,
+    )
+    assert create.status_code == 201, create.text
+
+    r = await client.get(
+        "/api/v1/tenant/me/payments",
+        headers=auth_headers(tenant_portal_token),
+    )
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) >= 1
+    p = items[0]
+    assert p["amount_paise"] == 700000
+    assert p["mode"] == "upi"
+    assert p["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_tenant_stub_endpoints_return_empty(
+    client: AsyncClient, tenant_portal_token: str
+):
+    """Stub endpoints (visitors / referrals / notifications / etc.)
+    return empty-state shapes so the resident app can render empty UI
+    consistently."""
+    headers = auth_headers(tenant_portal_token)
+    for path in (
+        "/api/v1/tenant/me/visitors",
+        "/api/v1/tenant/me/referrals",
+        "/api/v1/tenant/me/notifications",
+        "/api/v1/tenant/me/meals/week",
+        "/api/v1/tenant/me/events",
+        "/api/v1/tenant/me/residents",
+        "/api/v1/tenant/me/partners",
+    ):
+        r = await client.get(path, headers=headers)
+        assert r.status_code == 200, f"{path}: {r.text}"
+        assert r.json() == {"items": []}, path
+
+    summary = await client.get(
+        "/api/v1/tenant/me/referrals/summary", headers=headers
+    )
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["total_earned_paise"] == 0
+    assert body["code"] == ""
+
+
 # ── Cross-role isolation ───────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

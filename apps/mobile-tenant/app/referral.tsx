@@ -69,12 +69,71 @@ export default function ReferralScreen() {
     }
   }
 
-  if (summaryQ.isLoading || !summary) {
+  if (summaryQ.isLoading) {
     return (
       <Screen scroll>
         <Stack.Screen options={{ title: 'Refer & earn', headerStyle: { backgroundColor: colors.bg }, headerTitleStyle: { color: colors.text }, headerTintColor: colors.text }} />
         <View style={{ marginTop: 24 }}>
           <SkeletonLines count={6} />
+        </View>
+      </Screen>
+    );
+  }
+
+  // No live referral system yet → friendly placeholder rather than a hero
+  // card with ₹0 / empty code. The backend stub returns this shape until
+  // the referral feature lands.
+  if (!summary || !summary.code) {
+    return (
+      <Screen scroll>
+        <Stack.Screen
+          options={{
+            title: 'Refer & earn',
+            headerStyle: { backgroundColor: colors.bg },
+            headerTitleStyle: { color: colors.text },
+            headerTintColor: colors.text,
+          }}
+        />
+        <View style={{ marginTop: 24 }}>
+          <Card variant="hero">
+            <View style={{ alignItems: 'center', paddingVertical: 16 }}>
+              <View
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: 36,
+                  backgroundColor: colors.celebrationBg,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 16,
+                }}
+              >
+                <Ionicons name="gift" size={32} color={colors.celebrationFg} />
+              </View>
+              <Text
+                style={{
+                  color: colors.text,
+                  fontSize: fontSize.h3,
+                  fontWeight: fontWeight.bold,
+                  textAlign: 'center',
+                }}
+              >
+                Coming soon
+              </Text>
+              <Text
+                style={{
+                  color: colors.textMuted,
+                  fontSize: fontSize.body,
+                  textAlign: 'center',
+                  marginTop: 8,
+                  maxWidth: 280,
+                }}
+              >
+                We're putting together a referral programme. You'll see your
+                code and earnings here as soon as it goes live.
+              </Text>
+            </View>
+          </Card>
         </View>
       </Screen>
     );

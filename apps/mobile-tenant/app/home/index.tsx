@@ -143,7 +143,7 @@ export default function HomeScreen() {
               {profile.property.name}
             </Text>
           </View>
-          {referralQ.data ? (
+          {referralQ.data && referralQ.data.bonusPerMoveInPaise > 0 ? (
             <Pressable
               onPress={() => router.push('/referral')}
               accessibilityLabel="Refer & earn"

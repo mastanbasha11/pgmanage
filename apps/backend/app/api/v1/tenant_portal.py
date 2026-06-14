@@ -660,6 +660,278 @@ async def tenant_ledger(ctx: TenantContext = Depends(get_current_tenant), db: As
     }
 
 
+@router.get("/me/dues/current", summary="Tenant: current month rent dues + breakdown")
+async def tenant_current_dues(
+    ctx: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Synthesizes a DuesSummary the resident app can render: itemised lines
+    (rent / food / other charges / discount), total, due date and a status
+    pill. Backed by the active rent_plan + the matching rent_ledger row
+    for the current month (if it's been generated).
+    """
+    from datetime import date as _date, timedelta as _td
+
+    today = _date.today()
+    plan = (
+        await db.execute(
+            text(
+                """
+                SELECT monthly_rent_paise, food_included, food_charges_paise,
+                       other_charges_json, discount_amount_paise, discount_reason,
+                       billing_day
+                FROM rent_plans
+                WHERE tenant_id = :id AND is_active = true
+                LIMIT 1
+                """
+            ),
+            {"id": str(ctx.tenant_id)},
+        )
+    ).mappings().fetchone()
+
+    if not plan:
+        # Tenant has no active rent plan (e.g. checked out). Return a
+        # zero-state so the resident app can render "All settled" cleanly.
+        return {
+            "month_label": today.strftime("%B %Y"),
+            "total_paise": 0,
+            "due_date": today.isoformat(),
+            "days_until_due": 0,
+            "status": "paid",
+            "lines": [],
+            "wallet_applied_paise": 0,
+        }
+
+    # Look for the matching ledger row to know paid/unpaid status. If it
+    # hasn't been generated yet for this month, status is computed from
+    # billing_day vs today.
+    entry = (
+        await db.execute(
+            text(
+                """
+                SELECT amount_due_paise, amount_paid_paise, status, due_date
+                FROM rent_ledger_entries
+                WHERE tenant_id = :id AND month = :m AND year = :y
+                LIMIT 1
+                """
+            ),
+            {"id": str(ctx.tenant_id), "m": today.month, "y": today.year},
+        )
+    ).mappings().fetchone()
+
+    # Itemised breakdown from the active rent plan.
+    lines: list[dict] = [
+        {
+            "kind": "rent",
+            "label": "Room rent",
+            "amount_paise": int(plan["monthly_rent_paise"]),
+            "explanation": "Monthly rent for your bed",
+        }
+    ]
+    if plan["food_included"] and (plan["food_charges_paise"] or 0) > 0:
+        lines.append(
+            {
+                "kind": "food",
+                "label": "Food charges",
+                "amount_paise": int(plan["food_charges_paise"]),
+                "explanation": "Breakfast / lunch / dinner included",
+            }
+        )
+    # other_charges_json is a JSONB array of { label, amount_paise }.
+    other_raw = plan["other_charges_json"]
+    if other_raw:
+        # asyncpg returns JSONB as Python dict/list directly; tolerate a
+        # str fallback just in case.
+        if isinstance(other_raw, str):
+            try:
+                other_raw = json.loads(other_raw)
+            except Exception:
+                other_raw = []
+        for charge in other_raw or []:
+            amount = int(charge.get("amount_paise", 0))
+            if amount <= 0:
+                continue
+            lines.append(
+                {
+                    "kind": "other",
+                    "label": charge.get("label", "Other charge"),
+                    "amount_paise": amount,
+                }
+            )
+    if (plan["discount_amount_paise"] or 0) > 0:
+        lines.append(
+            {
+                "kind": "adjustment",
+                "label": "Discount",
+                "amount_paise": -int(plan["discount_amount_paise"]),
+                "explanation": plan["discount_reason"] or "Discount applied",
+            }
+        )
+
+    total = sum(int(l["amount_paise"]) for l in lines)
+
+    # Due date — prefer ledger row's due_date; otherwise the next
+    # billing_day on or after today.
+    if entry and entry["due_date"]:
+        due_date = entry["due_date"]
+    else:
+        bd = int(plan["billing_day"] or 1)
+        try:
+            candidate = today.replace(day=bd)
+        except ValueError:
+            # billing_day beyond this month's end (e.g. 31 in Feb)
+            candidate = today.replace(day=28)
+        due_date = candidate if candidate >= today else (candidate + _td(days=32)).replace(day=bd if bd <= 28 else 28)
+
+    days_until_due = (due_date - today).days
+
+    # Status
+    if entry:
+        s = entry["status"].lower() if entry["status"] else "unpaid"
+        # rent_status_enum values: PAID, PARTIAL, UNPAID, WAIVED
+        if s == "unpaid" and days_until_due < 0:
+            status_out = "overdue"
+        elif s in {"paid", "partial"}:
+            status_out = s
+        elif s == "waived":
+            status_out = "paid"
+        else:
+            status_out = "due" if days_until_due >= 0 else "overdue"
+    else:
+        status_out = "due" if days_until_due >= 0 else "overdue"
+
+    return {
+        "month_label": today.strftime("%B %Y"),
+        "total_paise": total,
+        "due_date": due_date.isoformat() if hasattr(due_date, "isoformat") else str(due_date),
+        "days_until_due": days_until_due,
+        "status": status_out,
+        "lines": lines,
+        "wallet_applied_paise": 0,
+    }
+
+
+@router.get("/me/payments", summary="Tenant: own payment history")
+async def tenant_payments(
+    ctx: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    collected_at AS date,
+                    amount_paise,
+                    payment_mode,
+                    payment_type,
+                    COALESCE(reference_number, idempotency_key) AS reference,
+                    for_month,
+                    for_year
+                FROM payments
+                WHERE tenant_id = :id
+                ORDER BY collected_at DESC
+                LIMIT 50
+                """
+            ),
+            {"id": str(ctx.tenant_id)},
+        )
+    ).mappings().fetchall()
+    items = []
+    for r in rows:
+        items.append(
+            {
+                "id": str(r["id"]),
+                "date": r["date"].isoformat() if r["date"] else None,
+                "amount_paise": int(r["amount_paise"]),
+                "mode": (r["payment_mode"] or "").lower() or "cash",
+                "payment_type": r["payment_type"],
+                "reference": r["reference"],
+                "for_month": r["for_month"],
+                "for_year": r["for_year"],
+                "status": "success",
+            }
+        )
+    return {"items": items}
+
+
+# ── Empty-array stubs ───────────────────────────────────────────────────────
+#
+# These endpoints exist so the resident app can hit one consistent shape
+# everywhere — even for features whose backend isn't implemented yet (no
+# real visitor passes / referral system / community / per-tenant
+# notifications). Returning {items: []} keeps the resident UI's empty
+# states honest. Each one will be replaced with a real implementation in
+# its respective feature phase.
+
+@router.get("/me/visitors", summary="Tenant: visitor history (stub)")
+async def tenant_visitors(
+    ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
+):
+    return {"items": []}
+
+
+@router.get("/me/referrals", summary="Tenant: own referrals (stub)")
+async def tenant_referrals(
+    ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
+):
+    return {"items": []}
+
+
+@router.get("/me/referrals/summary", summary="Tenant: referral earnings summary (stub)")
+async def tenant_referrals_summary(
+    ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
+):
+    # Empty state: zero earnings, no shareable code yet. A future
+    # referral-system phase will fill these in.
+    return {
+        "code": "",
+        "share_url": "",
+        "bonus_per_signup_paise": 0,
+        "bonus_per_move_in_paise": 0,
+        "total_earned_paise": 0,
+        "pending_paise": 0,
+        "credited_to_wallet_paise": 0,
+    }
+
+
+@router.get("/me/notifications", summary="Tenant: own notifications (stub)")
+async def tenant_notifications(
+    ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
+):
+    return {"items": []}
+
+
+@router.get("/me/meals/week", summary="Tenant: week's meal schedule (stub)")
+async def tenant_meals_week(
+    ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
+):
+    return {"items": []}
+
+
+@router.get("/me/events", summary="Tenant: community events (stub)")
+async def tenant_events(
+    ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
+):
+    return {"items": []}
+
+
+@router.get("/me/residents", summary="Tenant: resident directory (stub)")
+async def tenant_residents(
+    ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
+):
+    return {"items": []}
+
+
+@router.get("/me/partners", summary="Tenant: partner offers (stub)")
+async def tenant_partners(
+    ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
+):
+    return {"items": []}
+
+
 @router.get("/complaints", summary="Tenant: own complaints")
 async def tenant_complaints(ctx: TenantContext = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
