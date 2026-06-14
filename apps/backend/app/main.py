@@ -44,6 +44,7 @@ from app.api.v1 import (
     bookings,
     audit_logs,
     public_leads,
+    menu,
 )
 from app.api.platform import admin as platform_admin
 from fastapi import HTTPException
@@ -192,6 +193,7 @@ app.include_router(bookings.router, prefix=V1, tags=["bookings"])
 app.include_router(audit_logs.router, prefix=V1, tags=["audit-logs"])
 app.include_router(public_leads.router, prefix=V1, tags=["public-leads"])
 app.include_router(tenant_portal.router, prefix=V1, tags=["tenant-portal"])
+app.include_router(menu.router, prefix=V1, tags=["menu"])
 app.include_router(webhooks.router, prefix=V1, tags=["webhooks"])
 app.include_router(platform_admin.router, prefix="/api/platform", tags=["platform-admin"])
 

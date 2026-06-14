@@ -373,6 +373,25 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         f'CREATE INDEX IF NOT EXISTS idx_activity_log_event_category ON "{schema}".activity_log(event_category, created_at DESC)',
         f'CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON "{schema}".activity_log(created_at DESC)',
         # Bookings (daily stays + advance/future bookings). Mirrors migrations 007/008.
+        # Weekly menu uploads (per property). One active row per
+        # (property, week_start_date) — enforced by the partial unique
+        # index below. See migration 021 for full notes.
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".menu_uploads (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id UUID NOT NULL,
+            property_id UUID NOT NULL REFERENCES "{schema}".properties(id),
+            week_start_date DATE NOT NULL,
+            s3_key TEXT NOT NULL,
+            content_type VARCHAR(100) NOT NULL,
+            original_filename TEXT,
+            title VARCHAR(200),
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            uploaded_by UUID,
+            uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        f"""CREATE UNIQUE INDEX IF NOT EXISTS menu_uploads_active_uk
+            ON "{schema}".menu_uploads(property_id, week_start_date)
+            WHERE is_active = true""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".bookings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             org_id UUID NOT NULL,

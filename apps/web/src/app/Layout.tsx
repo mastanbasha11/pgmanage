@@ -17,6 +17,7 @@ import {
   ClipboardList,
   Globe,
   MessageSquare,
+  UtensilsCrossed,
 } from 'lucide-react';
 import { cn, initials } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
@@ -50,6 +51,7 @@ const NAV_ITEMS = [
   { to: '/leads', icon: UserCircle, label: 'Leads' },
   { to: '/audit-logs', icon: ClipboardList, label: 'Audit Logs', ownerOnly: true },
   { to: '/settings/website-integration', icon: Globe, label: 'Website Integration', ownerOnly: true },
+  { to: '/settings/menu', icon: UtensilsCrossed, label: 'Menu' },
   { to: '/settings/whatsapp', icon: MessageSquare, label: 'WhatsApp', ownerOnly: true },
   { to: '/settings/team', icon: UserCog, label: 'Team', ownerOnly: true },
 ];
