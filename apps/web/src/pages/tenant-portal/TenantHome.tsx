@@ -15,10 +15,30 @@ export default function TenantHome() {
     queryFn: () => tenantApi.get('/me').then((r) => r.data),
   });
 
+  // `/tenant/me/dues/current` carries the active rent + itemised breakdown
+  // — `/me` itself doesn't expose monthly_rent_paise (that's on rent_plan).
+  const { data: dues } = useQuery({
+    queryKey: ['tenant-dues-current'],
+    queryFn: () => tenantApi.get('/me/dues/current').then((r) => r.data),
+  });
+
   const { data: ledger } = useQuery({
     queryKey: ['tenant-ledger'],
     queryFn: () => tenantApi.get('/ledger').then((r) => r.data),
   });
+
+  // Outstanding rolls up unpaid + partial across all ledger rows.
+  const outstandingPaise: number =
+    ledger?.entries?.reduce(
+      (
+        sum: number,
+        e: { amount_due_paise: number; amount_paid_paise: number; status: string },
+      ) =>
+        e.status === 'PAID' || e.status === 'WAIVED'
+          ? sum
+          : sum + Math.max(e.amount_due_paise - e.amount_paid_paise, 0),
+      0,
+    ) ?? 0;
 
   const { data: announcements } = useQuery({
     queryKey: ['tenant-announcements'],
@@ -62,13 +82,13 @@ export default function TenantHome() {
               <div className="rounded-lg bg-muted/50 p-3">
                 <p className="text-xs text-muted-foreground">Monthly Rent</p>
                 <p className="font-bold mt-0.5">
-                  {me ? formatPaise(me.monthly_rent_paise) : '—'}
+                  {dues ? formatPaise(dues.total_paise) : '—'}
                 </p>
               </div>
               <div className="rounded-lg bg-destructive/10 p-3">
                 <p className="text-xs text-muted-foreground">Outstanding</p>
                 <p className="font-bold mt-0.5 text-destructive">
-                  {ledger ? formatPaise(ledger.total_due_paise ?? 0) : '—'}
+                  {ledger ? formatPaise(outstandingPaise) : '—'}
                 </p>
               </div>
             </div>
