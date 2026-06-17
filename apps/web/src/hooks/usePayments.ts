@@ -57,12 +57,21 @@ export interface CollectorRow {
 
 export interface RentLedgerStats {
   expected_paise: number;
+  /** Fiscal-window cash collected (RENT payments + DAILY booking cash). */
   collected_paise: number;
+  /**
+   * Legacy ledger-roll-up view: SUM(rent_ledger_entries.amount_paid_paise)
+   * for the (month, year). Useful when reconciling against rent ledger
+   * entries vs cash flow. Optional — added in the period-attribution
+   * refactor; older responses won't include it.
+   */
+  ledger_paid_paise?: number;
   discount_paise: number;
   settled_paise: number;
   outstanding_paise: number;
   advance_received_paise?: number;
   refunds_given_paise?: number;
+  /** 0..100 percentage. */
   collection_rate: number;
 }
 

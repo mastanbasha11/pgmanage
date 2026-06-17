@@ -372,14 +372,21 @@ export default function RentDashboardPage() {
   }
 
   const entries: LedgerEntry[] = ledger?.items ?? [];
-  // KPI totals always reflect the whole property (filters only narrow the table below).
-  const totalDue = entries.reduce((s, e) => s + (e.amount_due_paise ?? 0), 0);
-  const totalPaid = entries.reduce((s, e) => s + (e.amount_paid_paise ?? 0), 0);
-  const totalDiscount = entries.reduce((s, e) => s + (e.discount_paise ?? 0), 0);
-  const totalSettled = totalPaid + totalDiscount;
-  const totalOutstanding = Math.max(totalDue - totalSettled, 0);
-  const advanceReceived = ledger?.stats?.advance_received_paise ?? 0;
-  const refundsGiven = ledger?.stats?.refunds_given_paise ?? 0;
+  // KPIs come straight from the backend's `stats` object — it applies
+  // the fiscal-window vs rent-month attribution rule
+  // (project-period-attribution-rule) AND uses the per-row clamped sum
+  // for Outstanding. The previous code re-derived everything locally
+  // from `entries[].amount_paid_paise` (the ledger view), which
+  // bypassed the new Collected query AND brought back the
+  // aggregate-subtraction Outstanding bug.
+  const backendStats = ledger?.stats;
+  const totalDue = backendStats?.expected_paise ?? 0;
+  const totalPaid = backendStats?.collected_paise ?? 0; // fiscal-window cash
+  const totalDiscount = backendStats?.discount_paise ?? 0;
+  const totalSettled = backendStats?.settled_paise ?? totalPaid + totalDiscount;
+  const totalOutstanding = backendStats?.outstanding_paise ?? 0;
+  const advanceReceived = backendStats?.advance_received_paise ?? 0;
+  const refundsGiven = backendStats?.refunds_given_paise ?? 0;
   const stats = {
     expected_paise: totalDue,
     collected_paise: totalPaid,
@@ -396,7 +403,11 @@ export default function RentDashboardPage() {
     rent_paise?: number;
     advance_paise?: number;
   }> = ledger?.collectors ?? [];
-  const collectionPct = totalDue > 0 ? Math.round((totalSettled / totalDue) * 100) : 0;
+  // Backend's `collection_rate` is a percentage (e.g. 107.0); fall back to
+  // a client-side calc if older response shape.
+  const collectionPct = Math.round(
+    backendStats?.collection_rate ?? (totalDue > 0 ? (totalPaid / totalDue) * 100 : 0),
+  );
 
   // Build the dropdown options for the "Collected by" filter from the entries
   // themselves so it always reflects what's actually visible.
