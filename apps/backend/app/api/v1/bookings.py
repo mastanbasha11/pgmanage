@@ -164,11 +164,19 @@ async def list_bookings(
         conditions.append("b.kind = CAST(:kind AS booking_kind_enum)")
         params["kind"] = kind
 
-    # Period filter — default to month/year on collected_at (cash basis)
+    # Period filter — default to property's fiscal window on collected_at
+    # (matches Rent & Payments + Dashboard, see project-period-attribution-rule).
+    # Falls back to calendar month if no property_id (cross-property view).
     if month and year and not (start_date or end_date):
-        from calendar import monthrange
-        start_date = date(year, month, 1)
-        end_date = date(year, month, monthrange(year, month)[1])
+        if property_id:
+            from app.services.billing_period import get_fiscal_period
+            fp = await get_fiscal_period(property_id, month, year, db)
+            start_date = fp.period_start
+            end_date = fp.period_end
+        else:
+            from calendar import monthrange
+            start_date = date(year, month, 1)
+            end_date = date(year, month, monthrange(year, month)[1])
     if start_date:
         conditions.append("b.collected_at >= :sd")
         params["sd"] = start_date

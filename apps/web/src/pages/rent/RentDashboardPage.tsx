@@ -16,6 +16,7 @@ import {
   ArrowUpFromLine,
   CalendarDays,
   Pencil,
+  Trash2,
 } from 'lucide-react';
 import AddPaymentDialog from './AddPaymentDialog';
 import EditCloseDateDialog from './EditCloseDateDialog';
@@ -37,6 +38,8 @@ import {
   useOverdue,
   useGenerateLedger,
   useRecordPayment,
+  useUpdatePayment,
+  useDeletePayment,
   type PaymentMode,
 } from '@/hooks/usePayments';
 import { useAuthStore } from '@/store/auth';
@@ -296,6 +299,140 @@ function RecordPaymentDialog({
   );
 }
 
+const editPaymentSchema = z.object({
+  amount_rupees: z.coerce.number().min(0),
+  discount_rupees: z.coerce.number().min(0).default(0),
+  payment_mode: z.enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE']),
+  paid_to: z.string().optional(),
+  collected_at: z.string().min(1, 'Date required'),
+  reference_number: z.string().optional(),
+  notes: z.string().optional(),
+});
+type EditPaymentFormData = z.infer<typeof editPaymentSchema>;
+
+function EditPaymentDialog({
+  txn,
+  onClose,
+}: {
+  txn: Transaction | null;
+  onClose: () => void;
+}) {
+  const { mutateAsync, isPending } = useUpdatePayment();
+  const { toast } = useToast();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<EditPaymentFormData>({
+    resolver: zodResolver(editPaymentSchema),
+    values: txn
+      ? {
+          amount_rupees: txn.amount_paise / 100,
+          discount_rupees: 0,
+          payment_mode: txn.payment_mode as PaymentMode,
+          paid_to: txn.collector === 'Unattributed' ? '' : txn.collector,
+          collected_at: txn.collected_at.slice(0, 10),
+          reference_number: txn.reference_number ?? '',
+          notes: txn.notes ?? '',
+        }
+      : undefined,
+  });
+
+  if (!txn) return null;
+
+  async function submit(data: EditPaymentFormData) {
+    if (!txn) return;
+    try {
+      await mutateAsync({
+        id: txn.id,
+        data: {
+          amount_paise: rupeesToPaise(data.amount_rupees),
+          payment_mode: data.payment_mode,
+          paid_to: data.paid_to?.trim() || undefined,
+          collected_at: new Date(data.collected_at + 'T00:00:00').toISOString(),
+          reference_number: data.reference_number?.trim() || undefined,
+          notes: data.notes?.trim() || undefined,
+        },
+      });
+      toast({ title: 'Payment updated' });
+      reset();
+      onClose();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
+          ?.message ?? 'Could not update payment.';
+      toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
+
+  return (
+    <Dialog open={!!txn} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit payment</DialogTitle>
+          <DialogDescription>
+            {txn.tenant_name} · {txn.payment_type}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit(submit)} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Amount (₹)</Label>
+              <Input type="number" step="1" {...register('amount_rupees')} />
+              {errors.amount_rupees && (
+                <p className="text-xs text-destructive mt-1">{errors.amount_rupees.message}</p>
+              )}
+            </div>
+            <div>
+              <Label>Date collected</Label>
+              <Input type="date" {...register('collected_at')} />
+              {errors.collected_at && (
+                <p className="text-xs text-destructive mt-1">{errors.collected_at.message}</p>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Mode</Label>
+              <select
+                className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+                {...register('payment_mode')}
+              >
+                <option value="CASH">Cash</option>
+                <option value="UPI">UPI</option>
+                <option value="BANK_TRANSFER">Bank transfer</option>
+                <option value="CARD">Card</option>
+                <option value="CHEQUE">Cheque</option>
+              </select>
+            </div>
+            <div>
+              <Label>Paid to</Label>
+              <Input placeholder="Collector name" {...register('paid_to')} />
+            </div>
+          </div>
+          <div>
+            <Label>Reference / Txn id</Label>
+            <Input {...register('reference_number')} />
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Input {...register('notes')} />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isPending}>
+              {isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -340,6 +477,8 @@ export default function RentDashboardPage() {
   const [payingEntry, setPayingEntry] = useState<LedgerEntry | null>(null);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [showEditClose, setShowEditClose] = useState(false);
+  const [editingTxn, setEditingTxn] = useState<Transaction | null>(null);
+  const deletePayment = useDeletePayment();
   const { toast } = useToast();
 
   // Look up fiscal period for current selection (start, end, default close, override?)
@@ -912,6 +1051,7 @@ export default function RentDashboardPage() {
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Mode</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">For</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Collected by</th>
+                        <th className="px-4 py-3" />
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -967,13 +1107,47 @@ export default function RentDashboardPage() {
                                 )}
                               </td>
                               <td className="px-4 py-3 text-xs">{t.collector}</td>
+                              <td className="px-4 py-3 text-right whitespace-nowrap">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0"
+                                  title="Edit payment"
+                                  onClick={() => setEditingTxn(t)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                  title="Delete payment"
+                                  onClick={() => {
+                                    if (!window.confirm(
+                                      `Delete ${formatPaise(t.amount_paise)} payment for ${t.tenant_name}?`
+                                    )) return;
+                                    deletePayment.mutate(t.id, {
+                                      onSuccess: () =>
+                                        toast({ title: 'Payment deleted' }),
+                                      onError: (err: unknown) => {
+                                        const msg =
+                                          (err as { response?: { data?: { error?: { message?: string } } } })
+                                            ?.response?.data?.error?.message ?? 'Delete failed.';
+                                        toast({ title: 'Failed', description: msg, variant: 'destructive' });
+                                      },
+                                    });
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </td>
                             </tr>
                           );
                         })
                       ))}
                       {paymentRows.length === 0 && (
                         <tr>
-                          <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                          <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                             No payments collected in this fiscal window.
                           </td>
                         </tr>
@@ -995,6 +1169,7 @@ export default function RentDashboardPage() {
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Mode</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Notes</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Paid by</th>
+                        <th className="px-4 py-3" />
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -1026,11 +1201,44 @@ export default function RentDashboardPage() {
                             {t.notes ?? <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="px-4 py-3 text-xs">{t.collector}</td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0"
+                              title="Edit refund"
+                              onClick={() => setEditingTxn(t)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              title="Delete refund"
+                              onClick={() => {
+                                if (!window.confirm(
+                                  `Delete ${formatPaise(t.amount_paise)} refund for ${t.tenant_name}?`
+                                )) return;
+                                deletePayment.mutate(t.id, {
+                                  onSuccess: () => toast({ title: 'Refund deleted' }),
+                                  onError: (err: unknown) => {
+                                    const msg =
+                                      (err as { response?: { data?: { error?: { message?: string } } } })
+                                        ?.response?.data?.error?.message ?? 'Delete failed.';
+                                    toast({ title: 'Failed', description: msg, variant: 'destructive' });
+                                  },
+                                });
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                       {refundRows.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                          <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                             No refunds issued in this fiscal window.
                           </td>
                         </tr>
@@ -1045,6 +1253,7 @@ export default function RentDashboardPage() {
 
       <RecordPaymentDialog entry={payingEntry} onClose={() => setPayingEntry(null)} />
       <AddPaymentDialog open={showAddPayment} onClose={() => setShowAddPayment(false)} />
+      <EditPaymentDialog txn={editingTxn} onClose={() => setEditingTxn(null)} />
       {selectedPropertyId && period && (
         <EditCloseDateDialog
           open={showEditClose}

@@ -36,6 +36,81 @@ class PaymentCreate(BaseModel):
     collected_at: datetime | None = None
 
 
+class PaymentUpdate(BaseModel):
+    amount_paise: int | None = None
+    discount_paise: int | None = None
+    payment_mode: str | None = None
+    reference_number: str | None = None
+    paid_to: str | None = None
+    notes: str | None = None
+    collected_at: datetime | None = None
+    for_month: int | None = None
+    for_year: int | None = None
+
+
+async def _recompute_rent_ledger(
+    db: AsyncSession, tenant_id: UUID, month: int, year: int
+) -> None:
+    """Re-tally a rent_ledger_entries row from the underlying payments.
+
+    Idempotent: SUMs amount_paise + discount_paise from non-deleted RENT payments
+    for (tenant, month, year) and rewrites amount_paid_paise / discount_paise /
+    status on the matching ledger row.
+    """
+    res = await db.execute(
+        text("""
+            SELECT
+                COALESCE(SUM(amount_paise), 0) AS paid,
+                COALESCE(SUM(discount_paise), 0) AS discount
+            FROM payments
+            WHERE tenant_id = :tid
+              AND for_month = :month
+              AND for_year = :year
+              AND payment_type = 'RENT'
+              AND is_deleted = false
+        """),
+        {"tid": str(tenant_id), "month": month, "year": year},
+    )
+    sums = res.mappings().fetchone() or {"paid": 0, "discount": 0}
+    paid = int(sums["paid"] or 0)
+    discount = int(sums["discount"] or 0)
+
+    ledger = (await db.execute(
+        text("""
+            SELECT id, amount_due_paise
+            FROM rent_ledger_entries
+            WHERE tenant_id = :tid AND month = :month AND year = :year
+        """),
+        {"tid": str(tenant_id), "month": month, "year": year},
+    )).mappings().fetchone()
+    if not ledger:
+        return
+
+    covered = paid + discount
+    due = int(ledger["amount_due_paise"] or 0)
+    if covered >= due and due > 0:
+        new_status = "PAID"
+    elif covered > 0:
+        new_status = "PARTIAL"
+    else:
+        new_status = "UNPAID"
+
+    await db.execute(
+        text("""
+            UPDATE rent_ledger_entries
+            SET amount_paid_paise = :paid,
+                discount_paise = :discount,
+                status = CAST(:status AS rent_status_enum),
+                updated_at = NOW()
+            WHERE id = :id
+        """),
+        {
+            "paid": paid, "discount": discount,
+            "status": new_status, "id": str(ledger["id"]),
+        },
+    )
+
+
 @router.post("/payments", status_code=status.HTTP_201_CREATED, summary="Record payment")
 async def record_payment(
     body: PaymentCreate,
@@ -255,6 +330,131 @@ async def list_payments(
     )
     rows = result.mappings().fetchall()
     return {"items": [dict(r) for r in rows], "total": len(rows)}
+
+
+@router.patch("/payments/{payment_id}", summary="Edit a recorded payment")
+async def update_payment(
+    payment_id: UUID,
+    body: PaymentUpdate,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER"):
+        raise HTTPException(403, "Only owners or property managers can edit payments")
+
+    existing = (await db.execute(
+        text("""
+            SELECT id, tenant_id, property_id, amount_paise, discount_paise,
+                   payment_type, payment_mode, reference_number, paid_to,
+                   for_month, for_year, collected_at, notes
+            FROM payments
+            WHERE id = :id AND org_id = :org_id AND is_deleted = false
+        """),
+        {"id": str(payment_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    if not existing:
+        raise NotFoundError("Payment", payment_id)
+
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(400, "No fields to update")
+
+    set_parts: list[str] = []
+    params: dict[str, Any] = {"id": str(payment_id), "org_id": str(ctx.org_id)}
+    for k, v in updates.items():
+        if k == "payment_mode":
+            set_parts.append("payment_mode = CAST(:payment_mode AS payment_mode_enum)")
+            params["payment_mode"] = v
+        elif k in ("reference_number", "paid_to", "notes"):
+            params[k] = (str(v).strip() or None) if v is not None else None
+            set_parts.append(f"{k} = :{k}")
+        else:
+            set_parts.append(f"{k} = :{k}")
+            params[k] = v
+
+    set_clause = ", ".join(set_parts)
+    await db.execute(
+        text(
+            f"UPDATE payments SET {set_clause}, updated_at = NOW() "
+            f"WHERE id = :id AND org_id = :org_id AND is_deleted = false"
+        ),
+        params,
+    )
+
+    if existing["payment_type"] == "RENT":
+        old_m, old_y = existing["for_month"], existing["for_year"]
+        new_m = updates.get("for_month", old_m)
+        new_y = updates.get("for_year", old_y)
+        if old_m and old_y:
+            await _recompute_rent_ledger(db, existing["tenant_id"], old_m, old_y)
+        if (new_m, new_y) != (old_m, old_y) and new_m and new_y:
+            await _recompute_rent_ledger(db, existing["tenant_id"], new_m, new_y)
+
+    await log_event(
+        db,
+        Event.PAYMENT_RECORDED,
+        description=f"{ctx.name} edited a payment",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="payment",
+        entity_id=payment_id,
+        property_id=existing["property_id"],
+        tenant_id=existing["tenant_id"],
+        metadata={"changes": {k: str(v) for k, v in updates.items()}},
+    )
+    await db.commit()
+    return {"message": "Payment updated"}
+
+
+@router.delete("/payments/{payment_id}", summary="Soft-delete a payment")
+async def delete_payment(
+    payment_id: UUID,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER"):
+        raise HTTPException(403, "Only owners or property managers can delete payments")
+
+    existing = (await db.execute(
+        text("""
+            SELECT id, tenant_id, property_id, payment_type, for_month, for_year, amount_paise
+            FROM payments
+            WHERE id = :id AND org_id = :org_id AND is_deleted = false
+        """),
+        {"id": str(payment_id), "org_id": str(ctx.org_id)},
+    )).mappings().fetchone()
+    if not existing:
+        raise NotFoundError("Payment", payment_id)
+
+    await db.execute(
+        text(
+            "UPDATE payments SET is_deleted = true, updated_at = NOW() "
+            "WHERE id = :id AND org_id = :org_id"
+        ),
+        {"id": str(payment_id), "org_id": str(ctx.org_id)},
+    )
+
+    if existing["payment_type"] == "RENT" and existing["for_month"] and existing["for_year"]:
+        await _recompute_rent_ledger(
+            db, existing["tenant_id"], existing["for_month"], existing["for_year"]
+        )
+
+    await log_event(
+        db,
+        Event.PAYMENT_RECORDED,
+        description=f"{ctx.name} deleted a ₹{(existing['amount_paise'] or 0) / 100:,.0f} payment",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="payment",
+        entity_id=payment_id,
+        property_id=existing["property_id"],
+        tenant_id=existing["tenant_id"],
+        metadata={"deleted": True, "amount_paise": existing["amount_paise"]},
+    )
+    await db.commit()
+    return {"message": "Payment deleted"}
 
 
 @router.get("/rent/ledger", summary="All tenants' ledger for a month/year")

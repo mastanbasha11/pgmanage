@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
 import {
   Plus,
   Pencil,
@@ -403,6 +405,23 @@ export default function BookingsPage() {
     q: debouncedSearch || undefined,
   });
 
+  // Fetch the property's fiscal period (settlement_day-based) so the period
+  // shown above the KPIs matches the window the backend uses to filter
+  // bookings — see project-period-attribution-rule.
+  const { data: period } = useQuery<{
+    period_start: string;
+    period_end: string;
+    settlement_day: number;
+    overridden: boolean;
+  }>({
+    queryKey: ['billing-period', selectedPropertyId, year, month],
+    queryFn: () =>
+      api
+        .get(`/properties/${selectedPropertyId}/billing-period/${year}/${month}`)
+        .then((r) => r.data),
+    enabled: !!selectedPropertyId,
+  });
+
   const items = data?.items ?? [];
 
   async function handleDelete(b: Booking) {
@@ -426,9 +445,20 @@ export default function BookingsPage() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Bookings</h1>
-            <p className="text-sm text-muted-foreground">
-              Daily stays and advance bookings — guests who aren't (yet) regular tenants.
-            </p>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>Daily stays and advance bookings — guests who aren't (yet) regular tenants.</span>
+              {period && (
+                <span className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-xs">
+                  <CalendarDays className="h-3 w-3" />
+                  Period: {new Date(period.period_start).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                  {' – '}
+                  {new Date(period.period_end).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                  {period.overridden && (
+                    <span className="ml-1 text-[10px] uppercase text-amber-600">override</span>
+                  )}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>

@@ -111,6 +111,44 @@ export function useRecordPayment() {
   });
 }
 
+export interface UpdatePaymentPayload {
+  amount_paise?: number;
+  discount_paise?: number;
+  payment_mode?: PaymentMode;
+  reference_number?: string;
+  paid_to?: string;
+  notes?: string;
+  collected_at?: string;
+  for_month?: number;
+  for_year?: number;
+}
+
+function invalidatePaymentQueries(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ['payments'] });
+  qc.invalidateQueries({ queryKey: ['rent-ledger'] });
+  qc.invalidateQueries({ queryKey: ['rent-overdue'] });
+  qc.invalidateQueries({ queryKey: ['dashboard'] });
+  qc.invalidateQueries({ queryKey: ['tenants'] });
+  qc.invalidateQueries({ queryKey: ['bookings'] });
+}
+
+export function useUpdatePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdatePaymentPayload }) =>
+      api.patch(`/payments/${id}`, data).then((r) => r.data),
+    onSuccess: () => invalidatePaymentQueries(qc),
+  });
+}
+
+export function useDeletePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/payments/${id}`).then((r) => r.data),
+    onSuccess: () => invalidatePaymentQueries(qc),
+  });
+}
+
 export function useRentLedger(params: {
   property_id?: string;
   month: number;
