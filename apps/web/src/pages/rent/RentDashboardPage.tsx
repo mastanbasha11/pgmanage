@@ -24,6 +24,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -85,6 +86,26 @@ interface LedgerEntry {
 }
 
 type LedgerStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'ALL';
+type RentTab = 'tenants' | 'payments' | 'refunds';
+
+interface Transaction {
+  id: string;
+  paid_on: string;
+  collected_at: string;
+  amount_paise: number;
+  payment_type: 'RENT' | 'ADVANCE' | 'DEPOSIT' | 'FOOD' | 'OTHER_CHARGE' | 'REFUND';
+  payment_mode: string;
+  for_month?: number | null;
+  for_year?: number | null;
+  reference_number?: string | null;
+  notes?: string | null;
+  collector: string;
+  tenant_id: string;
+  tenant_name: string;
+  tenant_phone?: string | null;
+  room_number?: string | null;
+  bed_label?: string | null;
+}
 
 function daysInMonth(month: number, year: number): number {
   return new Date(year, month, 0).getDate();
@@ -315,6 +336,7 @@ export default function RentDashboardPage() {
   const [year, setYear] = useState(cy);
   const [statusFilter, setStatusFilter] = useState<LedgerStatus>('ALL');
   const [collectorFilter, setCollectorFilter] = useState<string>('ALL');
+  const [activeTab, setActiveTab] = useState<RentTab>('tenants');
   const [payingEntry, setPayingEntry] = useState<LedgerEntry | null>(null);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [showEditClose, setShowEditClose] = useState(false);
@@ -403,6 +425,19 @@ export default function RentDashboardPage() {
     rent_paise?: number;
     advance_paise?: number;
   }> = ledger?.collectors ?? [];
+  const transactions: Transaction[] = ledger?.transactions ?? [];
+  const paymentRows = transactions.filter((t) => t.payment_type !== 'REFUND');
+  const refundRows = transactions.filter((t) => t.payment_type === 'REFUND');
+  // Group payments by tenant so duplicates jump out visually.
+  const paymentsByTenant = new Map<string, Transaction[]>();
+  for (const t of paymentRows) {
+    const arr = paymentsByTenant.get(t.tenant_id) ?? [];
+    arr.push(t);
+    paymentsByTenant.set(t.tenant_id, arr);
+  }
+  const groupedPayments = Array.from(paymentsByTenant.values()).sort(
+    (a, b) => b.length - a.length || a[0].tenant_name.localeCompare(b[0].tenant_name),
+  );
   // Backend's `collection_rate` is a percentage (e.g. 107.0); fall back to
   // a client-side calc if older response shape.
   const collectionPct = Math.round(
@@ -641,6 +676,20 @@ export default function RentDashboardPage() {
             </div>
           ) : (
             <>
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as RentTab)}>
+                <TabsList>
+                  <TabsTrigger value="tenants">Tenants ({entries.length})</TabsTrigger>
+                  <TabsTrigger value="payments">
+                    Payments ({paymentRows.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="refunds">
+                    Refunds ({refundRows.length})
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {activeTab === 'tenants' && (
+              <>
               {/* Filter bar */}
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs text-muted-foreground mr-1">Filter:</p>
@@ -847,6 +896,149 @@ export default function RentDashboardPage() {
                   </tbody>
                 </table>
               </div>
+              </>
+              )}
+
+              {activeTab === 'payments' && (
+                <div className="overflow-hidden rounded-lg border bg-card">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tenant</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Room</th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Amount</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Mode</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">For</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Collected by</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {groupedPayments.map((group) => (
+                        group.map((t, idx) => {
+                          const isDup = group.length > 1;
+                          return (
+                            <tr
+                              key={t.id}
+                              className={
+                                isDup
+                                  ? 'bg-amber-50/60 hover:bg-amber-100/60'
+                                  : 'hover:bg-muted/30'
+                              }
+                            >
+                              <td className="px-4 py-3 text-xs tabular-nums">
+                                {new Date(t.paid_on).toLocaleDateString('en-IN', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: '2-digit',
+                                })}
+                              </td>
+                              <td className="px-4 py-3 font-medium">
+                                {t.tenant_name}
+                                {isDup && idx === 0 && (
+                                  <Badge variant="outline" className="ml-2 text-[10px] border-amber-400 text-amber-700">
+                                    {group.length}× paid
+                                  </Badge>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">
+                                {t.room_number ? (
+                                  <>
+                                    {t.room_number}
+                                    {t.bed_label && <span>·{t.bed_label}</span>}
+                                  </>
+                                ) : (
+                                  <span className="text-muted-foreground/40">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium tabular-nums">
+                                {formatPaise(t.amount_paise)}
+                              </td>
+                              <td className="px-4 py-3 text-xs">
+                                <Badge variant="outline" className="text-[10px]">{t.payment_type}</Badge>
+                              </td>
+                              <td className="px-4 py-3 text-xs">{t.payment_mode}</td>
+                              <td className="px-4 py-3 text-xs text-muted-foreground">
+                                {t.for_month && t.for_year ? (
+                                  `${monthName(t.for_month).slice(0, 3)} ${t.for_year}`
+                                ) : (
+                                  <span className="text-muted-foreground/40">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-xs">{t.collector}</td>
+                            </tr>
+                          );
+                        })
+                      ))}
+                      {paymentRows.length === 0 && (
+                        <tr>
+                          <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                            No payments collected in this fiscal window.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeTab === 'refunds' && (
+                <div className="overflow-hidden rounded-lg border bg-card">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tenant</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Room</th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Amount</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Mode</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Notes</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Paid by</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {refundRows.map((t) => (
+                        <tr key={t.id} className="hover:bg-muted/30">
+                          <td className="px-4 py-3 text-xs tabular-nums">
+                            {new Date(t.paid_on).toLocaleDateString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: '2-digit',
+                            })}
+                          </td>
+                          <td className="px-4 py-3 font-medium">{t.tenant_name}</td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">
+                            {t.room_number ? (
+                              <>
+                                {t.room_number}
+                                {t.bed_label && <span>·{t.bed_label}</span>}
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground/40">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-rose-700 tabular-nums">
+                            -{formatPaise(t.amount_paise)}
+                          </td>
+                          <td className="px-4 py-3 text-xs">{t.payment_mode}</td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {t.notes ?? <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-xs">{t.collector}</td>
+                        </tr>
+                      ))}
+                      {refundRows.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                            No refunds issued in this fiscal window.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </>
           ))}
       </div>

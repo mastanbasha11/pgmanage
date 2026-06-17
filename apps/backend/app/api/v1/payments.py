@@ -445,6 +445,44 @@ async def rent_ledger(
     refunds_given = ar.get("refund_paise", 0) or 0
     rent_collected_in_period = ar.get("rent_collected_in_period_paise", 0) or 0
 
+    # Every payment in the fiscal window, with tenant + room info. The
+    # frontend's "Payments" + "Refunds" tabs render from this so the user
+    # can spot duplicates / partial payments / refunds at a glance — and
+    # so July (or any month whose ledger hasn't been generated yet) still
+    # surfaces real cash flow at the per-payment level.
+    payments_in_window = await db.execute(
+        text("""
+            SELECT
+                p.id,
+                (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date AS paid_on,
+                p.collected_at,
+                p.amount_paise,
+                p.payment_type,
+                p.payment_mode,
+                p.for_month,
+                p.for_year,
+                p.reference_number,
+                p.notes,
+                COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name, 'Unattributed') AS collector,
+                t.id AS tenant_id,
+                t.name AS tenant_name,
+                t.phone AS tenant_phone,
+                r.room_number,
+                b.bed_label
+            FROM payments p
+            JOIN tenants t ON t.id = p.tenant_id
+            LEFT JOIN beds b ON b.id = t.bed_id
+            LEFT JOIN rooms r ON r.id = b.room_id
+            LEFT JOIN users u ON u.id = p.collected_by
+            WHERE p.property_id = :pid
+              AND p.is_deleted = false
+              AND (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
+            ORDER BY p.collected_at DESC
+        """),
+        {"pid": str(property_id), "start": period_start, "end": period_end},
+    )
+    transactions = [dict(r) for r in payments_in_window.mappings().fetchall()]
+
     book_split = await db.execute(
         text("""
             SELECT
@@ -493,6 +531,8 @@ async def rent_ledger(
             ),
         },
         "collectors": collectors,
+        # Per-payment list for the Payments + Refunds tabs.
+        "transactions": transactions,
         "period": {
             "start": str(period_start),
             "end": str(period_end),
