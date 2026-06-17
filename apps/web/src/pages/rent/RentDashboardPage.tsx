@@ -567,13 +567,26 @@ export default function RentDashboardPage() {
   const transactions: Transaction[] = ledger?.transactions ?? [];
   const paymentRows = transactions.filter((t) => t.payment_type !== 'REFUND');
   const refundRows = transactions.filter((t) => t.payment_type === 'REFUND');
-  // Group payments by tenant so duplicates jump out visually.
+  // Group payments by tenant for display. A row counts as a real duplicate
+  // only when the SAME tenant has another row with the same payment_type,
+  // for_month, for_year AND amount_paise — different types (RENT vs DEPOSIT)
+  // or different amounts (full + part) are legitimate separate payments and
+  // must NOT be flagged.
   const paymentsByTenant = new Map<string, Transaction[]>();
   for (const t of paymentRows) {
     const arr = paymentsByTenant.get(t.tenant_id) ?? [];
     arr.push(t);
     paymentsByTenant.set(t.tenant_id, arr);
   }
+  const dupKey = (t: Transaction) =>
+    `${t.payment_type}|${t.for_month ?? ''}|${t.for_year ?? ''}|${t.amount_paise}`;
+  const dupKeyCounts = new Map<string, number>();
+  for (const t of paymentRows) {
+    const k = `${t.tenant_id}|${dupKey(t)}`;
+    dupKeyCounts.set(k, (dupKeyCounts.get(k) ?? 0) + 1);
+  }
+  const isDuplicate = (t: Transaction) =>
+    (dupKeyCounts.get(`${t.tenant_id}|${dupKey(t)}`) ?? 0) > 1;
   const groupedPayments = Array.from(paymentsByTenant.values()).sort(
     (a, b) => b.length - a.length || a[0].tenant_name.localeCompare(b[0].tenant_name),
   );
@@ -1055,9 +1068,11 @@ export default function RentDashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {groupedPayments.map((group) => (
-                        group.map((t, idx) => {
-                          const isDup = group.length > 1;
+                      {groupedPayments.map((group) => {
+                        const dupRowsInGroup = group.filter(isDuplicate);
+                        const firstDupId = dupRowsInGroup[0]?.id;
+                        return group.map((t) => {
+                          const isDup = isDuplicate(t);
                           return (
                             <tr
                               key={t.id}
@@ -1076,9 +1091,9 @@ export default function RentDashboardPage() {
                               </td>
                               <td className="px-4 py-3 font-medium">
                                 {t.tenant_name}
-                                {isDup && idx === 0 && (
+                                {isDup && t.id === firstDupId && (
                                   <Badge variant="outline" className="ml-2 text-[10px] border-amber-400 text-amber-700">
-                                    {group.length}× paid
+                                    duplicate
                                   </Badge>
                                 )}
                               </td>
@@ -1143,8 +1158,8 @@ export default function RentDashboardPage() {
                               </td>
                             </tr>
                           );
-                        })
-                      ))}
+                        });
+                      })}
                       {paymentRows.length === 0 && (
                         <tr>
                           <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
