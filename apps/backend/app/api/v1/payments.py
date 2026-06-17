@@ -284,7 +284,8 @@ async def rent_ledger(
                    r.room_number,
                    f.floor_number, f.display_name as floor_name,
                    rt.name as room_type,
-                   collectors.collected_by
+                   collectors.collected_by,
+                   collectors.last_paid_at AS paid_on
             FROM rent_ledger_entries rle
             JOIN tenants t ON t.id = rle.tenant_id
             LEFT JOIN beds b ON b.id = t.bed_id
@@ -294,9 +295,13 @@ async def rent_ledger(
             LEFT JOIN LATERAL (
                 -- Only attribute a "collector" when actual cash was collected.
                 -- Discount-only rows (amount = 0) shouldn't surface a name.
-                SELECT array_agg(DISTINCT COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name))
-                  FILTER (WHERE COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name) IS NOT NULL)
-                    AS collected_by
+                -- Also surface the most-recent payment date for the "Paid on"
+                -- column on the rent table.
+                SELECT
+                    array_agg(DISTINCT COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name))
+                      FILTER (WHERE COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name) IS NOT NULL)
+                        AS collected_by,
+                    MAX(p.collected_at) AS last_paid_at
                 FROM payments p
                 LEFT JOIN users u ON u.id = p.collected_by
                 WHERE p.tenant_id = rle.tenant_id
@@ -456,6 +461,18 @@ async def rent_ledger(
     advance_received += bs.get("advance_paise", 0) or 0
     rent_collected_in_period += bs.get("daily_paise", 0) or 0
 
+    # ── Headline KPIs (see project memory: project-period-attribution-rule) ─
+    # Cash-flow KPIs use the fiscal window (collected_at in [start, end]).
+    # Expected / Discount / Outstanding stay keyed to (rent month, rent year)
+    # via the ledger rows so Collection Rate (Collected/Expected) stays a
+    # meaningful "did this period's rent get caught up?" ratio.
+    #
+    # Renamed legacy field: `collected_paise` USED TO mean the sum of
+    # rent_ledger.amount_paid_paise across ledger rows (i.e. "paid toward
+    # this rent month, whenever"). It is now the fiscal-window value. The
+    # old ledger-sum is exposed as `ledger_paid_paise` for any caller still
+    # wanting that view.
+    collected_in_period = rent_collected_in_period
     return {
         "property_id": str(property_id),
         "month": month, "year": year,
@@ -463,16 +480,17 @@ async def rent_ledger(
         "total": len(items),
         "stats": {
             "expected_paise": total_due,
-            # 'collected_paise' historically meant "sum across ledger items".
-            # For the partner-style P&L we want the period-bound collection.
-            "collected_paise": total_paid,
-            "collected_in_period_paise": rent_collected_in_period,
+            "collected_paise": collected_in_period,
+            "collected_in_period_paise": collected_in_period,
+            "ledger_paid_paise": total_paid,
             "discount_paise": total_discount,
             "settled_paise": settled,
             "outstanding_paise": total_outstanding,
             "advance_received_paise": advance_received,
             "refunds_given_paise": refunds_given,
-            "collection_rate": round(settled / total_due * 100, 1) if total_due > 0 else 0,
+            "collection_rate": (
+                round(collected_in_period / total_due * 100, 1) if total_due > 0 else 0
+            ),
         },
         "collectors": collectors,
         "period": {

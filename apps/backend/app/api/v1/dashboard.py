@@ -351,8 +351,10 @@ async def dashboard_summary(
     )
     overdue_tenants = (overdue_res.mappings().fetchone() or {}).get("overdue_tenants", 0)
 
-    # Match rent page: collection rate counts both cash + discount as "settled"
-    rate = (settled / expected) if expected > 0 else 0
+    # Period attribution (project-period-attribution-rule): collection rate
+    # uses fiscal-window collected vs rent-month expected. Settled is no
+    # longer numerator — late catch-ups should still count toward rate.
+    rate = (settled / expected) if expected > 0 else 0  # placeholder, overwritten below
     occupancy_rate = (occupied / total_beds) if total_beds > 0 else 0
 
     # For Net Income we use the period-bound rent collection if a property
@@ -372,8 +374,24 @@ async def dashboard_summary(
         )
         rent_in_period = rip_res.scalar() or 0
     else:
-        rent_in_period = collected
+        # No property selected → fall back to calendar-month on collected_at
+        # so the org-wide Home KPIs still obey the fiscal-window rule.
+        rip_res = await db.execute(
+            text("""
+                SELECT COALESCE(SUM(amount_paise), 0) AS rip
+                FROM payments
+                WHERE org_id = :org_id
+                  AND is_deleted = false
+                  AND payment_type = 'RENT'
+                  AND EXTRACT(MONTH FROM collected_at AT TIME ZONE 'Asia/Kolkata') = :month
+                  AND EXTRACT(YEAR FROM collected_at AT TIME ZONE 'Asia/Kolkata') = :year
+            """),
+            params,
+        )
+        rent_in_period = rip_res.scalar() or 0
     rent_in_period += daily_bookings
+    # Recompute rate with the fiscal-window collected as the numerator.
+    rate = (rent_in_period / expected) if expected > 0 else 0
 
     # Bookings revenue is already split into rent_in_period (DAILY) and
     # advance_received (ADVANCE) above — keep the total exposed for the KPI.
@@ -384,7 +402,12 @@ async def dashboard_summary(
     return {
         # Canonical names
         "expected_rent_paise": expected,
-        "collected_rent_paise": collected,
+        # `collected_rent_paise` is now the fiscal-window value (cash actually
+        # received this period). The old ledger-roll-up lives as
+        # `ledger_paid_paise` for any caller specifically wanting "paid
+        # toward this rent month, whenever".
+        "collected_rent_paise": rent_in_period,
+        "ledger_paid_paise": collected,
         "discount_paise": discount_total,
         "outstanding_paise": outstanding_total,
         "collection_rate": round(rate, 4),                   # 0..1 fraction
@@ -406,7 +429,7 @@ async def dashboard_summary(
         "period_end": str(period_end) if period_end else None,
         # Back-compat aliases (older clients)
         "gross_rent_expected_paise": expected,
-        "rent_collected_paise": collected,
+        "rent_collected_paise": rent_in_period,
         "active_tenants": rent["total_tenants"] or 0,
     }
 

@@ -80,6 +80,8 @@ interface LedgerEntry {
   floor_number?: number;
   room_type?: string;
   collected_by?: string[] | null;
+  /** ISO timestamp of the most-recent payment toward this row, if any. */
+  paid_on?: string | null;
 }
 
 type LedgerStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'ALL';
@@ -700,6 +702,9 @@ export default function RentDashboardPage() {
                           <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
                             Discount
                           </th>
+                          <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground lg:table-cell">
+                            Paid on
+                          </th>
                           <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground xl:table-cell">
                             Collected by
                           </th>
@@ -756,6 +761,16 @@ export default function RentDashboardPage() {
                                 <span className="text-emerald-600 font-medium">
                                   {formatPaise(e.discount_paise)}
                                 </span>
+                              ) : (
+                                <span className="text-muted-foreground/40">—</span>
+                              )}
+                            </td>
+                            <td className="hidden px-4 py-3 lg:table-cell text-xs text-muted-foreground tabular-nums">
+                              {e.paid_on ? (
+                                new Date(e.paid_on).toLocaleDateString('en-IN', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                })
                               ) : (
                                 <span className="text-muted-foreground/40">—</span>
                               )}

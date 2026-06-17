@@ -458,3 +458,112 @@ async def test_outstanding_uses_per_row_clamped_sum(
         f"₹{stats['outstanding_paise'] // 100} — the aggregate-subtraction "
         "bug is back. See payments.py /rent/ledger."
     )
+
+
+# ── Period attribution rule ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_collected_kpi_uses_fiscal_window_not_for_month(
+    client: AsyncClient, test_owner: dict, test_property: dict, db: AsyncSession
+):
+    """
+    Period-attribution rule (project-period-attribution-rule):
+    A late payment for May rent that is collected on May 12 — which falls in
+    JUNE's fiscal window (11 May – 10 Jun by default settlement_day=10) —
+    must contribute to JUNE's "Collected" KPI, NOT May's, even though the
+    payment row's for_month=5.
+
+    Conversely, "Expected" is rent BILLED for that rent month, so the May
+    ledger entry stays in May's Expected — Collection Rate for June can
+    exceed 100% when prior-month catch-ups land in June's window.
+    """
+    schema = test_property["schema_name"]
+    pid = test_property["property_id"]
+    bed = test_property["bed_ids"][0]
+
+    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+
+    # Set the property's settlement_day to 10 so the June fiscal window
+    # is 11-May .. 10-Jun (the default if unset).
+    await db.execute(
+        text("UPDATE properties SET settlement_day = 10 WHERE id = :pid"),
+        {"pid": str(pid)},
+    )
+
+    t = uuid.uuid4()
+    await db.execute(
+        text("""
+            INSERT INTO tenants (id, org_id, property_id, bed_id, name, phone,
+                id_type, id_number, emergency_contact_name, emergency_contact_phone,
+                emergency_contact_relation, move_in_date, status)
+            VALUES (:id, :org, :pid, :bed, 'Late Payer', '+919000000010',
+                'AADHAR', '101010101010', 'P', '+919000000099', 'P',
+                '2024-01-01', 'ACTIVE')
+        """),
+        {"id": str(t), "org": str(test_property["org_id"]),
+         "pid": str(pid), "bed": str(bed)},
+    )
+    # May ledger row (rent billed FOR May).
+    await db.execute(
+        text("""
+            INSERT INTO rent_ledger_entries
+                (tenant_id, property_id, month, year, amount_due_paise,
+                 amount_paid_paise, discount_paise, status, due_date)
+            VALUES (:tid, :pid, 5, 2024, 1200000, 1200000, 0, 'PAID', '2024-05-01')
+        """),
+        {"tid": str(t), "pid": str(pid)},
+    )
+    # June ledger row (rent billed FOR June). Untouched for the test.
+    await db.execute(
+        text("""
+            INSERT INTO rent_ledger_entries
+                (tenant_id, property_id, month, year, amount_due_paise,
+                 amount_paid_paise, discount_paise, status, due_date)
+            VALUES (:tid, :pid, 6, 2024, 1200000, 0, 0, 'UNPAID', '2024-06-01')
+        """),
+        {"tid": str(t), "pid": str(pid)},
+    )
+    # Payment collected on 2024-05-12 — inside JUNE's fiscal window
+    # (11-May-2024 .. 10-Jun-2024). for_month=5 because it's paying off May rent.
+    from uuid import uuid4 as _uuid4
+    await db.execute(
+        text("""
+            INSERT INTO payments (
+                org_id, property_id, tenant_id, amount_paise,
+                payment_type, payment_mode, paid_to, for_month, for_year,
+                collected_by, collected_at, notes, idempotency_key
+            ) VALUES (
+                :org_id, :pid, :tid, 1200000,
+                'RENT'::payment_type_enum, 'UPI'::payment_mode_enum,
+                'Shammi', 5, 2024, :user, '2024-05-12 10:00:00+00',
+                'May rent paid late', :ikey
+            )
+        """),
+        {
+            "org_id": str(test_property["org_id"]),
+            "pid": str(pid), "tid": str(t),
+            "user": str(test_owner["user_id"]),
+            "ikey": str(_uuid4()),
+        },
+    )
+    await db.commit()
+
+    # JUNE's Collected MUST include the May 12 catch-up (collected_at in
+    # June's fiscal window) even though the payment is for_month=5.
+    r = await client.get(
+        "/api/v1/rent/ledger",
+        headers=auth_headers(test_owner["token"]),
+        params={"property_id": str(pid), "month": 6, "year": 2024},
+    )
+    assert r.status_code == 200, r.text
+    stats = r.json()["stats"]
+    assert stats["collected_paise"] == 1200000, (
+        f"June Collected must include the May-rent payment collected on May 12 "
+        f"(fiscal window 11 May - 10 Jun). Got ₹{stats['collected_paise'] // 100}. "
+        "See project-period-attribution-rule."
+    )
+    # Ledger-roll-up view is still available for callers that want it.
+    assert stats["ledger_paid_paise"] == 0, (
+        "June's ledger_paid_paise rolls up the JUNE ledger row only — should be 0 "
+        "since the catch-up payment was applied to May's ledger row."
+    )

@@ -412,7 +412,15 @@ async def test_rent_ledger_view(
 async def test_rent_ledger_stats_accuracy(
     client: AsyncClient, test_owner: dict, test_tenant: dict
 ):
-    """Ledger stats accurately reflect paid vs due amounts."""
+    """
+    Ledger stats accurately reflect paid vs due amounts.
+
+    NB: under project-period-attribution-rule, `collected_paise` is the
+    fiscal-window cash collected for the (property, month, year). We
+    pass an explicit `collected_at` in July 2024's fiscal window so the
+    payment counts. The legacy ledger-roll-up view stays available as
+    `ledger_paid_paise`.
+    """
     await client.post(
         "/api/v1/rent/generate-ledger",
         headers=auth_headers(test_owner["token"]),
@@ -422,14 +430,17 @@ async def test_rent_ledger_stats_accuracy(
             "year": 2024,
         },
     )
-    # Pay half
+    # Pay half — backdate `collected_at` into July 2024's fiscal window
+    # (default settlement_day=10 → 11-Jun..10-Jul-2024).
+    payload = _payment_payload(test_tenant["tenant_id"], amount_paise=350000, for_month=7)
+    payload["collected_at"] = "2024-07-05T10:00:00+00:00"
     await client.post(
         "/api/v1/payments",
         headers={
             **auth_headers(test_owner["token"]),
             "X-Idempotency-Key": str(uuid.uuid4()),
         },
-        json=_payment_payload(test_tenant["tenant_id"], amount_paise=350000, for_month=7),
+        json=payload,
     )
     response = await client.get(
         "/api/v1/rent/ledger",
@@ -442,7 +453,11 @@ async def test_rent_ledger_stats_accuracy(
     )
     stats = response.json()["stats"]
     assert stats["expected_paise"] == 700000
+    # Fiscal-window cash collected (the new headline number).
     assert stats["collected_paise"] == 350000
+    # Legacy ledger roll-up — still 350000 because the ledger row was
+    # incremented by the payment (for_month=7, year=2024).
+    assert stats["ledger_paid_paise"] == 350000
     assert stats["outstanding_paise"] == 350000
     assert stats["collection_rate"] == 50.0
 
