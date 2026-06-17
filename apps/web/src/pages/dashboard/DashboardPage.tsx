@@ -10,9 +10,10 @@ import {
   ArrowUpFromLine,
   Receipt,
   Users,
-  CalendarCheck,
   Wallet,
   Zap,
+  PiggyBank,
+  CalendarRange,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -180,14 +181,40 @@ export default function DashboardPage() {
       {/* Row 1: cash in/out KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KPICard
-          title="Collected Rent"
+          title="Opening Balance"
+          value={formatPaise(summary.opening_balance_paise ?? 0)}
+          sub="Carry-forward from previous month"
+          icon={PiggyBank}
+        />
+        <KPICard
+          title="Rent"
           value={formatPaise(
-            summary.collected_rent_paise ?? summary.rent_collected_paise ?? 0,
+            summary.rent_only_paise ??
+              (summary.collected_rent_paise ?? summary.rent_collected_paise ?? 0)
+              - (summary.daily_stays_paise ?? 0),
           )}
           sub={`of ${formatPaise(
             summary.expected_rent_paise ?? summary.gross_rent_expected_paise ?? 0,
           )} expected`}
           icon={IndianRupee}
+        />
+        <KPICard
+          title="Advance Received"
+          value={formatPaise(summary.advance_received_paise ?? 0)}
+          sub="Deposits + advance bookings"
+          icon={ArrowDownToLine}
+        />
+        <KPICard
+          title="Daily Stays"
+          value={formatPaise(summary.daily_stays_paise ?? 0)}
+          sub="Daily-stay bookings collected"
+          icon={CalendarRange}
+        />
+        <KPICard
+          title="Power Meters"
+          value={formatPaise(summary.power_received_paise ?? 0)}
+          sub="Prepaid meter recharges"
+          icon={Zap}
         />
         <KPICard
           title="Outstanding"
@@ -197,27 +224,21 @@ export default function DashboardPage() {
           className={summary.outstanding_paise > 0 ? 'border-amber-200' : ''}
         />
         <KPICard
-          title="Advance Received"
-          value={formatPaise(summary.advance_received_paise ?? 0)}
-          sub="Deposits + advance bookings"
-          icon={ArrowDownToLine}
+          title="Total Received"
+          value={formatPaise(
+            summary.total_received_paise ??
+              (summary.opening_balance_paise ?? 0) +
+                (summary.collected_rent_paise ?? 0) +
+                (summary.advance_received_paise ?? 0) +
+                (summary.power_received_paise ?? 0),
+          )}
+          sub="Opening + Rent + Advance + Daily + Power"
+          icon={Wallet}
         />
         <KPICard
-          title="Bookings Revenue"
-          value={formatPaise(summary.bookings_revenue_paise ?? 0)}
-          sub="Already counted in Rent + Advance"
-          icon={CalendarCheck}
-        />
-        <KPICard
-          title="Power Recharges"
-          value={formatPaise(summary.power_received_paise ?? 0)}
-          sub="Prepaid electricity meter top-ups"
-          icon={Zap}
-        />
-        <KPICard
-          title="Net Income"
+          title="Profit"
           value={formatPaise(summary.net_income_paise)}
-          sub="(Rent + Advance + Power) − (Refunds + Expenses)"
+          sub="Total Received − Total Given"
           icon={TrendingUp}
         />
       </div>
@@ -234,6 +255,15 @@ export default function DashboardPage() {
           title="Refunds Given"
           value={formatPaise(summary.refunds_given_paise ?? 0)}
           sub="security deposit refunds"
+          icon={ArrowUpFromLine}
+        />
+        <KPICard
+          title="Total Given"
+          value={formatPaise(
+            summary.total_given_paise ??
+              (summary.total_expenses_paise + (summary.refunds_given_paise ?? 0)),
+          )}
+          sub="Expenses + Refunds"
           icon={ArrowUpFromLine}
         />
         <KPICard

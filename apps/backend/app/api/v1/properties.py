@@ -724,7 +724,8 @@ async def update_bed(
 # ── Billing periods (fiscal-month overrides) ──────────────────────────────────
 
 class BillingPeriodSet(BaseModel):
-    close_date: date
+    close_date: date | None = None
+    opening_balance_paise: int | None = None
     notes: str | None = None
 
 
@@ -763,6 +764,13 @@ async def get_billing_period(
     from datetime import date as _date
     from app.services.billing_period import get_fiscal_period
     p = await get_fiscal_period(property_id, month, year, db)
+    ob_row = (await db.execute(
+        text(
+            "SELECT opening_balance_paise FROM billing_periods "
+            "WHERE property_id = :pid AND period_month = :m AND period_year = :y"
+        ),
+        {"pid": str(property_id), "m": month, "y": year},
+    )).scalar_one_or_none()
     return {
         "property_id": str(property_id),
         "month": month,
@@ -772,6 +780,7 @@ async def get_billing_period(
         "settlement_day": p.settlement_day,
         "overridden": p.overridden,
         "prev_overridden": p.prev_overridden,
+        "opening_balance_paise": int(ob_row or 0),
         "today": str(_date.today()),
     }
 
@@ -792,27 +801,46 @@ async def set_billing_period(
         raise HTTPException(403, "Only owners can set the close date")
     if month < 1 or month > 12:
         raise HTTPException(400, "Invalid month")
-    # Sanity: close_date must be in the (month, year) ± a small grace window.
-    # We accept any date in the calendar month or up to 20 days into next month
-    # (some PGs close late).
-    if body.close_date.year != year or body.close_date.month not in (month, month % 12 + 1):
-        raise HTTPException(
-            400,
-            "close_date should fall in the named month or the first ~20 days of the next month",
-        )
+    if body.close_date is not None:
+        # Sanity: close_date must be in the (month, year) ± a small grace
+        # window — calendar month or up to ~20 days into the next month.
+        if body.close_date.year != year or body.close_date.month not in (month, month % 12 + 1):
+            raise HTTPException(
+                400,
+                "close_date should fall in the named month or the first ~20 days of the next month",
+            )
+    if body.close_date is None and body.opening_balance_paise is None:
+        raise HTTPException(400, "Nothing to set — provide close_date and/or opening_balance_paise")
+    ob = max(int(body.opening_balance_paise or 0), 0)
     await db.execute(
         text("""
-            INSERT INTO billing_periods (property_id, period_month, period_year, close_date, notes)
-            VALUES (:pid, :m, :y, :d, :n)
+            INSERT INTO billing_periods
+                (property_id, period_month, period_year, close_date, opening_balance_paise, notes)
+            VALUES (:pid, :m, :y, :d, :ob, :n)
             ON CONFLICT (property_id, period_month, period_year)
-            DO UPDATE SET close_date = EXCLUDED.close_date, notes = EXCLUDED.notes,
-                          updated_at = NOW()
+            DO UPDATE SET
+                close_date = COALESCE(EXCLUDED.close_date, billing_periods.close_date),
+                opening_balance_paise = CASE
+                    WHEN :ob_set THEN EXCLUDED.opening_balance_paise
+                    ELSE billing_periods.opening_balance_paise
+                END,
+                notes = COALESCE(EXCLUDED.notes, billing_periods.notes),
+                updated_at = NOW()
         """),
-        {"pid": str(property_id), "m": month, "y": year,
-         "d": body.close_date, "n": body.notes},
+        {
+            "pid": str(property_id), "m": month, "y": year,
+            "d": body.close_date,
+            "ob": ob,
+            "ob_set": body.opening_balance_paise is not None,
+            "n": body.notes,
+        },
     )
     await db.commit()
-    return {"message": "Billing period saved", "close_date": str(body.close_date)}
+    return {
+        "message": "Billing period saved",
+        "close_date": str(body.close_date) if body.close_date else None,
+        "opening_balance_paise": ob,
+    }
 
 
 @router.delete(

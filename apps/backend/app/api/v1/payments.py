@@ -725,7 +725,18 @@ async def rent_ledger(
     )
     bs = book_split.mappings().fetchone() or {}
     advance_received += bs.get("advance_paise", 0) or 0
-    rent_collected_in_period += bs.get("daily_paise", 0) or 0
+    daily_stays = int(bs.get("daily_paise", 0) or 0)
+    rent_collected_in_period += daily_stays
+
+    # Opening balance — owner-set carry-forward from the prior month
+    ob_row = (await db.execute(
+        text(
+            "SELECT opening_balance_paise FROM billing_periods "
+            "WHERE property_id = :pid AND period_month = :m AND period_year = :y"
+        ),
+        {"pid": str(property_id), "m": month, "y": year},
+    )).scalar_one_or_none()
+    opening_balance = int(ob_row or 0)
 
     # ── Headline KPIs (see project memory: project-period-attribution-rule) ─
     # Cash-flow KPIs use the fiscal window (collected_at in [start, end]).
@@ -755,6 +766,8 @@ async def rent_ledger(
             "advance_received_paise": advance_received,
             "refunds_given_paise": refunds_given,
             "power_received_paise": power_received,
+            "daily_stays_paise": daily_stays,
+            "opening_balance_paise": opening_balance,
             "collection_rate": (
                 round(collected_in_period / total_due * 100, 1) if total_due > 0 else 0
             ),

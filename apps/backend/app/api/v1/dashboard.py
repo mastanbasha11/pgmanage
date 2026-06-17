@@ -404,10 +404,30 @@ async def dashboard_summary(
     # advance_received (ADVANCE) above — keep the total exposed for the KPI.
     bookings_revenue = advance_bookings + daily_bookings
 
+    # Opening balance — owner-set carry-forward from the prior month. Only
+    # meaningful when a single property is in scope (org-level rollup would
+    # sum opening balances across properties, which the dashboard doesn't
+    # currently show separately).
+    opening_balance = 0
+    if property_id:
+        ob_row = (await db.execute(
+            text(
+                "SELECT opening_balance_paise FROM billing_periods "
+                "WHERE property_id = :pid AND period_month = :m AND period_year = :y"
+            ),
+            {"pid": str(property_id), "m": m, "y": y},
+        )).scalar_one_or_none()
+        opening_balance = int(ob_row or 0)
+
+    # rent_in_period already includes daily_bookings (folded in above).
+    # Expose Rent-only and Daily-stays separately for the dashboard tiles.
+    rent_only = int(rent_in_period) - int(daily_bookings)
+
     # Power-meter recharges are property-level income (no tenant link) — they
     # roll into cash_in alongside rent, advance bookings, and ADVANCE/DEPOSIT
     # payments. See [[project-period-attribution-rule]].
-    cash_in = rent_in_period + advance_received + power_received
+    # Opening Balance + Rent + Advance + Daily Stays + Power = Total Received.
+    cash_in = opening_balance + rent_in_period + advance_received + power_received
     cash_out = total_expenses + refunds_given
     return {
         # Canonical names
@@ -417,15 +437,20 @@ async def dashboard_summary(
         # `ledger_paid_paise` for any caller specifically wanting "paid
         # toward this rent month, whenever".
         "collected_rent_paise": rent_in_period,
+        "rent_only_paise": rent_only,
         "ledger_paid_paise": collected,
         "discount_paise": discount_total,
         "outstanding_paise": outstanding_total,
         "collection_rate": round(rate, 4),                   # 0..1 fraction
         "advance_received_paise": advance_received,
         "bookings_revenue_paise": int(bookings_revenue),
+        "daily_stays_paise": int(daily_bookings),
         "power_received_paise": int(power_received),
+        "opening_balance_paise": int(opening_balance),
         "refunds_given_paise": refunds_given,
         "total_expenses_paise": total_expenses,
+        "total_received_paise": int(cash_in),
+        "total_given_paise": int(cash_out),
         "net_income_paise": cash_in - cash_out,
         "expenses_by_person": expenses_by_person,
         "cash_in_by_person": cash_in_by_person,

@@ -17,9 +17,13 @@ import {
   CalendarDays,
   Pencil,
   Trash2,
+  Zap,
+  CalendarRange,
+  PiggyBank,
 } from 'lucide-react';
 import AddPaymentDialog from './AddPaymentDialog';
 import EditCloseDateDialog from './EditCloseDateDialog';
+import EditOpeningBalanceDialog from './EditOpeningBalanceDialog';
 import { api } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -478,6 +482,7 @@ export default function RentDashboardPage() {
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [showEditClose, setShowEditClose] = useState(false);
   const [editingTxn, setEditingTxn] = useState<Transaction | null>(null);
+  const [showOpeningBalance, setShowOpeningBalance] = useState(false);
   const deletePayment = useDeletePayment();
   const { toast } = useToast();
 
@@ -548,6 +553,9 @@ export default function RentDashboardPage() {
   const totalOutstanding = backendStats?.outstanding_paise ?? 0;
   const advanceReceived = backendStats?.advance_received_paise ?? 0;
   const refundsGiven = backendStats?.refunds_given_paise ?? 0;
+  const dailyStays = backendStats?.daily_stays_paise ?? 0;
+  const powerReceived = backendStats?.power_received_paise ?? 0;
+  const openingBalance = backendStats?.opening_balance_paise ?? 0;
   const stats = {
     expected_paise: totalDue,
     collected_paise: totalPaid,
@@ -732,6 +740,36 @@ export default function RentDashboardPage() {
                 value={`${collectionPct}%`}
                 icon={TrendingUp}
               />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <StatCard
+                label="Daily stays"
+                value={formatPaise(dailyStays)}
+                icon={CalendarRange}
+                tone={dailyStays > 0 ? 'success' : 'default'}
+              />
+              <StatCard
+                label="Power meters"
+                value={formatPaise(powerReceived)}
+                icon={Zap}
+                tone={powerReceived > 0 ? 'success' : 'default'}
+              />
+              <Card className="cursor-pointer hover:border-accent" onClick={() => setShowOpeningBalance(true)}>
+                <CardContent className="pt-5 pb-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">Opening balance</p>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/10 text-accent">
+                      <PiggyBank className="h-4 w-4" />
+                    </div>
+                  </div>
+                  <p className="mt-1 text-2xl font-bold tabular-nums">
+                    {formatPaise(openingBalance)}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Carry-forward from previous month · Click to edit
+                  </p>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Collected by breakdown */}
@@ -1271,6 +1309,16 @@ export default function RentDashboardPage() {
       <RecordPaymentDialog entry={payingEntry} onClose={() => setPayingEntry(null)} />
       <AddPaymentDialog open={showAddPayment} onClose={() => setShowAddPayment(false)} />
       <EditPaymentDialog txn={editingTxn} onClose={() => setEditingTxn(null)} />
+      {selectedPropertyId && (
+        <EditOpeningBalanceDialog
+          open={showOpeningBalance}
+          onClose={() => setShowOpeningBalance(false)}
+          propertyId={selectedPropertyId}
+          month={month}
+          year={year}
+          currentPaise={openingBalance}
+        />
+      )}
       {selectedPropertyId && period && (
         <EditCloseDateDialog
           open={showEditClose}
