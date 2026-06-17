@@ -147,7 +147,7 @@ async def record_payment(
         prop = (await db.execute(
             text(
                 "SELECT id FROM properties WHERE id = :id AND org_id = :org_id "
-                "AND is_deleted = false"
+                "AND is_active = true"
             ),
             {"id": str(body.property_id), "org_id": str(ctx.org_id)},
         )).scalar_one_or_none()
