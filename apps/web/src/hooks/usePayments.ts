@@ -8,7 +8,8 @@ export type PaymentType =
   | 'DEPOSIT'
   | 'FOOD'
   | 'OTHER_CHARGE'
-  | 'REFUND';
+  | 'REFUND'
+  | 'POWER';
 
 export type PaymentMode = 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE';
 
@@ -32,7 +33,8 @@ export interface Payment {
 }
 
 export interface RecordPaymentPayload {
-  tenant_id: string;
+  tenant_id?: string;
+  property_id?: string;
   amount_paise: number;
   discount_paise?: number;
   for_days?: number;

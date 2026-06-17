@@ -15,6 +15,7 @@ export interface DashboardSummary {
   total_expenses_paise: number;
   advance_received_paise?: number;
   bookings_revenue_paise?: number;
+  power_received_paise?: number;
   refunds_given_paise?: number;
   net_income_paise: number;
   expenses_by_person?: ExpenseByPerson[];

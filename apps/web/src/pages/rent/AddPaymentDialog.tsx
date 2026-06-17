@@ -29,20 +29,25 @@ import { useAuthStore } from '@/store/auth';
 
 const PAYMENT_MODES = ['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE'] as const;
 
-const schema = z.object({
-  tenant_id: z.string().uuid('Pick a tenant'),
-  payment_type: z.enum([
-    'RENT', 'ADVANCE', 'DEPOSIT', 'REFUND', 'OTHER_CHARGE', 'FOOD',
-  ]),
-  amount_rupees: z.coerce.number().positive('Amount required'),
-  for_month: z.coerce.number().int().min(1).max(12),
-  for_year: z.coerce.number().int().min(2000).max(2100),
-  for_days: z.coerce.number().int().min(0).max(31).optional(),
-  payment_mode: z.enum(PAYMENT_MODES),
-  paid_to: z.string().optional(),
-  collected_at: z.string().min(1, 'Date required'),
-  notes: z.string().optional(),
-});
+const schema = z
+  .object({
+    tenant_id: z.string().optional(),
+    payment_type: z.enum([
+      'RENT', 'ADVANCE', 'DEPOSIT', 'REFUND', 'OTHER_CHARGE', 'FOOD', 'POWER',
+    ]),
+    amount_rupees: z.coerce.number().positive('Amount required'),
+    for_month: z.coerce.number().int().min(1).max(12).optional(),
+    for_year: z.coerce.number().int().min(2000).max(2100).optional(),
+    for_days: z.coerce.number().int().min(0).max(31).optional(),
+    payment_mode: z.enum(PAYMENT_MODES),
+    paid_to: z.string().optional(),
+    collected_at: z.string().min(1, 'Date required'),
+    notes: z.string().optional(),
+  })
+  .refine(
+    (d) => d.payment_type === 'POWER' || (d.tenant_id && d.tenant_id.length > 0),
+    { message: 'Pick a tenant', path: ['tenant_id'] },
+  );
 
 type FormData = z.infer<typeof schema>;
 
@@ -136,24 +141,28 @@ export default function AddPaymentDialog({
   const selectedTenant = tenants.find((t) => t.id === selectedTenantId);
   const paymentType = watch('payment_type');
   const isRent = paymentType === 'RENT';
+  const isPower = paymentType === 'POWER';
 
   async function onSubmit(data: FormData) {
     try {
       await mutateAsync({
-        tenant_id: data.tenant_id,
+        tenant_id: isPower ? undefined : data.tenant_id,
+        property_id: isPower ? selectedPropertyId ?? undefined : undefined,
         amount_paise: rupeesToPaise(data.amount_rupees),
         payment_type: data.payment_type,
         payment_mode: data.payment_mode,
-        for_month: data.for_month,
-        for_year: data.for_year,
+        for_month: isPower ? undefined : data.for_month,
+        for_year: isPower ? undefined : data.for_year,
         for_days: data.for_days,
         paid_to: data.paid_to?.trim() || undefined,
         collected_at: data.collected_at,
         notes: data.notes || undefined,
       });
       toast({
-        title: 'Payment recorded',
-        description: `${selectedTenant?.name ?? 'Tenant'} — ₹${data.amount_rupees}`,
+        title: isPower ? 'Power recharge recorded' : 'Payment recorded',
+        description: isPower
+          ? `Power meter — ₹${data.amount_rupees}`
+          : `${selectedTenant?.name ?? 'Tenant'} — ₹${data.amount_rupees}`,
       });
       reset();
       onClose();
@@ -173,6 +182,7 @@ export default function AddPaymentDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+          {!isPower && (
           <div>
             <Label>Tenant *</Label>
             {selectedTenant ? (
@@ -244,6 +254,13 @@ export default function AddPaymentDialog({
               <p className="mt-1 text-xs text-destructive">{errors.tenant_id.message}</p>
             )}
           </div>
+          )}
+          {isPower && (
+            <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              Property-level recharge — tenant not tracked. Counts toward the
+              property's cash inflow.
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -261,6 +278,7 @@ export default function AddPaymentDialog({
                   <SelectItem value="DEPOSIT">Advance — Security Deposit</SelectItem>
                   <SelectItem value="REFUND">Refund</SelectItem>
                   <SelectItem value="OTHER_CHARGE">Other charge</SelectItem>
+                  <SelectItem value="POWER">Power-meter recharge</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -278,6 +296,7 @@ export default function AddPaymentDialog({
             </div>
           </div>
 
+          {!isPower && (
           <div className="grid grid-cols-3 gap-3">
             <div>
               <Label>Month *</Label>
@@ -312,6 +331,7 @@ export default function AddPaymentDialog({
               />
             </div>
           </div>
+          )}
 
           <div>
             <Label>Collected on *</Label>
@@ -349,7 +369,11 @@ export default function AddPaymentDialog({
               <Input
                 {...register('paid_to')}
                 placeholder={
-                  paymentType === 'REFUND' ? 'Refund paid by, e.g. Mastan' : 'Suresh, Pandu...'
+                  paymentType === 'REFUND'
+                    ? 'Refund paid by, e.g. Mastan'
+                    : isPower
+                    ? 'Who collected, e.g. Shammi'
+                    : 'Suresh, Pandu...'
                 }
               />
             </div>

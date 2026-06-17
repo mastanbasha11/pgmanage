@@ -39,7 +39,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         ("bed_status_enum", "'VACANT','OCCUPIED','RESERVED','MAINTENANCE'"),
         ("id_type_enum", "'AADHAR','PASSPORT','DRIVING_LICENSE','OTHER'"),
         ("tenant_status_enum", "'ACTIVE','CHECKED_OUT','RESERVED'"),
-        ("payment_type_enum", "'RENT','ADVANCE','DEPOSIT','FOOD','OTHER_CHARGE','REFUND'"),
+        ("payment_type_enum", "'RENT','ADVANCE','DEPOSIT','FOOD','OTHER_CHARGE','REFUND','POWER'"),
         ("payment_mode_enum", "'CASH','UPI','BANK_TRANSFER','CARD','CHEQUE'"),
         ("rent_status_enum", "'PAID','PARTIAL','UNPAID','WAIVED'"),
         ("expense_approval_enum", "'PENDING','APPROVED','REJECTED'"),
@@ -66,6 +66,11 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         await db.execute(
             text(f"DO $$ BEGIN CREATE TYPE {type_name} AS ENUM ({values}); EXCEPTION WHEN duplicate_object THEN null; END $$")
         )
+    # If the enum was created by an older provisioning run, CREATE TYPE
+    # above is a no-op and any new values silently never appear. Backfill
+    # them with idempotent ADD VALUE IF NOT EXISTS.
+    await db.execute(text("ALTER TYPE payment_type_enum ADD VALUE IF NOT EXISTS 'POWER'"))
+    await db.commit()
 
     # All DDL for org schema tables
     ddl_statements = [
@@ -226,7 +231,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             org_id UUID NOT NULL,
             property_id UUID NOT NULL,
-            tenant_id UUID NOT NULL REFERENCES "{schema}".tenants(id),
+            tenant_id UUID REFERENCES "{schema}".tenants(id),
             amount_paise INTEGER NOT NULL,
             discount_paise INTEGER NOT NULL DEFAULT 0,
             for_days INTEGER,

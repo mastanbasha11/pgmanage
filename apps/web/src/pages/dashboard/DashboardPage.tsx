@@ -12,6 +12,7 @@ import {
   Users,
   CalendarCheck,
   Wallet,
+  Zap,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -208,9 +209,15 @@ export default function DashboardPage() {
           icon={CalendarCheck}
         />
         <KPICard
+          title="Power Recharges"
+          value={formatPaise(summary.power_received_paise ?? 0)}
+          sub="Prepaid electricity meter top-ups"
+          icon={Zap}
+        />
+        <KPICard
           title="Net Income"
           value={formatPaise(summary.net_income_paise)}
-          sub="(Rent + Advance) − (Refunds + Expenses)"
+          sub="(Rent + Advance + Power) − (Refunds + Expenses)"
           icon={TrendingUp}
         />
       </div>

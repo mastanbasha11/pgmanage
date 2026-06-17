@@ -150,7 +150,10 @@ async def dashboard_summary(
                     ), 0) AS advance_paise,
                     COALESCE(SUM(p.amount_paise) FILTER (
                         WHERE p.payment_type = 'REFUND'
-                    ), 0) AS refund_paise
+                    ), 0) AS refund_paise,
+                    COALESCE(SUM(p.amount_paise) FILTER (
+                        WHERE p.payment_type = 'POWER'
+                    ), 0) AS power_paise
                 FROM payments p
                 WHERE p.org_id = :org_id
                   AND p.is_deleted = false
@@ -168,7 +171,10 @@ async def dashboard_summary(
                     ), 0) AS advance_paise,
                     COALESCE(SUM(p.amount_paise) FILTER (
                         WHERE p.payment_type = 'REFUND'
-                    ), 0) AS refund_paise
+                    ), 0) AS refund_paise,
+                    COALESCE(SUM(p.amount_paise) FILTER (
+                        WHERE p.payment_type = 'POWER'
+                    ), 0) AS power_paise
                 FROM payments p
                 WHERE p.org_id = :org_id
                   AND p.is_deleted = false
@@ -181,6 +187,7 @@ async def dashboard_summary(
     adv = adv_res.mappings().fetchone() or {}
     advance_received = adv.get("advance_paise", 0) or 0
     refunds_given = adv.get("refund_paise", 0) or 0
+    power_received = adv.get("power_paise", 0) or 0
 
     # Fold bookings into rent_in_period (DAILY) + advance_received (ADVANCE).
     # This keeps the dashboard's "Advance Received" KPI consistent with the
@@ -397,7 +404,10 @@ async def dashboard_summary(
     # advance_received (ADVANCE) above — keep the total exposed for the KPI.
     bookings_revenue = advance_bookings + daily_bookings
 
-    cash_in = rent_in_period + advance_received
+    # Power-meter recharges are property-level income (no tenant link) — they
+    # roll into cash_in alongside rent, advance bookings, and ADVANCE/DEPOSIT
+    # payments. See [[project-period-attribution-rule]].
+    cash_in = rent_in_period + advance_received + power_received
     cash_out = total_expenses + refunds_given
     return {
         # Canonical names
@@ -413,6 +423,7 @@ async def dashboard_summary(
         "collection_rate": round(rate, 4),                   # 0..1 fraction
         "advance_received_paise": advance_received,
         "bookings_revenue_paise": int(bookings_revenue),
+        "power_received_paise": int(power_received),
         "refunds_given_paise": refunds_given,
         "total_expenses_paise": total_expenses,
         "net_income_paise": cash_in - cash_out,

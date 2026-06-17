@@ -21,7 +21,8 @@ router = APIRouter()
 
 
 class PaymentCreate(BaseModel):
-    tenant_id: UUID
+    tenant_id: UUID | None = None
+    property_id: UUID | None = None
     amount_paise: int
     discount_paise: int = 0
     for_days: int | None = None
@@ -138,16 +139,33 @@ async def record_payment(
     if existing.scalar_one_or_none():
         raise IdempotencyError()
 
-    # Verify tenant
-    tenant_result = await db.execute(
-        text("SELECT id, property_id, name FROM tenants WHERE id = :id AND org_id = :org_id AND is_deleted = false"),
-        {"id": str(body.tenant_id), "org_id": str(ctx.org_id)},
-    )
-    tenant = tenant_result.mappings().fetchone()
-    if not tenant:
-        raise NotFoundError("Tenant", body.tenant_id)
-
-    property_id = tenant["property_id"]
+    # POWER payments are property-level (prepaid meter recharges). All other
+    # types are tied to a tenant.
+    if body.payment_type == "POWER":
+        if not body.property_id:
+            raise HTTPException(400, "property_id required for POWER payments")
+        prop = (await db.execute(
+            text(
+                "SELECT id FROM properties WHERE id = :id AND org_id = :org_id "
+                "AND is_deleted = false"
+            ),
+            {"id": str(body.property_id), "org_id": str(ctx.org_id)},
+        )).scalar_one_or_none()
+        if not prop:
+            raise NotFoundError("Property", body.property_id)
+        property_id = body.property_id
+        tenant = None
+    else:
+        if not body.tenant_id:
+            raise HTTPException(400, "tenant_id required")
+        tenant_result = await db.execute(
+            text("SELECT id, property_id, name FROM tenants WHERE id = :id AND org_id = :org_id AND is_deleted = false"),
+            {"id": str(body.tenant_id), "org_id": str(ctx.org_id)},
+        )
+        tenant = tenant_result.mappings().fetchone()
+        if not tenant:
+            raise NotFoundError("Tenant", body.tenant_id)
+        property_id = tenant["property_id"]
     collected_at = body.collected_at or datetime.now(timezone.utc)
 
     # Create payment
@@ -170,7 +188,8 @@ async def record_payment(
         """),
         {
             "org_id": str(ctx.org_id), "pid": str(property_id),
-            "tenant_id": str(body.tenant_id), "amount": body.amount_paise,
+            "tenant_id": str(body.tenant_id) if body.tenant_id else None,
+            "amount": body.amount_paise,
             "discount": max(int(body.discount_paise or 0), 0),
             "for_days": body.for_days,
             "pay_type": body.payment_type, "pay_mode": body.payment_mode,
@@ -242,21 +261,26 @@ async def record_payment(
     )
 
     _is_advance = body.payment_type == "ADVANCE"
+    _is_power = body.payment_type == "POWER"
     _rupees = f"₹{body.amount_paise / 100:,.0f}"
+    _entity_name = tenant["name"] if tenant else "Power meter"
+    _description = (
+        f"{ctx.name} recorded {_rupees} power-meter recharge"
+        if _is_power
+        else f"{ctx.name} recorded {_rupees} "
+        f"{'advance' if _is_advance else body.payment_type.lower() + ' payment'} "
+        f"for {_entity_name}"
+    )
     await log_event(
         db,
         Event.ADVANCE_RECORDED if _is_advance else Event.PAYMENT_RECORDED,
-        description=(
-            f"{ctx.name} recorded {_rupees} "
-            f"{'advance' if _is_advance else body.payment_type.lower() + ' payment'} "
-            f"for {tenant['name']}"
-        ),
+        description=_description,
         actor_user_id=ctx.user_id,
         actor_role=ctx.role,
         actor_name=ctx.name,
         entity_type="payment",
         entity_id=payment_id,
-        entity_name=tenant["name"],
+        entity_name=_entity_name,
         property_id=property_id,
         tenant_id=body.tenant_id,
         metadata={
@@ -320,7 +344,7 @@ async def list_payments(
                    t.name as tenant_name, t.phone as tenant_phone,
                    u.name as collected_by_name
             FROM payments p
-            JOIN tenants t ON t.id = p.tenant_id
+            LEFT JOIN tenants t ON t.id = p.tenant_id
             LEFT JOIN users u ON u.id = p.collected_by
             WHERE {where}
             ORDER BY p.collected_at DESC
@@ -632,7 +656,10 @@ async def rent_ledger(
                 ), 0) AS refund_paise,
                 COALESCE(SUM(amount_paise) FILTER (
                     WHERE payment_type = 'RENT'
-                ), 0) AS rent_collected_in_period_paise
+                ), 0) AS rent_collected_in_period_paise,
+                COALESCE(SUM(amount_paise) FILTER (
+                    WHERE payment_type = 'POWER'
+                ), 0) AS power_paise
             FROM payments
             WHERE property_id = :pid
               AND is_deleted = false
@@ -644,6 +671,7 @@ async def rent_ledger(
     advance_received = ar.get("advance_paise", 0) or 0
     refunds_given = ar.get("refund_paise", 0) or 0
     rent_collected_in_period = ar.get("rent_collected_in_period_paise", 0) or 0
+    power_received = ar.get("power_paise", 0) or 0
 
     # Every payment in the fiscal window, with tenant + room info. The
     # frontend's "Payments" + "Refunds" tabs render from this so the user
@@ -664,13 +692,13 @@ async def rent_ledger(
                 p.reference_number,
                 p.notes,
                 COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name, 'Unattributed') AS collector,
-                t.id AS tenant_id,
-                t.name AS tenant_name,
+                p.tenant_id,
+                COALESCE(t.name, 'Power meter') AS tenant_name,
                 t.phone AS tenant_phone,
                 r.room_number,
                 b.bed_label
             FROM payments p
-            JOIN tenants t ON t.id = p.tenant_id
+            LEFT JOIN tenants t ON t.id = p.tenant_id
             LEFT JOIN beds b ON b.id = t.bed_id
             LEFT JOIN rooms r ON r.id = b.room_id
             LEFT JOIN users u ON u.id = p.collected_by
@@ -726,6 +754,7 @@ async def rent_ledger(
             "outstanding_paise": total_outstanding,
             "advance_received_paise": advance_received,
             "refunds_given_paise": refunds_given,
+            "power_received_paise": power_received,
             "collection_rate": (
                 round(collected_in_period / total_due * 100, 1) if total_due > 0 else 0
             ),

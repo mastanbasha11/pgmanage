@@ -96,14 +96,14 @@ interface Transaction {
   paid_on: string;
   collected_at: string;
   amount_paise: number;
-  payment_type: 'RENT' | 'ADVANCE' | 'DEPOSIT' | 'FOOD' | 'OTHER_CHARGE' | 'REFUND';
+  payment_type: 'RENT' | 'ADVANCE' | 'DEPOSIT' | 'FOOD' | 'OTHER_CHARGE' | 'REFUND' | 'POWER';
   payment_mode: string;
   for_month?: number | null;
   for_year?: number | null;
   reference_number?: string | null;
   notes?: string | null;
   collector: string;
-  tenant_id: string;
+  tenant_id: string | null;
   tenant_name: string;
   tenant_phone?: string | null;
   room_number?: string | null;
@@ -574,19 +574,21 @@ export default function RentDashboardPage() {
   // must NOT be flagged.
   const paymentsByTenant = new Map<string, Transaction[]>();
   for (const t of paymentRows) {
-    const arr = paymentsByTenant.get(t.tenant_id) ?? [];
+    const key = t.tenant_id ?? '__power__';
+    const arr = paymentsByTenant.get(key) ?? [];
     arr.push(t);
-    paymentsByTenant.set(t.tenant_id, arr);
+    paymentsByTenant.set(key, arr);
   }
   const dupKey = (t: Transaction) =>
     `${t.payment_type}|${t.for_month ?? ''}|${t.for_year ?? ''}|${t.amount_paise}`;
   const dupKeyCounts = new Map<string, number>();
   for (const t of paymentRows) {
+    if (!t.tenant_id) continue; // POWER rows aren't per-tenant — skip dup flag
     const k = `${t.tenant_id}|${dupKey(t)}`;
     dupKeyCounts.set(k, (dupKeyCounts.get(k) ?? 0) + 1);
   }
   const isDuplicate = (t: Transaction) =>
-    (dupKeyCounts.get(`${t.tenant_id}|${dupKey(t)}`) ?? 0) > 1;
+    t.tenant_id ? (dupKeyCounts.get(`${t.tenant_id}|${dupKey(t)}`) ?? 0) > 1 : false;
   const groupedPayments = Array.from(paymentsByTenant.values()).sort(
     (a, b) => b.length - a.length || a[0].tenant_name.localeCompare(b[0].tenant_name),
   );
