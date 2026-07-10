@@ -21,6 +21,7 @@ import TeamPage from '@/pages/settings/TeamPage';
 import AuditLogsPage from '@/pages/audit-logs/AuditLogsPage';
 import WebsiteIntegrationPage from '@/pages/settings/WebsiteIntegrationPage';
 import WhatsAppPage from '@/pages/settings/WhatsAppPage';
+import MessageLogPage from '@/pages/settings/MessageLogPage';
 import MenuPage from '@/pages/settings/MenuPage';
 import InboxPage from '@/pages/inbox/InboxPage';
 import PrivacyPage from '@/pages/legal/PrivacyPage';
@@ -159,6 +160,7 @@ export default function App() {
                     <Route path="settings/menu" element={<MenuPage />} />
                     <Route path="inbox" element={<InboxPage />} />
                     <Route path="settings/whatsapp" element={<WhatsAppPage />} />
+                    <Route path="settings/messages" element={<MessageLogPage />} />
                     <Route path="audit-logs" element={<AuditLogsPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>

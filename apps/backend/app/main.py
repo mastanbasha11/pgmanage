@@ -1,17 +1,39 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-
-import redis.asyncio as aioredis
 from pathlib import Path
 
-from fastapi import FastAPI
+import redis.asyncio as aioredis
+from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.staticfiles import StaticFiles
 
+from app.api.platform import admin as platform_admin
+
+# ── Routers ───────────────────────────────────────────────────────────────────
+from app.api.v1 import (
+    announcements,
+    audit_logs,
+    auth,
+    bookings,
+    complaints,
+    dashboard,
+    expenses,
+    inbox,
+    leads,
+    menu,
+    notifications,
+    payments,
+    properties,
+    public_leads,
+    rooms,
+    tenant_portal,
+    tenants,
+    webhooks,
+)
 from app.core.config import settings
 from app.core.database import engine
 from app.core.exceptions import (
@@ -26,29 +48,6 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     WebsiteLeadCorsMiddleware,
 )
-
-# ── Routers ───────────────────────────────────────────────────────────────────
-from app.api.v1 import (
-    auth,
-    properties,
-    rooms,
-    tenants,
-    payments,
-    expenses,
-    leads,
-    announcements,
-    complaints,
-    dashboard,
-    tenant_portal,
-    webhooks,
-    bookings,
-    audit_logs,
-    public_leads,
-    menu,
-    inbox,
-)
-from app.api.platform import admin as platform_admin
-from fastapi import HTTPException
 
 
 @asynccontextmanager
@@ -79,7 +78,10 @@ async def lifespan(app: FastAPI):
         from apscheduler.triggers.cron import CronTrigger
         from pytz import timezone as _tz
 
-        from app.tasks.rent_reminders import _generate_and_remind, _send_overdue_reminders
+        from app.tasks.rent_reminders import (
+            _generate_and_remind,
+            _send_overdue_reminders,
+        )
 
         ist = _tz("Asia/Kolkata")
         scheduler = AsyncIOScheduler(timezone=ist)
@@ -196,6 +198,7 @@ app.include_router(public_leads.router, prefix=V1, tags=["public-leads"])
 app.include_router(tenant_portal.router, prefix=V1, tags=["tenant-portal"])
 app.include_router(menu.router, prefix=V1, tags=["menu"])
 app.include_router(inbox.router, prefix=V1, tags=["inbox"])
+app.include_router(notifications.router, prefix=V1, tags=["notifications"])
 app.include_router(webhooks.router, prefix=V1, tags=["webhooks"])
 app.include_router(platform_admin.router, prefix="/api/platform", tags=["platform-admin"])
 

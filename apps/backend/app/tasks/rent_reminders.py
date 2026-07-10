@@ -10,11 +10,14 @@ from datetime import date, datetime
 
 import pytz
 
+from app.core.config import settings
+
 IST = pytz.timezone("Asia/Kolkata")
 
 
 async def _generate_and_remind(event: dict, context) -> dict:
     from sqlalchemy import text
+
     from app.core.database import AsyncSessionLocal, set_schema
 
     now_ist = datetime.now(IST)
@@ -112,6 +115,7 @@ async def _generate_and_remind(event: dict, context) -> dict:
 async def _send_overdue_reminders(event: dict, context) -> dict:
     """Called on billing_day + 5. Sends overdue notices to UNPAID/PARTIAL tenants."""
     from sqlalchemy import text
+
     from app.core.database import AsyncSessionLocal, set_schema
 
     now_ist = datetime.now(IST)
@@ -131,6 +135,10 @@ async def _send_overdue_reminders(event: dict, context) -> dict:
             try:
                 await set_schema(db, schema_name)
 
+                # Only chase entries that are (a) past their due_date by at least
+                # OVERDUE_GRACE_DAYS, and (b) haven't already been sent an overdue
+                # notice within the last OVERDUE_REPEAT_DAYS — so a single unpaid
+                # tenant gets one notice every few days, not one every morning.
                 overdue_result = await db.execute(
                     text("""
                         SELECT t.id, t.name, t.phone, t.property_id,
@@ -140,8 +148,22 @@ async def _send_overdue_reminders(event: dict, context) -> dict:
                         WHERE rle.month = :month AND rle.year = :year
                             AND rle.status IN ('UNPAID', 'PARTIAL')
                             AND t.status = 'ACTIVE'
+                            AND t.is_deleted = false
+                            AND rle.due_date + :grace_days <= CURRENT_DATE
+                            AND NOT EXISTS (
+                                SELECT 1 FROM notification_log nl
+                                WHERE nl.recipient_id = t.id
+                                    AND nl.channel = 'WHATSAPP'
+                                    AND nl.template_name = 'rent_overdue'
+                                    AND nl.status = 'SENT'
+                                    AND nl.sent_at >= NOW() - (:repeat_days * INTERVAL '1 day')
+                            )
                     """),
-                    {"month": month, "year": year},
+                    {
+                        "month": month, "year": year,
+                        "grace_days": settings.OVERDUE_GRACE_DAYS,
+                        "repeat_days": settings.OVERDUE_REPEAT_DAYS,
+                    },
                 )
                 overdue = overdue_result.mappings().fetchall()
 

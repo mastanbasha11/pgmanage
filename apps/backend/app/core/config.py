@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     # exactly one prod replica (we currently run a single backend container).
     SCHEDULER_ENABLED: bool = False
 
+    # ── Rent overdue chasing (rent_overdue_daily job) ────────────────────────
+    # Grace: don't send an overdue notice until this many days AFTER the
+    # ledger due_date (so tenants aren't chased the moment rent is generated).
+    # Repeat: after the first overdue notice, wait this many days before the
+    # next one for the same tenant/month — prevents daily WhatsApp spam.
+    OVERDUE_GRACE_DAYS: int = 3
+    OVERDUE_REPEAT_DAYS: int = 3
+
     # ── CORS / Trusted hosts ─────────────────────────────────────────────────
     # Accepts either a JSON array string or a comma-separated list.
     CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:3001"]'
@@ -146,7 +154,7 @@ class Settings(BaseSettings):
         return "RS256" if self.use_rs256 else self.ALGORITHM
 
     @model_validator(mode="after")
-    def validate_production_settings(self) -> "Settings":
+    def validate_production_settings(self) -> Settings:
         if self.is_production:
             if not self.RS256_PRIVATE_KEY:
                 raise ValueError("RS256_PRIVATE_KEY must be set in production")
