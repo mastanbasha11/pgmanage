@@ -277,11 +277,12 @@ async def _handle_status(db, st: dict) -> None:
         text(
             """
             UPDATE notification_log SET
-                delivery_status = :state,
-                delivered_at = CASE WHEN :state IN ('delivered','read')
-                                    THEN to_timestamp(:ts) ELSE delivered_at END,
-                error_message = COALESCE(:err, error_message)
-            WHERE external_message_id = :mid
+                delivery_status = CAST(:state AS varchar),
+                delivered_at = CASE WHEN CAST(:state AS varchar) IN ('delivered','read')
+                                    THEN to_timestamp(CAST(:ts AS bigint))
+                                    ELSE delivered_at END,
+                error_message = COALESCE(CAST(:err AS text), error_message)
+            WHERE external_message_id = CAST(:mid AS varchar)
             """
         ),
         {"state": state, "ts": int(ts) if ts else None, "err": err, "mid": msg_id},
@@ -345,8 +346,12 @@ async def whatsapp_inbound(
                 continue  # unknown number — not one of ours
             await set_schema(db, route["schema_name"])
             # Delivery receipts (sent/delivered/read/failed) update the sent row.
+            # One malformed callback must not 500 the batch (Meta would retry-storm).
             for st in statuses:
-                await _handle_status(db, st)
+                try:
+                    await _handle_status(db, st)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[wa-status] skipped: {exc}")
                 processed += 1
             for msg in messages:
                 body = (msg.get("text") or {}).get("body", "")
