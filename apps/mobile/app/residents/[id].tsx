@@ -86,7 +86,7 @@ export default function ResidentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const qc = useQueryClient();
-  const { canAccessFinancials } = useAppStore();
+  const { canRecordPayments } = useAppStore();
   const [showNotice, setShowNotice] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [idUploading, setIdUploading] = useState(false);
@@ -168,7 +168,7 @@ export default function ResidentDetailScreen() {
 
         {/* Actions */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-          {isActive && canAccessFinancials() && (
+          {isActive && canRecordPayments() && (
             <Button
               variant="primary"
               iconName="cash-outline"

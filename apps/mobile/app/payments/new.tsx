@@ -13,7 +13,7 @@
  * Mirrors the split between web's AddPaymentDialog (/payments) and
  * BookingsPage (/bookings) but in one screen.
  *
- * Owner/Partner only (canAccessFinancials gate).
+ * OWNER / PARTNER / PROPERTY_MANAGER only (canRecordPayments gate).
  */
 import { useEffect, useState } from 'react';
 import {
@@ -86,25 +86,29 @@ export default function AddPaymentScreen() {
     name?: string;
     month?: string;
     year?: string;
+    /** Set to "GUEST" to pre-select the booking mode from a quick action. */
+    mode?: string;
   }>();
   const router = useRouter();
   const qc = useQueryClient();
-  const { selectedPropertyId, canAccessFinancials } = useAppStore();
+  const { selectedPropertyId, canRecordPayments } = useAppStore();
 
-  // Owner/Partner only.
+  // Owner / Partner / Property manager only.
   useEffect(() => {
-    if (!canAccessFinancials()) {
-      Alert.alert('Not allowed', 'Only owners and partners can record payments.');
+    if (!canRecordPayments()) {
+      Alert.alert(
+        'Not allowed',
+        'Only owners, partners, and property managers can record payments.',
+      );
       router.back();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Mode pickers ──────────────────────────────────────────────────────────
-  // Default to TENANT when a tenant_id is pre-filled (came from a tenant
-  // page); GUEST otherwise (came from the Dashboard quick action).
+  // Precedence: explicit ?mode=GUEST > pre-filled tenant_id > TENANT default.
   const [entryMode, setEntryMode] = useState<EntryMode>(
-    params.tenant_id ? 'TENANT' : 'TENANT',
+    params.mode === 'GUEST' ? 'GUEST' : 'TENANT',
   );
 
   // ── TENANT mode state ────────────────────────────────────────────────────

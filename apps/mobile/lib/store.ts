@@ -45,6 +45,12 @@ interface AppState {
   setVoiceGuidance: (on: boolean) => void;
   logout: () => Promise<void>;
   canAccessFinancials: () => boolean;
+  /**
+   * Property managers collect rent + create bookings but don't get the money
+   * summary KPIs — this mirrors the backend's require-role gate on
+   * PATCH/DELETE /payments and /bookings (OWNER|PARTNER|PROPERTY_MANAGER).
+   */
+  canRecordPayments: () => boolean;
 }
 
 export const useAppStore = create<AppState>()(
@@ -78,6 +84,11 @@ export const useAppStore = create<AppState>()(
       canAccessFinancials: () => {
         const role = get().user?.role;
         return role === 'OWNER' || role === 'PARTNER';
+      },
+
+      canRecordPayments: () => {
+        const role = get().user?.role;
+        return role === 'OWNER' || role === 'PARTNER' || role === 'PROPERTY_MANAGER';
       },
     }),
     {

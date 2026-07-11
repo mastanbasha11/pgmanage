@@ -60,10 +60,17 @@ interface DashSummary {
 type Section = 'occupancy' | 'rent' | 'pnl';
 
 export default function DashboardTab() {
-  const { user, selectedPropertyId, voiceGuidance, canAccessFinancials } = useAppStore();
+  const {
+    user,
+    selectedPropertyId,
+    voiceGuidance,
+    canAccessFinancials,
+    canRecordPayments,
+  } = useAppStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const hasFinancials = canAccessFinancials();
+  const canRecord = canRecordPayments();
   const [section, setSection] = useState<Section>('occupancy');
 
   // /dashboard/summary is owner-only on the backend; skip the query entirely
@@ -151,19 +158,31 @@ export default function DashboardTab() {
           </Card>
         )}
 
-        {/* Quick actions — unchanged from previous build. Take Payment + Add
-            Booking are owner/partner-only (RBAC mirror of web). */}
+        {/* Quick actions. Record Payment + Add Booking are visible to
+            OWNER / PARTNER / PROPERTY_MANAGER (canRecordPayments) — matches
+            the backend's PATCH/DELETE gate on payments/bookings. */}
         <Card>
           <Text style={styles.qaTitle}>Quick actions</Text>
           <View style={{ gap: space.sm }}>
-            {hasFinancials && (
-              <Button
-                variant="primary"
-                iconName="cash-outline"
-                label={t('res.record_payment')}
-                onPress={() => router.push('/payments/new')}
-                block
-              />
+            {canRecord && (
+              <>
+                <Button
+                  variant="primary"
+                  iconName="cash-outline"
+                  label={t('res.record_payment')}
+                  onPress={() => router.push('/payments/new')}
+                  block
+                />
+                <Button
+                  variant="secondary"
+                  iconName="calendar-outline"
+                  label="Add booking"
+                  onPress={() =>
+                    router.push({ pathname: '/payments/new', params: { mode: 'GUEST' } })
+                  }
+                  block
+                />
+              </>
             )}
             <Button
               variant="secondary"
