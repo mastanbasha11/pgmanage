@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from uuid import UUID
 
 import httpx
 
 from app.core.config import settings
-
 
 # ── WhatsApp message templates ────────────────────────────────────────────────
 
@@ -441,7 +439,7 @@ async def send_rent_reminder(
     db,
     property_name: str = "",
     room_label: str = "",
-) -> None:
+) -> dict:
     amount_rupees = f"₹{amount_paise // 100:,}"
     context = {
         "tenant_name": tenant_name,
@@ -471,6 +469,7 @@ async def send_rent_reminder(
         status=status, external_message_id=result.get("message_id"),
         error_message=result.get("error"), db=db,
     )
+    return result
 
 
 async def send_rent_overdue(
@@ -486,7 +485,7 @@ async def send_rent_overdue(
     days_overdue: int = 0,
     upi_vpa: str = "",
     property_name: str = "",
-) -> None:
+) -> dict:
     amount_rupees = f"₹{amount_paise // 100:,}"
     context = {
         "tenant_name": tenant_name,
@@ -515,3 +514,4 @@ async def send_rent_overdue(
         status=status, external_message_id=result.get("message_id"),
         error_message=result.get("error"), db=db,
     )
+    return result

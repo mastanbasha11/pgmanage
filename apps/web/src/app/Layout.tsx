@@ -18,6 +18,7 @@ import {
   Globe,
   MessageSquare,
   Send,
+  Activity,
   UtensilsCrossed,
   Inbox,
 } from 'lucide-react';
@@ -58,6 +59,7 @@ const NAV_ITEMS = [
   { to: '/settings/menu', icon: UtensilsCrossed, label: 'Menu' },
   { to: '/settings/whatsapp', icon: MessageSquare, label: 'WhatsApp', ownerOnly: true },
   { to: '/settings/messages', icon: Send, label: 'Message Log', ownerOnly: true },
+  { to: '/settings/jobs', icon: Activity, label: 'Job Monitor', ownerOnly: true },
   { to: '/settings/team', icon: UserCog, label: 'Team', ownerOnly: true },
 ];
 

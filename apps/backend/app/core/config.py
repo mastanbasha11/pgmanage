@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # next one for the same tenant/month — prevents daily WhatsApp spam.
     OVERDUE_GRACE_DAYS: int = 3
     OVERDUE_REPEAT_DAYS: int = 3
+    # Fills the {{manager_phone}} placeholder in the overdue template. Meta
+    # rejects empty template params, so the job falls back to the org's
+    # WhatsApp number and finally this literal if both are unset.
+    OVERDUE_MANAGER_PHONE: str = ""
 
     # ── CORS / Trusted hosts ─────────────────────────────────────────────────
     # Accepts either a JSON array string or a comma-separated list.

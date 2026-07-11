@@ -22,6 +22,7 @@ import AuditLogsPage from '@/pages/audit-logs/AuditLogsPage';
 import WebsiteIntegrationPage from '@/pages/settings/WebsiteIntegrationPage';
 import WhatsAppPage from '@/pages/settings/WhatsAppPage';
 import MessageLogPage from '@/pages/settings/MessageLogPage';
+import JobMonitorPage from '@/pages/settings/JobMonitorPage';
 import MenuPage from '@/pages/settings/MenuPage';
 import InboxPage from '@/pages/inbox/InboxPage';
 import PrivacyPage from '@/pages/legal/PrivacyPage';
@@ -161,6 +162,7 @@ export default function App() {
                     <Route path="inbox" element={<InboxPage />} />
                     <Route path="settings/whatsapp" element={<WhatsAppPage />} />
                     <Route path="settings/messages" element={<MessageLogPage />} />
+                    <Route path="settings/jobs" element={<JobMonitorPage />} />
                     <Route path="audit-logs" element={<AuditLogsPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>

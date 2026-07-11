@@ -23,6 +23,7 @@ from app.api.v1 import (
     dashboard,
     expenses,
     inbox,
+    job_runs,
     leads,
     menu,
     notifications,
@@ -199,6 +200,7 @@ app.include_router(tenant_portal.router, prefix=V1, tags=["tenant-portal"])
 app.include_router(menu.router, prefix=V1, tags=["menu"])
 app.include_router(inbox.router, prefix=V1, tags=["inbox"])
 app.include_router(notifications.router, prefix=V1, tags=["notifications"])
+app.include_router(job_runs.router, prefix=V1, tags=["job-runs"])
 app.include_router(webhooks.router, prefix=V1, tags=["webhooks"])
 app.include_router(platform_admin.router, prefix="/api/platform", tags=["platform-admin"])
 
