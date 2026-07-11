@@ -25,8 +25,9 @@ _ADMIN = require_roles(["OWNER", "PARTNER"])
 
 _COLUMNS = """
     nl.id, nl.created_at, nl.sent_at, nl.channel, nl.template_name,
-    nl.message_body, nl.status, nl.external_message_id, nl.error_message,
-    nl.recipient_type, nl.recipient_id, nl.property_id,
+    nl.message_body, nl.rendered_message, nl.status, nl.external_message_id,
+    nl.error_message, nl.recipient_type, nl.recipient_id, nl.recipient_phone,
+    nl.delivery_status, nl.delivered_at, nl.property_id,
     t.name AS tenant_name, t.phone AS tenant_phone,
     p.name AS property_name
 """
@@ -45,11 +46,15 @@ def _serialize(row: Any) -> dict:
         "channel": row.channel,
         "template_name": row.template_name,
         "message_body": row.message_body,
+        "rendered_message": row.rendered_message,
         "status": row.status,
+        "delivery_status": row.delivery_status,
+        "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
         "external_message_id": row.external_message_id,
         "error_message": row.error_message,
         "recipient_type": row.recipient_type,
         "recipient_id": str(row.recipient_id) if row.recipient_id else None,
+        "recipient_phone": row.recipient_phone,
         "property_id": str(row.property_id) if row.property_id else None,
         "property_name": getattr(row, "property_name", None),
         "tenant_name": getattr(row, "tenant_name", None),
@@ -93,7 +98,10 @@ async def list_notifications(
         where.append("COALESCE(nl.sent_at, nl.created_at) < (:date_to::date + 1)")
         params["date_to"] = date_to
     if search:
-        where.append("(t.name ILIKE :search OR t.phone ILIKE :search)")
+        where.append(
+            "(t.name ILIKE :search OR t.phone ILIKE :search "
+            "OR nl.recipient_phone ILIKE :search)"
+        )
         params["search"] = f"%{search}%"
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""

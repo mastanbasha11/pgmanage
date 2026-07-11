@@ -122,9 +122,41 @@ async def download_job_run_log(
     stamp = row.started_at.strftime("%Y%m%d-%H%M%S") if row.started_at else "unknown"
     filename = f"{row.job_name}_{stamp}.{fmt}"
 
+    # Per-message detail for THIS org, from notification_log within the run window
+    # (search_path is the caller's org, so owners only see their own messages).
+    messages: list[dict] = []
+    if row.started_at:
+        msg_rows = (
+            await db.execute(
+                text("""
+                    SELECT recipient_phone, rendered_message, message_body,
+                           sent_at, delivered_at, status, delivery_status, error_message
+                    FROM notification_log
+                    WHERE channel = 'WHATSAPP'
+                      AND created_at BETWEEN :start AND COALESCE(:finish, NOW())
+                      AND template_name IN ('rent_reminder', 'rent_overdue')
+                    ORDER BY created_at
+                """),
+                {"start": row.started_at, "finish": row.finished_at},
+            )
+        ).fetchall()
+        messages = [
+            {
+                "to": m.recipient_phone,
+                "message": m.rendered_message or m.message_body,
+                "triggered_at": m.sent_at.isoformat() if m.sent_at else None,
+                "delivered_at": m.delivered_at.isoformat() if m.delivered_at else None,
+                "status": m.status,
+                "delivery_status": m.delivery_status,
+                "error": m.error_message,
+            }
+            for m in msg_rows
+        ]
+
     if fmt == "json":
         body = json.dumps(
-            {**_serialize(row), "details": details}, indent=2, default=str
+            {**_serialize(row), "details": details, "messages": messages},
+            indent=2, default=str,
         )
         media = "application/json"
     else:
@@ -161,6 +193,20 @@ async def download_job_run_log(
             lines += [f"- {e.get('org_id')}: {e.get('error')}" for e in errors]
         if details.get("fatal_error"):
             lines += ["", f"FATAL: {details['fatal_error']}"]
+
+        lines += ["", f"Messages sent this run ({len(messages)})", "=" * 40]
+        for m in messages:
+            state = m["delivery_status"] or m["status"]
+            lines += [
+                "",
+                f"To:         {m['to'] or '—'}",
+                f"Status:     {state}" + (f"  ERROR: {m['error']}" if m["error"] else ""),
+                f"Triggered:  {m['triggered_at'] or '—'}",
+                f"Delivered:  {m['delivered_at'] or '—'}",
+                "Message:",
+                (m["message"] or "").rstrip(),
+                "-" * 40,
+            ]
         body = "\n".join(lines) + "\n"
         media = "text/plain"
 

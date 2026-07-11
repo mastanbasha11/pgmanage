@@ -157,9 +157,9 @@ async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | No
                 "SELECT whatsapp_phone_number_id, whatsapp_access_token_secret_arn, "
                 "       whatsapp_access_token, "
                 "       wa_rent_reminder_template_name, wa_rent_reminder_template_language, "
-                "       wa_rent_reminder_template_params, "
+                "       wa_rent_reminder_template_params, wa_rent_reminder_template_body, "
                 "       wa_rent_overdue_template_name,  wa_rent_overdue_template_language, "
-                "       wa_rent_overdue_template_params "
+                "       wa_rent_overdue_template_params, wa_rent_overdue_template_body "
                 "FROM properties WHERE id = :id"
             ),
             {"id": str(property_id)},
@@ -194,11 +194,39 @@ async def _get_property_whatsapp_credentials(property_id: UUID, db) -> dict | No
             "wa_rent_reminder_template_name":     row["wa_rent_reminder_template_name"],
             "wa_rent_reminder_template_language": row["wa_rent_reminder_template_language"],
             "wa_rent_reminder_template_params":   row["wa_rent_reminder_template_params"],
+            "wa_rent_reminder_template_body":     row["wa_rent_reminder_template_body"],
             "wa_rent_overdue_template_name":      row["wa_rent_overdue_template_name"],
             "wa_rent_overdue_template_language":  row["wa_rent_overdue_template_language"],
             "wa_rent_overdue_template_params":    row["wa_rent_overdue_template_params"],
+            "wa_rent_overdue_template_body":      row["wa_rent_overdue_template_body"],
         },
     }
+
+
+# Maps template key → the DB column holding its approved body text.
+_BODY_COLUMNS: dict[str, str] = {
+    "rent_reminder": "wa_rent_reminder_template_body",
+    "rent_overdue": "wa_rent_overdue_template_body",
+}
+
+
+def _render_message(template_name: str, overrides: dict, final_params: list[str]) -> str:
+    """
+    Reconstruct the final message the resident sees: the approved template body
+    with each {{N}} replaced by the value we sent. Falls back to a readable
+    "template — v1 | v2 | …" line when the body hasn't been saved for this
+    property yet (so the log is never empty).
+    """
+    body_col = _BODY_COLUMNS.get(template_name)
+    body = overrides.get(body_col) if body_col else None
+    if body:
+        rendered = body
+        for i, val in enumerate(final_params, start=1):
+            rendered = rendered.replace(f"{{{{{i}}}}}", str(val))
+        return rendered
+    if final_params:
+        return f"{template_name} — " + " | ".join(str(p) for p in final_params)
+    return template_name
 
 
 async def send_whatsapp_template(
@@ -238,6 +266,7 @@ async def send_whatsapp_template(
     # Resolve params: per-property config first, then the legacy ordered list.
     params_config = _params_config_for(template_name, overrides)
     final_params = _build_params(params_config, context or {}, template_params)
+    rendered = _render_message(template_name, overrides, final_params)
 
     template_block: dict = {
         "name": meta_name,
@@ -263,7 +292,7 @@ async def send_whatsapp_template(
     if settings.is_local:
         # In local dev, just log and return success
         print(f"[WA] {template_name} → {phone}: {final_params}")
-        return {"success": True, "message_id": "dev_mock_id"}
+        return {"success": True, "message_id": "dev_mock_id", "rendered": rendered, "to": phone}
 
     try:
         async with httpx.AsyncClient() as client:
@@ -298,12 +327,12 @@ async def send_whatsapp_template(
                 ).strip(" —")
             except Exception:
                 reason = f"Meta {response.status_code}: {response.text[:300]}"
-            return {"success": False, "error": reason}
+            return {"success": False, "error": reason, "rendered": rendered, "to": phone}
         data = response.json()
         message_id = data.get("messages", [{}])[0].get("id", "")
-        return {"success": True, "message_id": message_id}
+        return {"success": True, "message_id": message_id, "rendered": rendered, "to": phone}
     except httpx.HTTPError as e:
-        return {"success": False, "error": f"network error: {e}"}
+        return {"success": False, "error": f"network error: {e}", "rendered": rendered, "to": phone}
 
 
 async def log_notification(
@@ -318,6 +347,8 @@ async def log_notification(
     external_message_id: str | None,
     error_message: str | None,
     db,
+    recipient_phone: str | None = None,
+    rendered_message: str | None = None,
 ) -> None:
     from sqlalchemy import text
     await db.execute(
@@ -325,12 +356,16 @@ async def log_notification(
             INSERT INTO notification_log (
                 org_id, property_id, recipient_type, recipient_id,
                 channel, template_name, message_body, status,
-                external_message_id, error_message, sent_at
+                external_message_id, error_message,
+                recipient_phone, rendered_message, delivery_status, sent_at
             )
             VALUES (
                 :org_id, :pid, :recipient_type, :recipient_id,
                 :channel, :template_name, :message_body, CAST(:status AS notif_status_enum),
-                :ext_id, :error, CASE WHEN :status = 'SENT' THEN NOW() ELSE NULL END
+                :ext_id, :error,
+                :recipient_phone, :rendered_message,
+                CASE WHEN :status = 'SENT' THEN 'sent' ELSE NULL END,
+                CASE WHEN :status = 'SENT' THEN NOW() ELSE NULL END
             )
         """),
         {
@@ -339,6 +374,7 @@ async def log_notification(
             "channel": channel, "template_name": template_name,
             "message_body": message_body, "status": status,
             "ext_id": external_message_id, "error": error_message,
+            "recipient_phone": recipient_phone, "rendered_message": rendered_message,
         },
     )
 
@@ -387,6 +423,8 @@ async def send_whatsapp_to_tenant(
         external_message_id=result.get("message_id"),
         error_message=result.get("error"),
         db=db,
+        recipient_phone=result.get("to") or row["phone"],
+        rendered_message=result.get("rendered"),
     )
     return result
 
@@ -471,6 +509,8 @@ async def send_rent_reminder(
         message_body=f"Rent reminder {amount_rupees} for {month_name}",
         status=status, external_message_id=result.get("message_id"),
         error_message=result.get("error"), db=db,
+        recipient_phone=result.get("to") or tenant_phone,
+        rendered_message=result.get("rendered"),
     )
     return result
 
@@ -519,5 +559,7 @@ async def send_rent_overdue(
         message_body=f"Overdue notice {amount_rupees} for {month_name}",
         status=status, external_message_id=result.get("message_id"),
         error_message=result.get("error"), db=db,
+        recipient_phone=result.get("to") or tenant_phone,
+        rendered_message=result.get("rendered"),
     )
     return result

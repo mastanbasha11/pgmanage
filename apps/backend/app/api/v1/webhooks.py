@@ -257,6 +257,37 @@ async def _handle_inbound_message(db, route, from_phone: str, text_body: str) ->
         )
 
 
+async def _handle_status(db, st: dict) -> None:
+    """
+    Apply a Meta delivery-status callback (sent/delivered/read/failed) to the
+    matching notification_log row, keyed by the message id we stored at send.
+    Requires the org search_path to be set (caller does it).
+    """
+    msg_id = st.get("id")
+    state = st.get("status")  # sent | delivered | read | failed
+    ts = st.get("timestamp")
+    if not msg_id or not state:
+        return
+    err = None
+    if state == "failed":
+        errors = st.get("errors") or []
+        if errors:
+            err = (errors[0].get("title") or errors[0].get("message") or "")[:500]
+    await db.execute(
+        text(
+            """
+            UPDATE notification_log SET
+                delivery_status = :state,
+                delivered_at = CASE WHEN :state IN ('delivered','read')
+                                    THEN to_timestamp(:ts) ELSE delivered_at END,
+                error_message = COALESCE(:err, error_message)
+            WHERE external_message_id = :mid
+            """
+        ),
+        {"state": state, "ts": int(ts) if ts else None, "err": err, "mid": msg_id},
+    )
+
+
 @router.get("/whatsapp", summary="WhatsApp webhook verification (Meta subscribe)")
 async def whatsapp_verify(request: Request):
     """Meta calls this once with hub.challenge to verify the webhook URL."""
@@ -294,9 +325,10 @@ async def whatsapp_inbound(
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
             value = change.get("value", {})
+            statuses = value.get("statuses") or []
             messages = value.get("messages") or []
-            if not messages:
-                continue  # status callbacks etc. — ignore for now
+            if not statuses and not messages:
+                continue
             phone_number_id = (value.get("metadata") or {}).get("phone_number_id")
             if not phone_number_id:
                 continue
@@ -312,6 +344,10 @@ async def whatsapp_inbound(
             if not route:
                 continue  # unknown number — not one of ours
             await set_schema(db, route["schema_name"])
+            # Delivery receipts (sent/delivered/read/failed) update the sent row.
+            for st in statuses:
+                await _handle_status(db, st)
+                processed += 1
             for msg in messages:
                 body = (msg.get("text") or {}).get("body", "")
                 await _handle_inbound_message(db, route, msg.get("from", ""), body)

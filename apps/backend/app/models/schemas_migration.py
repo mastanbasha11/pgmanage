@@ -115,6 +115,8 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             wa_rent_overdue_template_name VARCHAR(200),
             wa_rent_overdue_template_language VARCHAR(20),
             wa_rent_overdue_template_params JSONB,
+            wa_rent_reminder_template_body TEXT,
+            wa_rent_overdue_template_body TEXT,
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -352,6 +354,8 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             template_name VARCHAR(100) NOT NULL, message_body TEXT NOT NULL,
             status notif_status_enum NOT NULL DEFAULT 'PENDING',
             external_message_id VARCHAR(200), error_message TEXT,
+            recipient_phone VARCHAR(20), rendered_message TEXT,
+            delivery_status VARCHAR(20), delivered_at TIMESTAMPTZ,
             sent_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".audit_log (

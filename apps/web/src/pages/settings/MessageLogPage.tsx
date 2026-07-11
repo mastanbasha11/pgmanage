@@ -1,6 +1,16 @@
 import { useState } from 'react';
-import { formatDistanceToNow } from 'date-fns';
-import { Send, Search, CheckCircle2, XCircle, Clock, MessageSquare, Mail } from 'lucide-react';
+import { formatDistanceToNow, format } from 'date-fns';
+import {
+  Send,
+  Search,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  MessageSquare,
+  Mail,
+  CheckCheck,
+  Check,
+} from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +40,18 @@ function channelIcon(channel: NotificationEntry['channel']) {
   if (channel === 'WHATSAPP') return MessageSquare;
   if (channel === 'EMAIL') return Mail;
   return Send;
+}
+
+// Meta delivery receipt (sent → delivered → read, or failed).
+const DELIVERY_META: Record<string, { label: string; cls: string; Icon: typeof Check }> = {
+  sent: { label: 'Sent', cls: 'text-muted-foreground', Icon: Check },
+  delivered: { label: 'Delivered', cls: 'text-emerald-600', Icon: CheckCheck },
+  read: { label: 'Read', cls: 'text-teal-600', Icon: CheckCheck },
+  failed: { label: 'Failed', cls: 'text-red-600', Icon: XCircle },
+};
+
+function fmt(ts: string | null): string {
+  return ts ? format(new Date(ts), 'd MMM, HH:mm') : '—';
 }
 
 const PAGE_SIZE = 50;
@@ -130,41 +152,58 @@ export default function MessageLogPage() {
           {items.map((n) => {
             const s = STATUS_META[n.status];
             const ChannelIcon = channelIcon(n.channel);
-            const when = n.sent_at ?? n.created_at;
-            const recipient = n.tenant_name || n.recipient_type;
+            const to = n.recipient_phone || n.tenant_phone;
+            const recipient = n.tenant_name || (to ? '' : n.recipient_type);
+            const message = n.rendered_message || n.message_body;
+            const delivery = n.delivery_status ? DELIVERY_META[n.delivery_status] : null;
             return (
-              <div
-                key={n.id}
-                className="rounded-lg border bg-card p-3 text-sm shadow-sm"
-              >
+              <div key={n.id} className="rounded-lg border bg-card p-3 text-sm shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <ChannelIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="font-medium truncate">{recipient}</span>
-                      {n.tenant_phone && (
-                        <span className="text-xs text-muted-foreground">{n.tenant_phone}</span>
-                      )}
+                      {recipient && <span className="font-medium">{recipient}</span>}
+                      {to && <span className="font-mono text-xs text-muted-foreground">To: {to}</span>}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                       <Badge variant="secondary" className="font-mono text-[11px]">
                         {n.template_name}
                       </Badge>
                       {n.property_name && <span>· {n.property_name}</span>}
-                      {when && (
-                        <span>
-                          · {formatDistanceToNow(new Date(when), { addSuffix: true })}
-                        </span>
-                      )}
                     </div>
                   </div>
-                  <span
-                    className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}
-                  >
-                    <s.Icon className="h-3 w-3" />
-                    {s.label}
-                  </span>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}
+                    >
+                      <s.Icon className="h-3 w-3" />
+                      {s.label}
+                    </span>
+                    {delivery && (
+                      <span className={`inline-flex items-center gap-1 text-[11px] ${delivery.cls}`}>
+                        <delivery.Icon className="h-3 w-3" />
+                        {delivery.label}
+                      </span>
+                    )}
+                  </div>
                 </div>
+
+                {/* The actual message sent (rendered with real values) */}
+                {message && (
+                  <p className="mt-2 whitespace-pre-wrap rounded bg-muted/50 px-2.5 py-2 text-xs text-foreground/90">
+                    {message}
+                  </p>
+                )}
+
+                {/* Triggered / Delivered times */}
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-muted-foreground">
+                  <span>Triggered: {fmt(n.sent_at ?? n.created_at)}</span>
+                  <span>Delivered: {fmt(n.delivered_at)}</span>
+                  {n.sent_at && (
+                    <span>({formatDistanceToNow(new Date(n.sent_at), { addSuffix: true })})</span>
+                  )}
+                </div>
+
                 {n.error_message && (
                   <p className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">
                     {n.error_message}

@@ -8,11 +8,15 @@ export interface NotificationEntry {
   channel: 'WHATSAPP' | 'EMAIL' | 'PUSH' | 'SMS';
   template_name: string;
   message_body: string;
+  rendered_message: string | null;
   status: 'SENT' | 'FAILED' | 'PENDING';
+  delivery_status: string | null;
+  delivered_at: string | null;
   external_message_id: string | null;
   error_message: string | null;
   recipient_type: 'TENANT' | 'USER';
   recipient_id: string | null;
+  recipient_phone: string | null;
   property_id: string | null;
   property_name: string | null;
   tenant_name: string | null;
