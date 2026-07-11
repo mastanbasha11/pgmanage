@@ -31,6 +31,7 @@ from app.api.v1 import (
     properties,
     public_leads,
     rooms,
+    team,
     tenant_portal,
     tenants,
     webhooks,
@@ -201,6 +202,7 @@ app.include_router(menu.router, prefix=V1, tags=["menu"])
 app.include_router(inbox.router, prefix=V1, tags=["inbox"])
 app.include_router(notifications.router, prefix=V1, tags=["notifications"])
 app.include_router(job_runs.router, prefix=V1, tags=["job-runs"])
+app.include_router(team.router, prefix=V1, tags=["team"])
 app.include_router(webhooks.router, prefix=V1, tags=["webhooks"])
 app.include_router(platform_admin.router, prefix="/api/platform", tags=["platform-admin"])
 

@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { useTenants } from '@/hooks/useTenants';
 import { useRecordPayment, type PaymentMode, type PaymentType } from '@/hooks/usePayments';
+import PaidPersonSelect from '@/components/PaidPersonSelect';
 import { useToast } from '@/hooks/useToast';
 import { rupeesToPaise, monthName } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
@@ -366,14 +367,16 @@ export default function AddPaymentDialog({
             </div>
             <div>
               <Label>Paid to / by</Label>
-              <Input
-                {...register('paid_to')}
+              <PaidPersonSelect
+                value={watch('paid_to') ?? ''}
+                onChange={(v) => setValue('paid_to', v, { shouldValidate: true })}
+                propertyId={selectedPropertyId ?? undefined}
                 placeholder={
                   paymentType === 'REFUND'
-                    ? 'Refund paid by, e.g. Mastan'
+                    ? 'Refund paid by…'
                     : isPower
-                    ? 'Who collected, e.g. Shammi'
-                    : 'Suresh, Pandu...'
+                    ? 'Who collected…'
+                    : 'Select collector…'
                 }
               />
             </div>

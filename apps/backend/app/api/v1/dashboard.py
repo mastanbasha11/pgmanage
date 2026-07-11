@@ -430,6 +430,40 @@ async def dashboard_summary(
     cash_in = opening_balance + rent_in_period + advance_received + power_received
     cash_out = total_expenses + refunds_given
 
+    # Owner profit split. Each active OWNER on the property_team gets their
+    # share_pct of the profit. Missing shares (< 100%) leave a "Unassigned"
+    # bucket so the owner sees they haven't fully configured the roster.
+    owner_profits: list[dict] = []
+    if property_id:
+        own_res = await db.execute(
+            text("""
+                SELECT name, share_pct
+                FROM property_team
+                WHERE property_id = :pid AND is_active = true
+                  AND role = 'OWNER'::team_role_enum
+                  AND share_pct IS NOT NULL
+                ORDER BY sort_order, name
+            """),
+            {"pid": str(property_id)},
+        )
+        owners = [dict(r) for r in own_res.mappings().fetchall()]
+        profit = cash_in - cash_out
+        assigned_pct = sum(float(o["share_pct"] or 0) for o in owners)
+        for o in owners:
+            pct = float(o["share_pct"] or 0)
+            owner_profits.append({
+                "name": o["name"],
+                "share_pct": pct,
+                "share_paise": int(round(profit * pct / 100)),
+            })
+        if assigned_pct < 100:
+            unassigned_pct = 100 - assigned_pct
+            owner_profits.append({
+                "name": "Unassigned",
+                "share_pct": unassigned_pct,
+                "share_paise": int(round(profit * unassigned_pct / 100)),
+            })
+
     # Recurring items spike detection. Diff this fiscal window's keyword
     # buckets against the prior same-length window; surface items with
     # meaningful growth (>= 50% and >= ₹500 absolute change) so owners see
@@ -512,6 +546,7 @@ async def dashboard_summary(
         "total_received_paise": int(cash_in),
         "total_given_paise": int(cash_out),
         "top_recurring_spikes": top_recurring_spikes,
+        "owner_profits": owner_profits,
         "net_income_paise": cash_in - cash_out,
         "expenses_by_person": expenses_by_person,
         "cash_in_by_person": cash_in_by_person,
@@ -657,6 +692,116 @@ async def cashflow(
         })
 
     return {"items": items, "months": months}
+
+
+@router.get(
+    "/dashboard/roi-by-room",
+    summary="Revenue per room + room-type ROI (owner only)",
+)
+async def roi_by_room(
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+    property_id: UUID | None = Query(None),
+    months: int = Query(6, ge=1, le=24),
+):
+    """
+    Per-room revenue over the last `months` calendar months plus a
+    room-type roll-up so owners can see which room class earns most per
+    bed. Vacancy signal comes from the current occupancy state (RESERVED
+    counts as filled, MAINTENANCE doesn't).
+
+    Expense attribution is intentionally property-level for now — the
+    user picked "revenue only, no expense allocation" during design. The
+    /expenses/summary endpoint gives the property-level spend view.
+    """
+    _owner_only(ctx)
+    if not property_id:
+        raise HTTPException(400, "property_id is required")
+
+    params: dict[str, Any] = {"pid": str(property_id), "months": months}
+    revenue_res = await db.execute(
+        text("""
+            SELECT r.id AS room_id, r.room_number, rt.name AS room_type,
+                   rt.capacity, rt.monthly_base_rent_paise,
+                   COALESCE(SUM(p.amount_paise), 0) AS revenue_paise,
+                   COUNT(p.id) FILTER (WHERE p.payment_type = 'RENT') AS rent_txns
+            FROM rooms r
+            LEFT JOIN room_types rt ON rt.id = r.room_type_id
+            LEFT JOIN beds b ON b.room_id = r.id
+            LEFT JOIN tenants t ON t.bed_id = b.id AND t.is_deleted = false
+            LEFT JOIN payments p ON p.tenant_id = t.id
+              AND p.is_deleted = false
+              AND p.payment_type IN ('RENT', 'ADVANCE', 'DEPOSIT')
+              AND p.collected_at >= NOW() - (:months || ' months')::interval
+            WHERE r.property_id = :pid AND r.is_active = true
+            GROUP BY r.id, r.room_number, rt.name, rt.capacity, rt.monthly_base_rent_paise
+            ORDER BY r.room_number
+        """),
+        params,
+    )
+    rooms = [dict(r) for r in revenue_res.mappings().fetchall()]
+
+    # Current occupancy signal per room (used for vacancy alerts).
+    occ_res = await db.execute(
+        text("""
+            SELECT r.id AS room_id,
+                   COUNT(b.id) FILTER (WHERE b.status = 'OCCUPIED') AS occupied,
+                   COUNT(b.id) FILTER (WHERE b.status = 'VACANT')  AS vacant,
+                   COUNT(b.id) FILTER (WHERE b.status = 'RESERVED') AS reserved,
+                   COUNT(b.id) AS total_beds
+            FROM rooms r
+            LEFT JOIN beds b ON b.room_id = r.id
+            WHERE r.property_id = :pid AND r.is_active = true
+            GROUP BY r.id
+        """),
+        {"pid": str(property_id)},
+    )
+    occ = {str(r["room_id"]): dict(r) for r in occ_res.mappings().fetchall()}
+
+    for row in rooms:
+        o = occ.get(str(row["room_id"]), {})
+        row["occupied_beds"] = int(o.get("occupied", 0) or 0)
+        row["vacant_beds"] = int(o.get("vacant", 0) or 0)
+        row["reserved_beds"] = int(o.get("reserved", 0) or 0)
+        row["total_beds"] = int(o.get("total_beds", 0) or 0)
+        # Revenue per bed (avg over the window) — normalises for room size.
+        row["revenue_per_bed_paise"] = (
+            int(row["revenue_paise"]) // row["total_beds"]
+            if row["total_beds"] > 0
+            else 0
+        )
+        row["revenue_per_bed_per_month_paise"] = (
+            row["revenue_per_bed_paise"] // months if months > 0 else 0
+        )
+        # Expected monthly revenue if all beds occupied at base rent.
+        expected = int(row["monthly_base_rent_paise"] or 0) * int(row["total_beds"] or 0)
+        row["expected_monthly_paise"] = expected
+
+    # Room-type roll-up — total revenue, avg revenue per bed per month, occupancy.
+    types: dict[str, dict[str, Any]] = {}
+    for row in rooms:
+        t = row["room_type"] or "Untyped"
+        b = types.setdefault(t, {
+            "room_type": t, "rooms": 0, "total_beds": 0, "occupied_beds": 0,
+            "revenue_paise": 0, "capacity": row.get("capacity"),
+        })
+        b["rooms"] += 1
+        b["total_beds"] += row["total_beds"]
+        b["occupied_beds"] += row["occupied_beds"]
+        b["revenue_paise"] += int(row["revenue_paise"] or 0)
+    room_types = []
+    for b in types.values():
+        beds = b["total_beds"] or 1
+        b["revenue_per_bed_per_month_paise"] = int(b["revenue_paise"]) // beds // max(months, 1)
+        b["occupancy_rate"] = round(b["occupied_beds"] / beds, 4) if beds > 0 else 0
+        room_types.append(b)
+    room_types.sort(key=lambda x: x["revenue_per_bed_per_month_paise"], reverse=True)
+
+    return {
+        "months": months,
+        "rooms": rooms,
+        "room_types": room_types,
+    }
 
 
 @router.get("/dashboard/occupancy-trend", summary="Occupancy rate by month (owner only)")

@@ -50,6 +50,7 @@ import {
   type Expense,
 } from '@/hooks/useExpenses';
 import { useAuthStore } from '@/store/auth';
+import PaidPersonSelect from '@/components/PaidPersonSelect';
 import {
   formatPaise,
   formatDate,
@@ -398,7 +399,12 @@ function ExpenseDialog({
             </div>
             <div>
               <Label>Paid by</Label>
-              <Input {...register('paid_by')} placeholder="Mastan / Harshi" />
+              <PaidPersonSelect
+                value={watch('paid_by') ?? ''}
+                onChange={(v) => setValue('paid_by', v, { shouldValidate: true })}
+                propertyId={selectedPropertyId ?? undefined}
+                placeholder="Who paid…"
+              />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

@@ -26,6 +26,7 @@ import {
   useUpdateBedStatus,
 } from '@/hooks/useProperties';
 import { useVacantBeds, type VacantBed } from '@/hooks/useTenants';
+import TeamRoster from './TeamRoster';
 import { formatPaise, formatDate, shortRoomType, cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import PropertySetupDialog from './PropertySetupDialog';
@@ -207,6 +208,7 @@ export default function PropertyDetailPage() {
             Blocked ({blockedBeds.length})
           </TabsTrigger>
           <TabsTrigger value="grid">Floor grid</TabsTrigger>
+          <TabsTrigger value="team">Team & Owners</TabsTrigger>
         </TabsList>
 
         <TabsContent value="vacant" className="mt-4 space-y-4">
@@ -326,6 +328,10 @@ export default function PropertyDetailPage() {
           ) : (
             <OccupancyGrid floors={floors} />
           )}
+        </TabsContent>
+
+        <TabsContent value="team" className="mt-4">
+          <TeamRoster propertyId={property.id} />
         </TabsContent>
       </Tabs>
 

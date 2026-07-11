@@ -25,6 +25,7 @@ import {
 import AddPaymentDialog from './AddPaymentDialog';
 import EditCloseDateDialog from './EditCloseDateDialog';
 import EditOpeningBalanceDialog from './EditOpeningBalanceDialog';
+import PaidPersonSelect from '@/components/PaidPersonSelect';
 import { api } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -161,6 +162,7 @@ function RecordPaymentDialog({
 }) {
   const { mutateAsync, isPending } = useRecordPayment();
   const { toast } = useToast();
+  const { selectedPropertyId } = useAuthStore();
   const {
     register,
     handleSubmit,
@@ -301,7 +303,12 @@ function RecordPaymentDialog({
 
           <div>
             <Label>Paid to (optional)</Label>
-            <Input {...register('paid_to')} placeholder="Who received the cash, e.g. Suresh" />
+            <PaidPersonSelect
+              value={watch('paid_to') ?? ''}
+              onChange={(v) => setValue('paid_to', v, { shouldValidate: true })}
+              propertyId={selectedPropertyId ?? undefined}
+              placeholder="Who received the cash…"
+            />
           </div>
 
           <div>
@@ -343,9 +350,12 @@ function EditPaymentDialog({
 }) {
   const { mutateAsync, isPending } = useUpdatePayment();
   const { toast } = useToast();
+  const { selectedPropertyId } = useAuthStore();
   const {
     register,
     handleSubmit,
+    setValue,
+    watch,
     reset,
     formState: { errors },
   } = useForm<EditPaymentFormData>({
@@ -432,7 +442,12 @@ function EditPaymentDialog({
             </div>
             <div>
               <Label>Paid to</Label>
-              <Input placeholder="Collector name" {...register('paid_to')} />
+              <PaidPersonSelect
+                value={watch('paid_to') ?? ''}
+                onChange={(v) => setValue('paid_to', v, { shouldValidate: true })}
+                propertyId={selectedPropertyId ?? undefined}
+                placeholder="Collector name…"
+              />
             </div>
           </div>
           <div>

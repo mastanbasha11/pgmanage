@@ -334,6 +334,51 @@ export default function DashboardPage() {
         />
       </div>
 
+      {(summary.owner_profits?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Users className="h-4 w-4 text-accent" />
+              Owner profit split
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Profit ({formatPaise(summary.net_income_paise)}) split by the
+              share % configured in Properties → Team &amp; Owners.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {summary.owner_profits!.map((o) => (
+                <div
+                  key={o.name}
+                  className={
+                    o.name === 'Unassigned'
+                      ? 'flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2'
+                      : 'flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2'
+                  }
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{o.name}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {o.share_pct}% share
+                    </p>
+                  </div>
+                  <p
+                    className={
+                      o.share_paise < 0
+                        ? 'font-semibold tabular-nums text-rose-700'
+                        : 'font-semibold tabular-nums'
+                    }
+                  >
+                    {formatPaise(o.share_paise)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {(summary.top_recurring_spikes?.length ?? 0) > 0 && (
         <Card className="border-amber-200 bg-amber-50/40">
           <CardHeader className="pb-2">

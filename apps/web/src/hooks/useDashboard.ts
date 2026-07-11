@@ -29,6 +29,11 @@ export interface DashboardSummary {
     delta_paise: number;
     pct_change: number | null;
   }[];
+  owner_profits?: {
+    name: string;
+    share_pct: number;
+    share_paise: number;
+  }[];
   net_income_paise: number;
   expenses_by_person?: ExpenseByPerson[];
   cash_in_by_person?: ExpenseByPerson[];

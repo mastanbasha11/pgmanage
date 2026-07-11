@@ -16,6 +16,7 @@ import TenantDetailPage from '@/pages/tenants/TenantDetailPage';
 import RentDashboardPage from '@/pages/rent/RentDashboardPage';
 import ExpensesPage from '@/pages/expenses/ExpensesPage';
 import BookingsPage from '@/pages/bookings/BookingsPage';
+import ROIPage from '@/pages/roi/ROIPage';
 import LeadsPage from '@/pages/leads/LeadsPage';
 import TeamPage from '@/pages/settings/TeamPage';
 import AuditLogsPage from '@/pages/audit-logs/AuditLogsPage';
@@ -154,6 +155,7 @@ export default function App() {
                     <Route path="tenants/:id" element={<TenantDetailPage />} />
                     <Route path="rent" element={<RentDashboardPage />} />
                     <Route path="bookings" element={<BookingsPage />} />
+                    <Route path="roi" element={<ROIPage />} />
                     <Route path="expenses" element={<ExpensesPage />} />
                     <Route path="leads" element={<LeadsPage />} />
                     <Route path="settings/team" element={<TeamPage />} />

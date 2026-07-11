@@ -56,6 +56,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         ("audit_action_enum", "'INSERT','UPDATE','DELETE'"),
         ("booking_kind_enum", "'DAILY','ADVANCE'"),
         ("vehicle_type_enum", "'NONE','TWO_WHEELER','FOUR_WHEELER'"),
+        ("team_role_enum", "'OWNER','MANAGER','COLLECTOR'"),
         (
             "inbox_event_kind_enum",
             "'COMPLAINT_NEW','COMPLAINT_REOPENED','NOTICE_GIVEN','KYC_UPDATED','FEEDBACK','OTHER'",
@@ -135,6 +136,23 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT uq_billing_period_pmy UNIQUE (property_id, period_month, period_year)
+        )""",
+        # Per-property team roster: owners get share_pct; managers + collectors
+        # populate the Paid To / Paid By dropdowns. Kept separate from `users`
+        # (which are staff logins) — some collectors don't have logins.
+        # See [[project-team-roster]].
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".property_team (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            property_id UUID NOT NULL REFERENCES "{schema}".properties(id) ON DELETE CASCADE,
+            name VARCHAR(200) NOT NULL,
+            phone VARCHAR(20),
+            role team_role_enum NOT NULL,
+            share_pct NUMERIC(5,2) CHECK (share_pct >= 0 AND share_pct <= 100),
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".room_types (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -20,6 +20,7 @@ import {
   Send,
   Activity,
   UtensilsCrossed,
+  TrendingUp,
   Inbox,
 } from 'lucide-react';
 import { cn, initials } from '@/lib/utils';
@@ -62,6 +63,7 @@ const NAV_ITEMS: (NavItem | { section: string })[] = [
   { to: '/bookings', icon: CalendarCheck, label: 'Bookings' },
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/leads', icon: UserCircle, label: 'Leads' },
+  { to: '/roi', icon: TrendingUp, label: 'ROI & Rooms', ownerOnly: true },
 
   { section: 'Activity' },
   { to: '/inbox', icon: Inbox, label: 'Inbox' },
