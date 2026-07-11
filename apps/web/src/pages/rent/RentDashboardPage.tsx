@@ -20,6 +20,7 @@ import {
   Zap,
   CalendarRange,
   PiggyBank,
+  MessageCircle,
 } from 'lucide-react';
 import AddPaymentDialog from './AddPaymentDialog';
 import EditCloseDateDialog from './EditCloseDateDialog';
@@ -75,6 +76,7 @@ interface LedgerEntry {
   id: string;
   tenant_id: string;
   tenant_name: string;
+  phone?: string | null;
   month: number;
   year: number;
   amount_due_paise: number;
@@ -94,6 +96,24 @@ interface LedgerEntry {
 
 type LedgerStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'ALL';
 type RentTab = 'tenants' | 'payments' | 'refunds';
+
+/**
+ * Compose a WhatsApp deep-link that pre-fills the overdue-reminder message.
+ * We build the text client-side (rather than triggering the Meta template) so
+ * the owner can review + tweak before sending — this is the manual, ad-hoc
+ * path. Digits-only phone; strip +/spaces so both "9876543210" and
+ * "+91 98765 43210" work.
+ */
+function buildOverdueWhatsappUrl(e: LedgerEntry): string {
+  const phone = (e.phone ?? '').replace(/\D/g, '');
+  const rupees = Math.round(e.outstanding_paise / 100).toLocaleString('en-IN');
+  const period = `${monthName(e.month)} ${e.year}`;
+  const name = e.tenant_name.trim();
+  const msg =
+    `Hi ${name}, a friendly reminder that your rent for ${period} is still ` +
+    `outstanding — ₹${rupees}. Please clear it at the earliest. Thanks!`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+}
 
 interface Transaction {
   id: string;
@@ -1049,17 +1069,31 @@ export default function RentDashboardPage() {
                         <td className="px-4 py-3 text-center">
                           <Badge variant={statusBadgeVariant(e.status)}>{e.status}</Badge>
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
                           {e.status !== 'PAID' && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => setPayingEntry(e)}
-                            >
-                              <IndianRupee className="h-3 w-3 mr-1" />
-                              Pay
-                            </Button>
+                            <div className="inline-flex items-center gap-1">
+                              {e.phone && (
+                                <a
+                                  href={buildOverdueWhatsappUrl(e)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                  title={`Send WhatsApp reminder to ${e.tenant_name}`}
+                                  onClick={(ev) => ev.stopPropagation()}
+                                >
+                                  <MessageCircle className="h-3.5 w-3.5" />
+                                </a>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => setPayingEntry(e)}
+                              >
+                                <IndianRupee className="h-3 w-3 mr-1" />
+                                Pay
+                              </Button>
+                            </div>
                           )}
                         </td>
                       </tr>

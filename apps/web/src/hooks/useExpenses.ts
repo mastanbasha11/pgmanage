@@ -84,6 +84,10 @@ export function useExpenseSummary(params?: {
     total_paise: number;
     by_person?: ExpenseByPerson[];
     recurring_items?: RecurringItem[];
+    previous_items?: { category_name: string; total_paise: number; count: number }[];
+    previous_recurring_items?: { item: string; total_paise: number; count: number }[];
+    previous_period_start?: string;
+    previous_period_end?: string;
     period_start?: string;
     period_end?: string;
   }>({

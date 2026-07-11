@@ -63,6 +63,48 @@ import { api } from '@/lib/api';
 const PAYMENT_MODES = ['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE'] as const;
 type PaymentMode = (typeof PAYMENT_MODES)[number];
 
+/**
+ * Month-over-month change chip. Green when spending dropped, red when it rose,
+ * grey when there's nothing to compare against (previous period was zero).
+ * < ₹100 absolute change is a shrug — render as flat.
+ */
+function MoMBadge({ current, previous }: { current: number; previous: number }) {
+  if (previous === 0 && current === 0) return null;
+  if (previous === 0) {
+    return (
+      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+        new
+      </span>
+    );
+  }
+  const delta = current - previous;
+  if (Math.abs(delta) < 10_000) {
+    return (
+      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+        flat
+      </span>
+    );
+  }
+  const pct = Math.round(((current - previous) / previous) * 100);
+  const rising = delta > 0;
+  return (
+    <span
+      className={
+        rising
+          ? 'rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700'
+          : 'rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700'
+      }
+      title={
+        rising
+          ? `Up ₹${Math.round(delta / 100).toLocaleString('en-IN')} vs previous month`
+          : `Down ₹${Math.round(-delta / 100).toLocaleString('en-IN')} vs previous month`
+      }
+    >
+      {rising ? '▲' : '▼'} {Math.abs(pct)}%
+    </span>
+  );
+}
+
 const schema = z.object({
   category_id: z.string().uuid('Select a category'),
   description: z.string().min(2, 'Description required'),
@@ -661,9 +703,34 @@ export default function ExpensesPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Breakdown by category</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Badges compare against the previous month.
+              </p>
             </CardHeader>
-            <CardContent>
+            <CardContent className="grid gap-6 md:grid-cols-2">
               <ExpenseDonut data={summary!.items} />
+              <ul className="space-y-1.5 text-sm">
+                {summary!.items.map((c) => {
+                  const prev =
+                    summary!.previous_items?.find(
+                      (p) => p.category_name === c.category_name,
+                    )?.total_paise ?? 0;
+                  return (
+                    <li
+                      key={c.category_name}
+                      className="flex items-center justify-between border-b border-dashed pb-1.5 last:border-0"
+                    >
+                      <span className="font-medium truncate">{c.category_name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold tabular-nums">
+                          {formatPaise(c.total_paise)}
+                        </span>
+                        <MoMBadge current={c.total_paise} previous={prev} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             </CardContent>
           </Card>
         )}
@@ -715,27 +782,36 @@ export default function ExpensesPage() {
               <p className="text-xs text-muted-foreground">
                 Spend on common items (matched against the description). One expense can
                 count toward multiple buckets, so totals here can exceed the period total.
+                Badges compare against the previous month.
               </p>
             </CardHeader>
             <CardContent>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {summary!.recurring_items!.map((r) => (
-                  <div
-                    key={r.item}
-                    className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-medium truncate">{r.item}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {r.count}{' '}
-                        {r.count === 1 ? 'entry' : 'entries'}
-                      </p>
+                {summary!.recurring_items!.map((r) => {
+                  const prev =
+                    summary!.previous_recurring_items?.find((p) => p.item === r.item)
+                      ?.total_paise ?? 0;
+                  return (
+                    <div
+                      key={r.item}
+                      className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{r.item}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {r.count}{' '}
+                          {r.count === 1 ? 'entry' : 'entries'}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <p className="font-semibold tabular-nums">
+                          {formatPaise(r.total_paise)}
+                        </p>
+                        <MoMBadge current={r.total_paise} previous={prev} />
+                      </div>
                     </div>
-                    <p className="font-semibold tabular-nums">
-                      {formatPaise(r.total_paise)}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

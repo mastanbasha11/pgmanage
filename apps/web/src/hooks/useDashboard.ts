@@ -22,6 +22,13 @@ export interface DashboardSummary {
   total_received_paise?: number;
   total_given_paise?: number;
   refunds_given_paise?: number;
+  top_recurring_spikes?: {
+    item: string;
+    current_paise: number;
+    previous_paise: number;
+    delta_paise: number;
+    pct_change: number | null;
+  }[];
   net_income_paise: number;
   expenses_by_person?: ExpenseByPerson[];
   cash_in_by_person?: ExpenseByPerson[];

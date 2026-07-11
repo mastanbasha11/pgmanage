@@ -50,7 +50,7 @@ export function CashflowChart({ data }: Props) {
         <Tooltip
           formatter={(value: number, name: string) => [
             formatPaise(value),
-            name === 'income_paise' ? 'Income' : 'Expenses',
+            name === 'income_paise' ? 'Total Received' : 'Total Spent',
           ]}
           contentStyle={{
             backgroundColor: 'hsl(var(--card))',
@@ -60,7 +60,7 @@ export function CashflowChart({ data }: Props) {
           }}
         />
         <Legend
-          formatter={(value) => (value === 'income_paise' ? 'Income' : 'Expenses')}
+          formatter={(value) => (value === 'income_paise' ? 'Total Received' : 'Total Spent')}
           iconType="circle"
           iconSize={8}
           wrapperStyle={{ fontSize: '12px' }}

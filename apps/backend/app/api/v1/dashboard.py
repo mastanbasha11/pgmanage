@@ -429,6 +429,66 @@ async def dashboard_summary(
     # Opening Balance + Rent + Advance + Daily Stays + Power = Total Received.
     cash_in = opening_balance + rent_in_period + advance_received + power_received
     cash_out = total_expenses + refunds_given
+
+    # Recurring items spike detection. Diff this fiscal window's keyword
+    # buckets against the prior same-length window; surface items with
+    # meaningful growth (>= 50% and >= ₹500 absolute change) so owners see
+    # what's actually spiking, not tiny noise.
+    top_recurring_spikes: list[dict] = []
+    if period_start and period_end:
+        from datetime import timedelta as _td
+        span = (period_end - period_start).days + 1
+        prev_end = period_start - _td(days=1)
+        prev_start = prev_end - _td(days=span - 1)
+        rec_filter = "AND e.property_id = :pid" if property_id else ""
+
+        async def _bucket_totals(bstart, bend):
+            r = await db.execute(
+                text(f"""
+                    WITH keywords(label, pattern) AS (VALUES
+                        ('Vegetables', '%vegetable%'), ('Kirana', '%kirana%'),
+                        ('Zepto', '%zepto%'), ('Insta Mart', '%insta mart%'),
+                        ('Milk', '%milk%'), ('Curd', '%curd%'),
+                        ('Chicken', '%chicken%'), ('Mutton', '%mutton%'),
+                        ('Eggs', '%egg%'), ('Mushroom', '%mushroom%'),
+                        ('Tomato', '%tomato%'), ('Tomato', '%tamota%'),
+                        ('Onion', '%onion%'),
+                        ('Petrol', '%petrol%'), ('Diesel', '%diesel%'),
+                        ('Oil', '%oil%'), ('Masala', '%masala%'),
+                        ('Cleaning', '%cleaning%'), ('Water cans', '%water bottle%')
+                    )
+                    SELECT k.label AS item, SUM(e.amount_paise) AS total_paise
+                    FROM keywords k JOIN expenses e ON e.description ILIKE k.pattern
+                    WHERE e.org_id = :org_id
+                      AND e.purchase_date BETWEEN :start AND :end
+                      AND e.approval_status = 'APPROVED' AND e.is_deleted = false
+                      {rec_filter}
+                    GROUP BY k.label
+                """),
+                {**params, "start": bstart, "end": bend},
+            )
+            return {row["item"]: int(row["total_paise"] or 0) for row in r.mappings().fetchall()}
+
+        cur_buckets = await _bucket_totals(period_start, period_end)
+        prev_buckets = await _bucket_totals(prev_start, prev_end)
+        for item, cur in cur_buckets.items():
+            prev = prev_buckets.get(item, 0)
+            delta = cur - prev
+            if delta < 50_000:  # < ₹500 absolute — ignore noise
+                continue
+            pct = ((cur / prev) - 1) * 100 if prev > 0 else None
+            if prev > 0 and pct is not None and pct < 50:
+                continue
+            top_recurring_spikes.append({
+                "item": item,
+                "current_paise": cur,
+                "previous_paise": prev,
+                "delta_paise": delta,
+                "pct_change": round(pct, 1) if pct is not None else None,
+            })
+        top_recurring_spikes.sort(key=lambda r: r["delta_paise"], reverse=True)
+        top_recurring_spikes = top_recurring_spikes[:5]
+
     return {
         # Canonical names
         "expected_rent_paise": expected,
@@ -451,6 +511,7 @@ async def dashboard_summary(
         "total_expenses_paise": total_expenses,
         "total_received_paise": int(cash_in),
         "total_given_paise": int(cash_out),
+        "top_recurring_spikes": top_recurring_spikes,
         "net_income_paise": cash_in - cash_out,
         "expenses_by_person": expenses_by_person,
         "cash_in_by_person": cash_in_by_person,
@@ -485,6 +546,11 @@ async def cashflow(
     if property_id:
         params["pid"] = str(property_id)
 
+    # Income = Total Received (dashboard summary rule):
+    #   opening_balance + rent + advance + daily + power (non-REFUND payments +
+    #   all bookings). We aggregate payments (excluding REFUND) and bookings
+    #   separately by calendar month on collected_at, then fold opening_balance
+    #   from billing_periods on (property, year, month).
     income_result = await db.execute(
         text(f"""
             SELECT EXTRACT(YEAR FROM collected_at)::int as year,
@@ -502,6 +568,37 @@ async def cashflow(
     )
     income_rows = {(r["year"], r["month"]): r["income_paise"] for r in income_result.mappings().fetchall()}
 
+    booking_result = await db.execute(
+        text(f"""
+            SELECT EXTRACT(YEAR FROM collected_at)::int as year,
+                   EXTRACT(MONTH FROM collected_at)::int as month,
+                   SUM(amount_paise) as booking_paise
+            FROM bookings
+            WHERE org_id = :org_id AND is_deleted = false
+                AND collected_at >= NOW() - INTERVAL '{months} months'
+            {pid_filter_income}
+            GROUP BY year, month
+        """),
+        params,
+    )
+    booking_rows = {(r["year"], r["month"]): r["booking_paise"] for r in booking_result.mappings().fetchall()}
+
+    opening_result = await db.execute(
+        text(f"""
+            SELECT period_year as year, period_month as month,
+                   SUM(opening_balance_paise) as opening_paise
+            FROM billing_periods
+            WHERE opening_balance_paise > 0
+                {"AND property_id = :pid" if property_id else ""}
+            GROUP BY period_year, period_month
+        """),
+        params,
+    )
+    opening_rows = {(r["year"], r["month"]): r["opening_paise"] for r in opening_result.mappings().fetchall()}
+
+    # Expenses = Total Spent: approved expenses + REFUND payments in the same
+    # calendar month (fiscal window handled at summary time; monthly trend
+    # stays calendar-month for readability).
     expense_result = await db.execute(
         text(f"""
             SELECT EXTRACT(YEAR FROM purchase_date)::int as year,
@@ -518,14 +615,40 @@ async def cashflow(
     )
     expense_rows = {(r["year"], r["month"]): r["expense_paise"] for r in expense_result.mappings().fetchall()}
 
+    refund_result = await db.execute(
+        text(f"""
+            SELECT EXTRACT(YEAR FROM collected_at)::int as year,
+                   EXTRACT(MONTH FROM collected_at)::int as month,
+                   SUM(amount_paise) as refund_paise
+            FROM payments
+            WHERE org_id = :org_id AND is_deleted = false
+                AND payment_type = 'REFUND'
+                AND collected_at >= NOW() - INTERVAL '{months} months'
+            {pid_filter_income}
+            GROUP BY year, month
+        """),
+        params,
+    )
+    refund_rows = {(r["year"], r["month"]): r["refund_paise"] for r in refund_result.mappings().fetchall()}
+
     # Build unified timeline. Frontend expects {items: [{month, income_paise, expenses_paise}]}
     # with `month` as a display label (e.g. "May 2026").
     import calendar
-    all_keys = sorted(set(income_rows.keys()) | set(expense_rows.keys()))
+    all_keys = sorted(
+        set(income_rows.keys()) | set(expense_rows.keys())
+        | set(booking_rows.keys()) | set(refund_rows.keys()) | set(opening_rows.keys())
+    )
     items = []
     for year, month in all_keys:
-        income = income_rows.get((year, month), 0)
-        expense = expense_rows.get((year, month), 0)
+        income = (
+            int(income_rows.get((year, month), 0) or 0)
+            + int(booking_rows.get((year, month), 0) or 0)
+            + int(opening_rows.get((year, month), 0) or 0)
+        )
+        expense = (
+            int(expense_rows.get((year, month), 0) or 0)
+            + int(refund_rows.get((year, month), 0) or 0)
+        )
         items.append({
             "month": f"{calendar.month_abbr[month]} {year}",
             "income_paise": income,

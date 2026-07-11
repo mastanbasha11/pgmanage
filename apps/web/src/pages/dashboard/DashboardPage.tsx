@@ -32,6 +32,7 @@ import { useExpenseSummary } from '@/hooks/useExpenses';
 import { useProperties } from '@/hooks/useProperties';
 import { useAuthStore } from '@/store/auth';
 import { formatPaise, currentMonthYear, monthName } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -39,7 +40,7 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
 }));
 const NOW_YEAR = new Date().getFullYear();
 const YEARS = [NOW_YEAR - 1, NOW_YEAR, NOW_YEAR + 1];
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 
 function KPICard({
   title,
@@ -47,15 +48,33 @@ function KPICard({
   sub,
   icon: Icon,
   className,
+  tone = 'default',
+  onClick,
 }: {
   title: string;
   value: string;
   sub?: string;
   icon: React.ElementType;
   className?: string;
+  tone?: 'default' | 'income' | 'expense' | 'profit';
+  onClick?: () => void;
 }) {
+  const chipClass =
+    tone === 'income'
+      ? 'bg-emerald-500/15 text-emerald-700'
+      : tone === 'expense'
+      ? 'bg-rose-500/15 text-rose-700'
+      : tone === 'profit'
+      ? 'bg-slate-900/10 text-slate-900'
+      : 'bg-accent/10 text-accent';
   return (
-    <Card className={className}>
+    <Card
+      className={cn(
+        className,
+        onClick && 'cursor-pointer transition-colors hover:border-accent',
+      )}
+      onClick={onClick}
+    >
       <CardContent className="pt-6">
         <div className="flex items-start justify-between">
           <div>
@@ -63,8 +82,8 @@ function KPICard({
             <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
             {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
           </div>
-          <div className="rounded-lg bg-accent/10 p-2.5">
-            <Icon className="h-5 w-5 text-accent" />
+          <div className={cn('rounded-lg p-2.5', chipClass)}>
+            <Icon className="h-5 w-5" />
           </div>
         </div>
       </CardContent>
@@ -74,6 +93,7 @@ function KPICard({
 
 export default function DashboardPage() {
   const { selectedPropertyId, canAccessFinancials } = useAuthStore();
+  const navigate = useNavigate();
   const cmy = currentMonthYear();
   const [month, setMonth] = useState(cmy.month);
   const [year, setYear] = useState(cmy.year);
@@ -178,43 +198,117 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Row 1: cash in/out KPIs */}
+      {/* Money in — green tinted band. Everything that landed as cash this period. */}
+      <section className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-4">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-emerald-800">
+            Money received
+          </h2>
+          <p className="text-lg font-bold tabular-nums text-emerald-900">
+            {formatPaise(
+              summary.total_received_paise ??
+                (summary.opening_balance_paise ?? 0) +
+                  (summary.collected_rent_paise ?? 0) +
+                  (summary.advance_received_paise ?? 0) +
+                  (summary.power_received_paise ?? 0),
+            )}
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <KPICard
+            title="Opening Balance"
+            value={formatPaise(summary.opening_balance_paise ?? 0)}
+            sub="Carry-forward"
+            icon={PiggyBank}
+            tone="income"
+          />
+          <KPICard
+            title="Rent"
+            value={formatPaise(
+              summary.rent_only_paise ??
+                (summary.collected_rent_paise ?? summary.rent_collected_paise ?? 0)
+                - (summary.daily_stays_paise ?? 0),
+            )}
+            sub={`of ${formatPaise(
+              summary.expected_rent_paise ?? summary.gross_rent_expected_paise ?? 0,
+            )} expected`}
+            icon={IndianRupee}
+            tone="income"
+          />
+          <KPICard
+            title="Advance Received"
+            value={formatPaise(summary.advance_received_paise ?? 0)}
+            sub="Deposits + advance bookings"
+            icon={ArrowDownToLine}
+            tone="income"
+          />
+          <KPICard
+            title="Daily Stays"
+            value={formatPaise(summary.daily_stays_paise ?? 0)}
+            sub="Daily-stay bookings"
+            icon={CalendarRange}
+            tone="income"
+          />
+          <KPICard
+            title="Power Meters"
+            value={formatPaise(summary.power_received_paise ?? 0)}
+            sub="Prepaid recharges"
+            icon={Zap}
+            tone="income"
+          />
+        </div>
+      </section>
+
+      {/* Money out — red tinted band. */}
+      <section className="rounded-xl border border-rose-100 bg-rose-50/40 p-4">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-rose-800">
+            Money spent
+          </h2>
+          <p className="text-lg font-bold tabular-nums text-rose-900">
+            {formatPaise(
+              summary.total_given_paise ??
+                (summary.total_expenses_paise + (summary.refunds_given_paise ?? 0)),
+            )}
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <KPICard
+            title="Total Expenses"
+            value={formatPaise(summary.total_expenses_paise)}
+            sub="approved this month"
+            icon={Receipt}
+            tone="expense"
+          />
+          <KPICard
+            title="Refunds Given"
+            value={formatPaise(summary.refunds_given_paise ?? 0)}
+            sub="security deposit refunds"
+            icon={ArrowUpFromLine}
+            tone="expense"
+          />
+          <KPICard
+            title="Total Spent"
+            value={formatPaise(
+              summary.total_given_paise ??
+                (summary.total_expenses_paise + (summary.refunds_given_paise ?? 0)),
+            )}
+            sub="Expenses + Refunds"
+            icon={ArrowUpFromLine}
+            tone="expense"
+          />
+        </div>
+      </section>
+
+      {/* Bottom line + operations. Profit is Received − Spent. */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KPICard
-          title="Opening Balance"
-          value={formatPaise(summary.opening_balance_paise ?? 0)}
-          sub="Carry-forward from previous month"
-          icon={PiggyBank}
-        />
-        <KPICard
-          title="Rent"
-          value={formatPaise(
-            summary.rent_only_paise ??
-              (summary.collected_rent_paise ?? summary.rent_collected_paise ?? 0)
-              - (summary.daily_stays_paise ?? 0),
-          )}
-          sub={`of ${formatPaise(
-            summary.expected_rent_paise ?? summary.gross_rent_expected_paise ?? 0,
-          )} expected`}
-          icon={IndianRupee}
-        />
-        <KPICard
-          title="Advance Received"
-          value={formatPaise(summary.advance_received_paise ?? 0)}
-          sub="Deposits + advance bookings"
-          icon={ArrowDownToLine}
-        />
-        <KPICard
-          title="Daily Stays"
-          value={formatPaise(summary.daily_stays_paise ?? 0)}
-          sub="Daily-stay bookings collected"
-          icon={CalendarRange}
-        />
-        <KPICard
-          title="Power Meters"
-          value={formatPaise(summary.power_received_paise ?? 0)}
-          sub="Prepaid meter recharges"
-          icon={Zap}
+          title="Profit"
+          value={formatPaise(summary.net_income_paise)}
+          sub="Received − Spent"
+          icon={TrendingUp}
+          tone="profit"
+          className="border-slate-300"
         />
         <KPICard
           title="Outstanding"
@@ -222,49 +316,6 @@ export default function DashboardPage() {
           sub={`${collectionPct}% collection rate`}
           icon={AlertCircle}
           className={summary.outstanding_paise > 0 ? 'border-amber-200' : ''}
-        />
-        <KPICard
-          title="Total Received"
-          value={formatPaise(
-            summary.total_received_paise ??
-              (summary.opening_balance_paise ?? 0) +
-                (summary.collected_rent_paise ?? 0) +
-                (summary.advance_received_paise ?? 0) +
-                (summary.power_received_paise ?? 0),
-          )}
-          sub="Opening + Rent + Advance + Daily + Power"
-          icon={Wallet}
-        />
-        <KPICard
-          title="Profit"
-          value={formatPaise(summary.net_income_paise)}
-          sub="Total Received − Total Given"
-          icon={TrendingUp}
-        />
-      </div>
-
-      {/* Row 2: outflows + occupancy */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KPICard
-          title="Total Expenses"
-          value={formatPaise(summary.total_expenses_paise)}
-          sub="approved this month"
-          icon={Receipt}
-        />
-        <KPICard
-          title="Refunds Given"
-          value={formatPaise(summary.refunds_given_paise ?? 0)}
-          sub="security deposit refunds"
-          icon={ArrowUpFromLine}
-        />
-        <KPICard
-          title="Total Given"
-          value={formatPaise(
-            summary.total_given_paise ??
-              (summary.total_expenses_paise + (summary.refunds_given_paise ?? 0)),
-          )}
-          sub="Expenses + Refunds"
-          icon={ArrowUpFromLine}
         />
         <KPICard
           title="Occupancy"
@@ -275,10 +326,53 @@ export default function DashboardPage() {
         <KPICard
           title="Vacant Beds"
           value={`${summary.vacant_beds ?? 0}`}
-          sub={`of ${summary.total_beds ?? 0} total`}
+          sub={`of ${summary.total_beds ?? 0} · click to view`}
           icon={Building2}
+          onClick={() =>
+            selectedPropertyId && navigate(`/properties/${selectedPropertyId}`)
+          }
         />
       </div>
+
+      {(summary.top_recurring_spikes?.length ?? 0) > 0 && (
+        <Card className="border-amber-200 bg-amber-50/40">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2 text-amber-900">
+              <TrendingUp className="h-4 w-4" />
+              Recurring items — spending up vs previous month
+            </CardTitle>
+            <p className="text-xs text-amber-800/70">
+              Buckets matched from expense descriptions where this period is up
+              at least ₹500 and 50% vs the previous same-length window. Drill
+              into <Link to="/expenses" className="underline">Expenses</Link>{' '}
+              for the receipts.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {summary.top_recurring_spikes!.map((s) => (
+                <div
+                  key={s.item}
+                  className="flex items-center justify-between rounded-md border border-amber-200 bg-white px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{s.item}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      was {formatPaise(s.previous_paise)} →{' '}
+                      <span className="text-rose-700 font-semibold">
+                        {formatPaise(s.current_paise)}
+                      </span>
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700 whitespace-nowrap">
+                    {s.pct_change != null ? `▲ ${Math.round(s.pct_change)}%` : 'new'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Charts row */}
       <div className="grid gap-6 lg:grid-cols-3">

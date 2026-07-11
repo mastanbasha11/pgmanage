@@ -26,7 +26,6 @@ import { cn, initials } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
 import { useProperties } from '@/hooks/useProperties';
 import { useNewWebsiteLeadCount } from '@/hooks/useWebsiteLeads';
-import { useInboxUnreadCount } from '@/hooks/useInbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,22 +44,36 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-const NAV_ITEMS = [
+type NavItem = {
+  to: string;
+  icon: typeof LayoutDashboard;
+  label: string;
+  exact?: boolean;
+  ownerOnly?: boolean;
+};
+
+// Top-level nav is one long list, but rendered with section headers (a plain
+// `section` string means "put a small uppercase header here").
+const NAV_ITEMS: (NavItem | { section: string })[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true, ownerOnly: true },
-  { to: '/inbox', icon: Inbox, label: 'Inbox', badgeKind: 'inbox' as const },
   { to: '/properties', icon: Building2, label: 'Properties' },
   { to: '/tenants', icon: Users, label: 'Tenants' },
   { to: '/rent', icon: IndianRupee, label: 'Rent & Payments' },
   { to: '/bookings', icon: CalendarCheck, label: 'Bookings' },
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/leads', icon: UserCircle, label: 'Leads' },
-  { to: '/audit-logs', icon: ClipboardList, label: 'Audit Logs', ownerOnly: true },
-  { to: '/settings/website-integration', icon: Globe, label: 'Website Integration', ownerOnly: true },
-  { to: '/settings/menu', icon: UtensilsCrossed, label: 'Menu' },
-  { to: '/settings/whatsapp', icon: MessageSquare, label: 'WhatsApp', ownerOnly: true },
+
+  { section: 'Activity' },
+  { to: '/inbox', icon: Inbox, label: 'Inbox' },
   { to: '/settings/messages', icon: Send, label: 'Message Log', ownerOnly: true },
   { to: '/settings/jobs', icon: Activity, label: 'Job Monitor', ownerOnly: true },
+
+  { section: 'Settings & Setup' },
+  { to: '/settings/menu', icon: UtensilsCrossed, label: 'Menu' },
+  { to: '/settings/whatsapp', icon: MessageSquare, label: 'WhatsApp', ownerOnly: true },
+  { to: '/settings/website-integration', icon: Globe, label: 'Website Integration', ownerOnly: true },
   { to: '/settings/team', icon: UserCog, label: 'Team', ownerOnly: true },
+  { to: '/audit-logs', icon: ClipboardList, label: 'Audit Logs', ownerOnly: true },
 ];
 
 interface Props {
@@ -74,7 +87,8 @@ export default function Layout({ children }: Props) {
   const navigate = useNavigate();
   const { data: propertiesData } = useProperties();
   const newWebsiteLeads = useNewWebsiteLeadCount();
-  const inboxUnread = useInboxUnreadCount();
+  // Inbox is Coming Soon — suppress the unread badge until it ships.
+  const inboxUnread = 0;
 
   const properties = propertiesData?.items ?? [];
   const activePropertyId = selectedPropertyId ?? properties[0]?.id ?? '';
@@ -95,9 +109,17 @@ export default function Layout({ children }: Props) {
     navigate('/auth/login');
   }
 
-  const visibleNav = NAV_ITEMS.filter((item) => {
+  // Filter items by role; drop section headers that would end up with no
+  // visible items under them.
+  const filtered = NAV_ITEMS.filter((item) => {
+    if ('section' in item) return true;
     if (item.ownerOnly && !canAccessFinancials()) return false;
     return true;
+  });
+  const visibleNav = filtered.filter((item, i) => {
+    if (!('section' in item)) return true;
+    const next = filtered[i + 1];
+    return next && !('section' in next);
   });
 
   return (
@@ -153,36 +175,49 @@ export default function Layout({ children }: Props) {
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-4 px-3">
           <ul className="space-y-1">
-            {visibleNav.map(({ to, icon: Icon, label, exact }) => (
-              <li key={to}>
-                <NavLink
-                  to={to}
-                  end={exact}
-                  className={({ isActive }) =>
-                    cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                      isActive
-                        ? 'bg-accent text-accent-foreground shadow-sm'
-                        : 'text-white/70 hover:bg-white/5 hover:text-white',
-                    )
-                  }
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon className="h-4 w-4 flex-shrink-0" />
-                  <span className="flex-1">{label}</span>
-                  {to === '/leads' && newWebsiteLeads > 0 && (
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-semibold text-accent-foreground">
-                      {newWebsiteLeads}
-                    </span>
-                  )}
-                  {to === '/inbox' && inboxUnread > 0 && (
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-semibold text-white">
-                      {inboxUnread > 99 ? '99+' : inboxUnread}
-                    </span>
-                  )}
-                </NavLink>
-              </li>
-            ))}
+            {visibleNav.map((item, i) => {
+              if ('section' in item) {
+                return (
+                  <li
+                    key={`section-${item.section}-${i}`}
+                    className="pt-4 pb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-white/40"
+                  >
+                    {item.section}
+                  </li>
+                );
+              }
+              const { to, icon: Icon, label, exact } = item;
+              return (
+                <li key={to}>
+                  <NavLink
+                    to={to}
+                    end={exact}
+                    className={({ isActive }) =>
+                      cn(
+                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                        isActive
+                          ? 'bg-accent text-accent-foreground shadow-sm'
+                          : 'text-white/70 hover:bg-white/5 hover:text-white',
+                      )
+                    }
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <Icon className="h-4 w-4 flex-shrink-0" />
+                    <span className="flex-1">{label}</span>
+                    {to === '/leads' && newWebsiteLeads > 0 && (
+                      <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-semibold text-accent-foreground">
+                        {newWebsiteLeads}
+                      </span>
+                    )}
+                    {to === '/inbox' && inboxUnread > 0 && (
+                      <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-semibold text-white">
+                        {inboxUnread > 99 ? '99+' : inboxUnread}
+                      </span>
+                    )}
+                  </NavLink>
+                </li>
+              );
+            })}
           </ul>
         </nav>
 

@@ -565,11 +565,66 @@ async def expense_summary(
     )
     recurring_items = [dict(r) for r in recurring_res.mappings().fetchall()]
 
+    # Previous-period comparison. Same length window ending the day before
+    # this period started — used by the frontend to render %MoM badges and
+    # surface spikes ([[project-period-attribution-rule]] is calendar-shape
+    # neutral: we just diff the two windows).
+    from datetime import timedelta as _td
+    span = (end_date - start_date).days + 1
+    prev_end = start_date - _td(days=1)
+    prev_start = prev_end - _td(days=span - 1)
+    prev_params = {**params, "start": prev_start, "end": prev_end}
+
+    prev_cat_res = await db.execute(
+        text(f"""
+            SELECT ec.name AS category_name,
+                   SUM(e.amount_paise) AS total_paise,
+                   COUNT(e.id) AS count
+            FROM expenses e
+            JOIN expense_categories ec ON ec.id = e.category_id
+            WHERE {where}
+            GROUP BY ec.name
+        """),
+        prev_params,
+    )
+    previous_items = [dict(r) for r in prev_cat_res.mappings().fetchall()]
+
+    prev_recurring_res = await db.execute(
+        text(f"""
+            WITH keywords(label, pattern) AS (VALUES
+                ('Vegetables', '%vegetable%'), ('Kirana', '%kirana%'),
+                ('Zepto', '%zepto%'), ('Insta Mart', '%insta mart%'),
+                ('Milk', '%milk%'), ('Curd', '%curd%'),
+                ('Chicken', '%chicken%'), ('Mutton', '%mutton%'),
+                ('Eggs', '%egg%'), ('Mushroom', '%mushroom%'),
+                ('Tomato', '%tomato%'), ('Tomato', '%tamota%'),
+                ('Onion', '%onion%'),
+                ('Petrol', '%petrol%'), ('Diesel', '%diesel%'),
+                ('Oil', '%oil%'), ('Masala', '%masala%'),
+                ('Cleaning', '%cleaning%'), ('Water cans', '%water bottle%')
+            )
+            SELECT k.label AS item,
+                   SUM(e.amount_paise) AS total_paise,
+                   COUNT(e.id) AS count
+            FROM keywords k
+            JOIN expenses e ON e.description ILIKE k.pattern
+            WHERE {where}
+            GROUP BY k.label
+            HAVING COUNT(e.id) >= 1
+        """),
+        prev_params,
+    )
+    previous_recurring_items = [dict(r) for r in prev_recurring_res.mappings().fetchall()]
+
     return {
         "items": rows,
         "total_paise": total,
         "by_person": by_person,
         "recurring_items": recurring_items,
+        "previous_items": previous_items,
+        "previous_recurring_items": previous_recurring_items,
+        "previous_period_start": str(prev_start),
+        "previous_period_end": str(prev_end),
         "period_start": str(start_date),
         "period_end": str(end_date),
     }
