@@ -68,7 +68,7 @@ const NAV_ITEMS: (NavItem | { section: string })[] = [
   { to: '/settings/messages', icon: Send, label: 'Message Log', ownerOnly: true },
   { to: '/settings/jobs', icon: Activity, label: 'Job Monitor', ownerOnly: true },
 
-  { section: 'Settings & Setup' },
+  { section: 'Settings' },
   { to: '/settings/menu', icon: UtensilsCrossed, label: 'Menu' },
   { to: '/settings/whatsapp', icon: MessageSquare, label: 'WhatsApp', ownerOnly: true },
   { to: '/settings/website-integration', icon: Globe, label: 'Website Integration', ownerOnly: true },
