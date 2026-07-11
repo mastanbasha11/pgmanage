@@ -29,11 +29,13 @@ _COLUMNS = """
     nl.error_message, nl.recipient_type, nl.recipient_id, nl.recipient_phone,
     nl.delivery_status, nl.delivered_at, nl.property_id,
     t.name AS tenant_name, t.phone AS tenant_phone,
-    p.name AS property_name
+    p.name AS property_name, r.room_number AS room_number
 """
 _FROM = (
     "FROM notification_log nl "
     "LEFT JOIN tenants t ON t.id = nl.recipient_id AND nl.recipient_type = 'TENANT' "
+    "LEFT JOIN beds b ON b.id = t.bed_id "
+    "LEFT JOIN rooms r ON r.id = b.room_id "
     "LEFT JOIN properties p ON p.id = nl.property_id"
 )
 
@@ -59,6 +61,7 @@ def _serialize(row: Any) -> dict:
         "property_name": getattr(row, "property_name", None),
         "tenant_name": getattr(row, "tenant_name", None),
         "tenant_phone": getattr(row, "tenant_phone", None),
+        "room_number": getattr(row, "room_number", None),
     }
 
 

@@ -129,13 +129,18 @@ async def download_job_run_log(
         msg_rows = (
             await db.execute(
                 text("""
-                    SELECT recipient_phone, rendered_message, message_body,
-                           sent_at, delivered_at, status, delivery_status, error_message
-                    FROM notification_log
-                    WHERE channel = 'WHATSAPP'
-                      AND created_at BETWEEN :start AND COALESCE(:finish, NOW())
-                      AND template_name IN ('rent_reminder', 'rent_overdue')
-                    ORDER BY created_at
+                    SELECT nl.recipient_phone, nl.rendered_message, nl.message_body,
+                           nl.sent_at, nl.delivered_at, nl.status, nl.delivery_status,
+                           nl.error_message, r.room_number AS room_number,
+                           t.name AS tenant_name
+                    FROM notification_log nl
+                    LEFT JOIN tenants t ON t.id = nl.recipient_id AND nl.recipient_type = 'TENANT'
+                    LEFT JOIN beds b ON b.id = t.bed_id
+                    LEFT JOIN rooms r ON r.id = b.room_id
+                    WHERE nl.channel = 'WHATSAPP'
+                      AND nl.created_at BETWEEN :start AND COALESCE(:finish, NOW())
+                      AND nl.template_name IN ('rent_reminder', 'rent_overdue')
+                    ORDER BY nl.created_at
                 """),
                 {"start": row.started_at, "finish": row.finished_at},
             )
@@ -143,6 +148,8 @@ async def download_job_run_log(
         messages = [
             {
                 "to": m.recipient_phone,
+                "room_number": m.room_number,
+                "tenant_name": m.tenant_name,
                 "message": m.rendered_message or m.message_body,
                 "triggered_at": m.sent_at.isoformat() if m.sent_at else None,
                 "delivered_at": m.delivered_at.isoformat() if m.delivered_at else None,
@@ -200,6 +207,8 @@ async def download_job_run_log(
             lines += [
                 "",
                 f"To:         {m['to'] or '—'}",
+                f"Room:       {m['room_number'] or '—'}",
+                f"Resident:   {m['tenant_name'] or '—'}",
                 f"Status:     {state}" + (f"  ERROR: {m['error']}" if m["error"] else ""),
                 f"Triggered:  {m['triggered_at'] or '—'}",
                 f"Delivered:  {m['delivered_at'] or '—'}",

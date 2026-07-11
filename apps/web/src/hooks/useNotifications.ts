@@ -21,6 +21,7 @@ export interface NotificationEntry {
   property_name: string | null;
   tenant_name: string | null;
   tenant_phone: string | null;
+  room_number: string | null;
 }
 
 export interface NotificationFilters {
