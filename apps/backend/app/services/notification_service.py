@@ -52,7 +52,7 @@ BUILT_IN_VARIABLES: dict[str, dict[str, list[dict[str, str]]]] = {
         "variables": [
             {"key": "tenant_name",       "label": "Resident's full name",            "example": "Asha Rao"},
             {"key": "tenant_first_name", "label": "Resident's first name",           "example": "Asha"},
-            {"key": "amount_rupees",     "label": "Amount due (₹ formatted)",        "example": "₹9,000"},
+            {"key": "amount_rupees",     "label": "Amount due (number; ₹ from template)", "example": "9,000"},
             {"key": "month_name",        "label": "Billing month (e.g. June 2026)",  "example": "June 2026"},
             {"key": "due_date",          "label": "Due date (e.g. 10 Jun 2026)",     "example": "10 Jun 2026"},
             {"key": "upi_vpa",           "label": "Property UPI handle",             "example": "loop@okhdfc"},
@@ -64,7 +64,7 @@ BUILT_IN_VARIABLES: dict[str, dict[str, list[dict[str, str]]]] = {
         "variables": [
             {"key": "tenant_name",       "label": "Resident's full name",            "example": "Asha Rao"},
             {"key": "tenant_first_name", "label": "Resident's first name",           "example": "Asha"},
-            {"key": "amount_rupees",     "label": "Outstanding (₹ formatted)",       "example": "₹9,000"},
+            {"key": "amount_rupees",     "label": "Outstanding (number; ₹ from template)","example": "9,000"},
             {"key": "month_name",        "label": "Billing month",                   "example": "June 2026"},
             {"key": "days_overdue",      "label": "Days overdue",                    "example": "7"},
             {"key": "upi_vpa",           "label": "Property UPI handle",             "example": "loop@okhdfc"},
@@ -440,11 +440,14 @@ async def send_rent_reminder(
     property_name: str = "",
     room_label: str = "",
 ) -> dict:
-    amount_rupees = f"₹{amount_paise // 100:,}"
+    # Templates print the ₹ literally (e.g. "…of ₹{{2}}"), so the param carries
+    # the number only — otherwise residents see a double "₹₹9,000".
+    amount_value = f"{amount_paise // 100:,}"
+    amount_rupees = f"₹{amount_value}"  # ₹-prefixed form, for the internal log body
     context = {
         "tenant_name": tenant_name,
         "tenant_first_name": tenant_name.split(" ")[0] if tenant_name else "",
-        "amount_rupees": amount_rupees,
+        "amount_rupees": amount_value,
         "month_name": month_name,
         "due_date": due_date,
         "upi_vpa": upi_id,
@@ -455,7 +458,7 @@ async def send_rent_reminder(
         to_phone=tenant_phone,
         template_name="rent_reminder",
         # Legacy ordered fallback for properties that haven't run the wizard yet.
-        template_params=[tenant_name, amount_rupees, month_name, due_date, upi_id],
+        template_params=[tenant_name, amount_value, month_name, due_date, upi_id],
         property_id=property_id,
         db=db,
         context=context,
@@ -486,11 +489,14 @@ async def send_rent_overdue(
     upi_vpa: str = "",
     property_name: str = "",
 ) -> dict:
-    amount_rupees = f"₹{amount_paise // 100:,}"
+    # Templates print the ₹ literally (e.g. "…of ₹{{2}}"), so the param carries
+    # the number only — otherwise residents see a double "₹₹9,000".
+    amount_value = f"{amount_paise // 100:,}"
+    amount_rupees = f"₹{amount_value}"  # ₹-prefixed form, for the internal log body
     context = {
         "tenant_name": tenant_name,
         "tenant_first_name": tenant_name.split(" ")[0] if tenant_name else "",
-        "amount_rupees": amount_rupees,
+        "amount_rupees": amount_value,
         "month_name": month_name,
         "days_overdue": str(days_overdue),
         "upi_vpa": upi_vpa,
@@ -500,7 +506,7 @@ async def send_rent_overdue(
     result = await send_whatsapp_template(
         to_phone=tenant_phone,
         template_name="rent_overdue",
-        template_params=[tenant_name, amount_rupees, month_name, manager_phone],
+        template_params=[tenant_name, amount_value, month_name, manager_phone],
         property_id=property_id,
         db=db,
         context=context,
