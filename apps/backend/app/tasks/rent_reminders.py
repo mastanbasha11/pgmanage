@@ -177,6 +177,12 @@ async def _generate_and_remind(event: dict, context) -> dict:
                     results["orgs_processed"] += 1
 
                 except Exception as exc:
+                    # See the overdue block below — a failed statement taints
+                    # the shared DB session; roll back before moving on.
+                    try:
+                        await db.rollback()
+                    except Exception as rb_exc:  # noqa: BLE001
+                        o["rollback_error"] = str(rb_exc)
                     o["error"] = str(exc)
                     results["errors"].append({"org_id": str(org_id), "error": str(exc)})
                 results["orgs"].append(o)
@@ -246,7 +252,7 @@ async def _send_overdue_reminders(event: dict, context) -> dict:
                                 AND t.status = 'ACTIVE'
                                 AND t.is_deleted = false
                                 AND t.phone IS NOT NULL
-                                AND rle.due_date + :grace_days <= CURRENT_DATE
+                                AND rle.due_date + CAST(:grace_days AS INTEGER) <= CURRENT_DATE
                                 AND NOT EXISTS (
                                     SELECT 1 FROM notification_log nl
                                     WHERE nl.recipient_id = t.id
@@ -292,6 +298,14 @@ async def _send_overdue_reminders(event: dict, context) -> dict:
                     results["orgs_processed"] += 1
 
                 except Exception as exc:
+                    # A failed statement taints the whole DB session — the next
+                    # org's `SET LOCAL search_path` fails with
+                    # InFailedSQLTransactionError until we roll back. Rollback
+                    # is best-effort; failure to roll back is logged, not raised.
+                    try:
+                        await db.rollback()
+                    except Exception as rb_exc:  # noqa: BLE001
+                        o["rollback_error"] = str(rb_exc)
                     o["error"] = str(exc)
                     results["errors"].append({"org_id": str(org_id), "error": str(exc)})
                 results["orgs"].append(o)
