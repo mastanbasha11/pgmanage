@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import {
   FlatList,
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -16,6 +17,7 @@ import {
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../../lib/api';
 import { useAppStore } from '../../lib/store';
@@ -42,6 +44,7 @@ interface LedgerEntry {
   id: string;
   tenant_id: string;
   tenant_name: string;
+  phone?: string | null;
   month: number;
   year: number;
   amount_due_paise: number;
@@ -51,6 +54,21 @@ interface LedgerEntry {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Compose a wa.me deep-link with the overdue-reminder message pre-filled.
+ * Same shape as the web WhatsApp icon — client-side text, not a Meta
+ * template call, so the collector reviews before tapping Send.
+ */
+function buildOverdueWhatsappUrl(e: LedgerEntry, monthLabel: string): string {
+  const phone = (e.phone ?? '').replace(/\D/g, '');
+  const rupeesFmt = Math.round(e.outstanding_paise / 100).toLocaleString('en-IN');
+  const name = e.tenant_name.trim();
+  const msg =
+    `Hi ${name}, a friendly reminder that your rent for ${monthLabel} is still ` +
+    `outstanding — ₹${rupeesFmt}. Please clear it at the earliest. Thanks!`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+}
 
 export default function RentTab() {
   const { selectedPropertyId, voiceGuidance } = useAppStore();
@@ -151,30 +169,49 @@ export default function RentTab() {
               colors={[colors.accent]}
             />
           }
-          renderItem={({ item }) => (
-            <Card
-              style={styles.entry}
-              onPress={() =>
-                router.push({
-                  pathname: '/payments/new',
-                  params: { tenant_id: item.tenant_id, name: item.tenant_name },
-                })
-              }
-            >
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.tenantName} numberOfLines={1}>
-                  {item.tenant_name}
-                </Text>
-                <Text style={styles.due}>Due {rupees(item.amount_due_paise)}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end', gap: space.xs }}>
-                <StatusPill label={t(`rent.status.${item.status}` as 'rent.status.PAID')} tone={statusTone(item.status)} />
-                {item.status !== 'PAID' && (
-                  <Text style={styles.outstanding}>{rupees(item.outstanding_paise)}</Text>
+          renderItem={({ item }) => {
+            const canWhatsapp = item.status !== 'PAID' && !!item.phone;
+            const monthLabel = `${MONTHS[item.month - 1]} ${item.year}`;
+            return (
+              <Card
+                style={styles.entry}
+                onPress={() =>
+                  router.push({
+                    pathname: '/payments/new',
+                    params: { tenant_id: item.tenant_id, name: item.tenant_name },
+                  })
+                }
+              >
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.tenantName} numberOfLines={1}>
+                    {item.tenant_name}
+                  </Text>
+                  <Text style={styles.due}>Due {rupees(item.amount_due_paise)}</Text>
+                </View>
+                {canWhatsapp && (
+                  <Pressable
+                    accessibilityLabel={`Message ${item.tenant_name} on WhatsApp`}
+                    hitSlop={8}
+                    style={styles.waButton}
+                    onPress={(ev) => {
+                      // Stop the card's onPress from firing behind us.
+                      ev.stopPropagation();
+                      const url = buildOverdueWhatsappUrl(item, monthLabel);
+                      Linking.openURL(url).catch(() => {});
+                    }}
+                  >
+                    <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+                  </Pressable>
                 )}
-              </View>
-            </Card>
-          )}
+                <View style={{ alignItems: 'flex-end', gap: space.xs }}>
+                  <StatusPill label={t(`rent.status.${item.status}` as 'rent.status.PAID')} tone={statusTone(item.status)} />
+                  {item.status !== 'PAID' && (
+                    <Text style={styles.outstanding}>{rupees(item.outstanding_paise)}</Text>
+                  )}
+                </View>
+              </Card>
+            );
+          }}
           ListEmptyComponent={
             <Empty
               iconName="cash-outline"
@@ -216,6 +253,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.md,
     marginBottom: space.sm,
+  },
+  waButton: {
+    height: 36,
+    width: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DCFCE7',
   },
   tenantName: { fontSize: fontSize.bodyLg, fontWeight: '700', color: colors.text },
   due: { fontSize: fontSize.caption, color: colors.textMuted, marginTop: 2 },

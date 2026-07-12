@@ -110,6 +110,11 @@ export default function SettingsTab() {
               label={t('tab.rooms')}
               onPress={() => router.push('/tabs/rooms')}
             />
+            <Row
+              iconName="chatbubbles-outline"
+              label="WA Message Log"
+              onPress={() => router.push('/messages')}
+            />
           </View>
         </Card>
 
