@@ -141,15 +141,15 @@ function PlanResults({ data, propertyId }: { data: PaybackPlan; propertyId: stri
           sub={`${grace} mo grace + ${regular} mo regular`}
         />
         <SummaryTile
-          label="Grace month profit"
+          label="Grace month target"
           value={formatPaise(calc.grace_month_profit_paise)}
-          sub="All owners, per month"
+          sub="Required to hit ROI on schedule"
           tone="income"
         />
         <SummaryTile
-          label="Regular month profit"
+          label="Regular month target"
           value={formatPaise(calc.regular_month_profit_paise)}
-          sub="Post-grace, per month"
+          sub="Post-grace (grace target − rent)"
           tone="income"
         />
       </div>
@@ -169,10 +169,10 @@ function PlanResults({ data, propertyId }: { data: PaybackPlan; propertyId: stri
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">Share</th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">Capital</th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">
-                    Grace month
+                    Grace month target
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">
-                    Regular month
+                    Regular month target
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">
                     Total over {plan.target_months} mo
@@ -264,7 +264,23 @@ function PlanResults({ data, propertyId }: { data: PaybackPlan; propertyId: stri
               }
             />
           </div>
+
+          {/* Catch-up card */}
+          {data.catchup && data.catchup.remaining_months > 0 && (
+            <CatchUpCard
+              catchup={data.catchup}
+              lessorRent={plan.lessor_rent_paise ?? 0}
+              onTrackExpectedTotal={
+                calc.grace_period_total_paise + calc.regular_period_total_paise
+              }
+            />
+          )}
         </div>
+      )}
+
+      {/* Month-by-month actual vs expected */}
+      {(monthly?.length ?? 0) > 0 && (
+        <MonthlyBreakdownTable months={monthly!} />
       )}
 
       {showBackfill && plan.plan_start_date && (
@@ -274,6 +290,169 @@ function PlanResults({ data, propertyId }: { data: PaybackPlan; propertyId: stri
           onClose={() => setShowBackfill(false)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * "If you keep last month's pace, you'll finish at ₹X" — vs "hit ROI on
+ * time, you need to average ₹Y from now on". The gap between the two is
+ * where owners course-correct.
+ */
+function CatchUpCard({
+  catchup,
+  lessorRent,
+  onTrackExpectedTotal,
+}: {
+  catchup: NonNullable<PaybackPlan['catchup']>;
+  lessorRent: number;
+  onTrackExpectedTotal: number;
+}) {
+  const graceLeft = catchup.grace_remaining;
+  const regLeft = catchup.regular_remaining;
+  const tone = catchup.on_track ? 'emerald' : 'amber';
+  return (
+    <div
+      className={
+        tone === 'emerald'
+          ? 'mt-3 rounded-md border border-emerald-200 bg-emerald-50/40 p-3'
+          : 'mt-3 rounded-md border border-amber-200 bg-amber-50/40 p-3'
+      }
+    >
+      <p className={`text-[11px] uppercase tracking-wider ${tone === 'emerald' ? 'text-emerald-800' : 'text-amber-800'}`}>
+        To still hit ROI on time — from next month onwards
+      </p>
+      {catchup.remaining_investment_paise <= 0 ? (
+        <p className="mt-1 text-sm">
+          ROI already recovered ahead of schedule. Anything you earn from now on is pure gain.
+        </p>
+      ) : (
+        <div className="mt-1 grid gap-2 sm:grid-cols-3">
+          {graceLeft > 0 && (
+            <div>
+              <p className="text-[11px] text-muted-foreground">
+                Grace months left ({graceLeft})
+              </p>
+              <p className="text-sm font-semibold">
+                {formatPaise(catchup.p_grace_catchup_paise)} / mo
+              </p>
+            </div>
+          )}
+          <div>
+            <p className="text-[11px] text-muted-foreground">
+              Regular months left ({regLeft})
+            </p>
+            <p className="text-sm font-semibold">
+              {formatPaise(catchup.p_regular_catchup_paise)} / mo
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] text-muted-foreground">
+              Remaining investment to recover
+            </p>
+            <p className="text-sm font-semibold">
+              {formatPaise(catchup.remaining_investment_paise)}
+            </p>
+          </div>
+        </div>
+      )}
+      {/* Deltas vs the original plan */}
+      {catchup.remaining_investment_paise > 0 && lessorRent >= 0 && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          {catchup.on_track
+            ? 'You are ahead of the original plan; the amounts above are the minimum from here.'
+            : `Original plan totalled ${formatPaise(onTrackExpectedTotal)} over the full horizon; you'll need this pace to catch up in the remaining months.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compact month × (Expected · Actual · Δ · Cumulative) table so the owner can
+ * see exactly which months over/under-shot and how the running gap moves.
+ */
+function MonthlyBreakdownTable({
+  months,
+}: {
+  months: NonNullable<PaybackPlan['monthly_breakdown']>;
+}) {
+  const monthName = (m: number) =>
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1];
+  let cumActual = 0;
+  let cumExpected = 0;
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <TrendingUp className="h-4 w-4 text-accent" />
+        <span className="text-sm font-medium">Month-by-month tracking</span>
+      </div>
+      <div className="overflow-hidden rounded-md border">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="px-3 py-2 text-left font-medium text-muted-foreground">Month</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Expected</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Actual</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Δ</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">
+                Cumulative actual
+              </th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">
+                Cumulative expected
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {months.map((m) => {
+              cumActual += m.actual_paise;
+              cumExpected += m.expected_paise;
+              const delta = m.actual_paise - m.expected_paise;
+              const cumDelta = cumActual - cumExpected;
+              return (
+                <tr key={`${m.year}-${m.month}`}>
+                  <td className="px-3 py-2">
+                    <span className="font-medium">
+                      {monthName(m.month)} {String(m.year).slice(-2)}
+                    </span>
+                    <span className="ml-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {m.source}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatPaise(m.expected_paise)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatPaise(m.actual_paise)}
+                  </td>
+                  <td
+                    className={
+                      delta >= 0
+                        ? 'px-3 py-2 text-right tabular-nums text-emerald-700'
+                        : 'px-3 py-2 text-right tabular-nums text-rose-700'
+                    }
+                  >
+                    {delta >= 0 ? '+' : '−'}
+                    {formatPaise(Math.abs(delta))}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                    {formatPaise(cumActual)}
+                  </td>
+                  <td
+                    className={
+                      cumDelta >= 0
+                        ? 'px-3 py-2 text-right tabular-nums text-emerald-700'
+                        : 'px-3 py-2 text-right tabular-nums text-rose-700'
+                    }
+                  >
+                    {formatPaise(cumExpected)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

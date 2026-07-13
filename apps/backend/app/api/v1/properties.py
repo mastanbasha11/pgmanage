@@ -1255,13 +1255,22 @@ async def get_payback_plan(
         # Iterate months in the plan window; for each, use manual if
         # present, else compute from payments/expenses for that calendar
         # month (bounded to the plan_start day on the first month).
+        # Also tag each row with the expected target for that month so the
+        # UI can render actual-vs-expected per month without recomputing.
         year, month = start.year, start.month
+        grace_months = int(plan["grace_months"] or 0)
         for i in range(months_elapsed):
+            expected_this_month = (
+                calc["grace_month_profit_paise"]
+                if i < grace_months
+                else calc["regular_month_profit_paise"]
+            )
             key = (year, month)
             if key in manual:
                 monthly_breakdown.append({
                     "year": year, "month": month,
                     "actual_paise": manual[key],
+                    "expected_paise": expected_this_month,
                     "source": "manual",
                 })
                 actual_cumulative_paise += manual[key]
@@ -1313,6 +1322,7 @@ async def get_payback_plan(
                 monthly_breakdown.append({
                     "year": year, "month": month,
                     "actual_paise": v,
+                    "expected_paise": expected_this_month,
                     "source": "computed",
                 })
                 actual_cumulative_paise += v
@@ -1331,6 +1341,49 @@ async def get_payback_plan(
     else:
         expected_cumulative_paise = 0
 
+    # Catch-up: given what's already banked (actual_cumulative_paise), what
+    # do the remaining months need to average so we still hit the total
+    # investment by month T? Same shape as the original solve, but the
+    # "remaining" horizon and "remaining" investment replace T and I.
+    catchup: dict | None = None
+    if plan["target_months"] and months_elapsed is not None:
+        T = int(plan["target_months"])
+        G = int(plan["grace_months"] or 0)
+        rent = int(plan["lessor_rent_paise"] or 0)
+        remaining_months = max(0, T - months_elapsed)
+        remaining_investment = int(plan["investment_paise"] or 0) - actual_cumulative_paise
+        grace_remaining = max(0, G - months_elapsed)
+        regular_remaining = remaining_months - grace_remaining
+        if remaining_months > 0:
+            if remaining_investment <= 0:
+                # Already fully recovered.
+                catchup = {
+                    "remaining_months": remaining_months,
+                    "grace_remaining": grace_remaining,
+                    "regular_remaining": regular_remaining,
+                    "remaining_investment_paise": remaining_investment,
+                    "p_grace_catchup_paise": 0,
+                    "p_regular_catchup_paise": 0,
+                    "on_track": True,
+                }
+            else:
+                # Solve P_grace' × grace_remaining + P_regular' × regular_remaining
+                #        = remaining_investment
+                # with P_regular' = P_grace' − rent.
+                p_grace_cu = (
+                    remaining_investment + regular_remaining * rent
+                ) / remaining_months
+                p_regular_cu = p_grace_cu - rent
+                catchup = {
+                    "remaining_months": remaining_months,
+                    "grace_remaining": grace_remaining,
+                    "regular_remaining": regular_remaining,
+                    "remaining_investment_paise": remaining_investment,
+                    "p_grace_catchup_paise": int(round(p_grace_cu)),
+                    "p_regular_catchup_paise": int(round(p_regular_cu)),
+                    "on_track": actual_cumulative_paise >= expected_cumulative_paise,
+                }
+
     result.update({
         "calc": calc,
         "per_owner": per_owner,
@@ -1338,6 +1391,7 @@ async def get_payback_plan(
         "actual_cumulative_paise": actual_cumulative_paise,
         "expected_cumulative_paise": expected_cumulative_paise,
         "monthly_breakdown": monthly_breakdown,
+        "catchup": catchup,
     })
     return result
 

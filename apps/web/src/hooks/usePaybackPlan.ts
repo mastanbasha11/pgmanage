@@ -37,8 +37,18 @@ export interface PaybackPlan {
     year: number;
     month: number;
     actual_paise: number;
+    expected_paise: number;
     source: 'manual' | 'computed';
   }[];
+  catchup?: {
+    remaining_months: number;
+    grace_remaining: number;
+    regular_remaining: number;
+    remaining_investment_paise: number;
+    p_grace_catchup_paise: number;
+    p_regular_catchup_paise: number;
+    on_track: boolean;
+  } | null;
 }
 
 export function usePaybackPlan(propertyId?: string) {
