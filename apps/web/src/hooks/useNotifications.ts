@@ -29,6 +29,7 @@ export interface NotificationFilters {
   status?: string;
   property_id?: string;
   recipient_id?: string;
+  direction?: 'outbound' | 'inbound';
   template_name?: string;
   date_from?: string;
   date_to?: string;

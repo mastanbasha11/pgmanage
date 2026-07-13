@@ -73,6 +73,10 @@ async def list_notifications(
     status: str | None = Query(None, description="SENT / FAILED / PENDING"),
     property_id: UUID | None = Query(None),
     recipient_id: UUID | None = Query(None, description="Filter to a single tenant thread"),
+    direction: str | None = Query(
+        None,
+        description="outbound (default excludes inbound:*) or inbound (only inbound:*)",
+    ),
     template_name: str | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
@@ -95,6 +99,10 @@ async def list_notifications(
     if recipient_id is not None:
         where.append("nl.recipient_id = :recipient_id")
         params["recipient_id"] = str(recipient_id)
+    if direction == "outbound":
+        where.append("(nl.template_name IS NULL OR nl.template_name NOT LIKE 'inbound:%')")
+    elif direction == "inbound":
+        where.append("nl.template_name LIKE 'inbound:%'")
     if template_name:
         where.append("nl.template_name = :template_name")
         params["template_name"] = template_name
