@@ -70,12 +70,36 @@ async def lifespan(app: FastAPI):
     print("Redis connection OK")
 
     # In-process cron — rent reminders + overdue notices. Only runs when
-    # SCHEDULER_ENABLED=true (so dev boxes don't spam tenants). Safe today
-    # because prod is a single backend replica; if we ever scale out, swap
-    # this for an external scheduler (EventBridge / k8s CronJob) or add a
-    # Redis-backed distributed lock around each fire.
+    # SCHEDULER_ENABLED=true (so dev boxes don't spam tenants).
+    #
+    # Uvicorn in prod runs with --workers 2, so BOTH workers would otherwise
+    # spin up their own APScheduler and every cron would fire twice. We
+    # grab a non-blocking exclusive fcntl lock on a file that lives across
+    # workers within the container; whichever worker gets it first is the
+    # scheduler leader, the other worker skips the scheduler entirely. The
+    # OS releases the lock when the worker dies, so a crash on the leader
+    # promotes the follower on the next boot.
     scheduler = None
+    scheduler_lock_fd = None
     if settings.SCHEDULER_ENABLED:
+        import fcntl
+        import os
+        try:
+            scheduler_lock_fd = open("/tmp/pgmanage-scheduler.lock", "w")
+            fcntl.flock(
+                scheduler_lock_fd.fileno(),
+                fcntl.LOCK_EX | fcntl.LOCK_NB,
+            )
+            scheduler_lock_fd.write(f"pid={os.getpid()}\n")
+            scheduler_lock_fd.flush()
+        except BlockingIOError:
+            # Another worker already leads — skip scheduler startup.
+            if scheduler_lock_fd is not None:
+                scheduler_lock_fd.close()
+                scheduler_lock_fd = None
+            print(f"Scheduler skipped in worker pid={os.getpid()} — another worker leads")
+
+    if settings.SCHEDULER_ENABLED and scheduler_lock_fd is not None:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
         from pytz import timezone as _tz
@@ -117,6 +141,8 @@ async def lifespan(app: FastAPI):
     if scheduler is not None:
         scheduler.shutdown(wait=False)
         print("Scheduler stopped")
+    if scheduler_lock_fd is not None:
+        scheduler_lock_fd.close()
     await engine.dispose()
     print("PGManage API shutdown complete")
 

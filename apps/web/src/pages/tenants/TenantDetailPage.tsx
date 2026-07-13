@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import TenantMessagesThread from './TenantMessagesThread';
 import {
   Dialog,
   DialogContent,
@@ -267,6 +268,7 @@ export default function TenantDetailPage() {
           <TabsTrigger value="payments">
             Payments ({paymentsData?.items.length ?? 0})
           </TabsTrigger>
+          <TabsTrigger value="messages">Messages</TabsTrigger>
           <TabsTrigger value="info">Info</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
         </TabsList>
@@ -421,6 +423,10 @@ export default function TenantDetailPage() {
               No payments recorded yet.
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="messages" className="mt-4">
+          <TenantMessagesThread tenantId={tenant.id} tenantName={tenant.name} />
         </TabsContent>
 
         <TabsContent value="info" className="mt-4">

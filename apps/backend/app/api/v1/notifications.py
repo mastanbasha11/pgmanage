@@ -72,6 +72,7 @@ async def list_notifications(
     channel: str | None = Query(None, description="WHATSAPP / EMAIL / PUSH / SMS"),
     status: str | None = Query(None, description="SENT / FAILED / PENDING"),
     property_id: UUID | None = Query(None),
+    recipient_id: UUID | None = Query(None, description="Filter to a single tenant thread"),
     template_name: str | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
@@ -91,6 +92,9 @@ async def list_notifications(
     if property_id is not None:
         where.append("nl.property_id = :property_id")
         params["property_id"] = str(property_id)
+    if recipient_id is not None:
+        where.append("nl.recipient_id = :recipient_id")
+        params["recipient_id"] = str(recipient_id)
     if template_name:
         where.append("nl.template_name = :template_name")
         params["template_name"] = template_name

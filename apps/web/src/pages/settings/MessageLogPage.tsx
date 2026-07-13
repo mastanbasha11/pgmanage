@@ -273,11 +273,87 @@ export default function MessageLogPage() {
                     {selected.rendered_message || selected.message_body}
                   </p>
                 </div>
+
+                <RepliesForOutbound selected={selected} />
               </div>
             </>
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Any inbound WhatsApp messages we received from the same tenant AFTER
+ * this outbound was sent. Not a Meta context-id chain — just "everything
+ * this tenant said back after we pinged them". If the same tenant got a
+ * later outbound as well, we stop at that boundary so replies land under
+ * the outbound they most likely responded to.
+ */
+function RepliesForOutbound({ selected }: { selected: NotificationEntry }) {
+  const enabled = !!selected.recipient_id && selected.recipient_type === 'TENANT';
+  const { data } = useNotifications(
+    enabled
+      ? {
+          recipient_id: selected.recipient_id ?? undefined,
+          channel: 'WHATSAPP',
+          page_size: 100,
+        }
+      : { page_size: 0 },
+  );
+  if (!enabled) return null;
+  const items = data?.items ?? [];
+  const sentAt = new Date(selected.sent_at ?? selected.created_at ?? 0).getTime();
+  // Next outbound to same tenant, if any — bound the reply window.
+  const nextOutbound = items
+    .filter(
+      (m) =>
+        !(m.template_name ?? '').startsWith('inbound:') &&
+        m.id !== selected.id &&
+        new Date(m.sent_at ?? m.created_at ?? 0).getTime() > sentAt,
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.sent_at ?? a.created_at ?? 0).getTime() -
+        new Date(b.sent_at ?? b.created_at ?? 0).getTime(),
+    )[0];
+  const cutoff = nextOutbound
+    ? new Date(nextOutbound.sent_at ?? nextOutbound.created_at ?? 0).getTime()
+    : Infinity;
+  const replies = items
+    .filter((m) => (m.template_name ?? '').startsWith('inbound:'))
+    .filter((m) => {
+      const t = new Date(m.sent_at ?? m.created_at ?? 0).getTime();
+      return t > sentAt && t < cutoff;
+    })
+    .sort(
+      (a, b) =>
+        new Date(a.sent_at ?? a.created_at ?? 0).getTime() -
+        new Date(b.sent_at ?? b.created_at ?? 0).getTime(),
+    );
+  if (replies.length === 0) return null;
+  return (
+    <div className="pt-2">
+      <span className="text-sm font-medium text-muted-foreground">
+        Replies from {selected.tenant_name ?? 'tenant'} ({replies.length})
+      </span>
+      <div className="mt-2 space-y-2">
+        {replies.map((r) => (
+          <div
+            key={r.id}
+            className="rounded-md border border-emerald-200 bg-emerald-50/50 px-3 py-2"
+          >
+            <p className="text-[10px] uppercase tracking-wider text-emerald-800">
+              {r.template_name?.replace('inbound:', '') || 'general'} · received{' '}
+              {fmt(r.sent_at ?? r.created_at)}
+            </p>
+            <p className="mt-1 whitespace-pre-line text-sm text-foreground">
+              {r.rendered_message || r.message_body}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
