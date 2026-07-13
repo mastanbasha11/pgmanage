@@ -883,5 +883,12 @@ async def generate_ledger(
         )
         created += 1
 
+        # If the owner already logged RENT payments for this (tenant, month,
+        # year) via Add Payment before running Generate, the freshly inserted
+        # ledger row would otherwise show UNPAID/₹0 collected — recompute
+        # from the payments table so paid amount, discount, and status
+        # reflect reality. Idempotent for the DO-NOTHING branch too.
+        await _recompute_rent_ledger(db, UUID(str(tenant["tenant_id"])), month, year)
+
     await db.commit()
     return {"message": f"Ledger generated", "entries_created": created, "month": month, "year": year}

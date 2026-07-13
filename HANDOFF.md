@@ -2,9 +2,51 @@
 
 > Single source of truth for someone picking up this codebase cold. Pair this with [CLAUDE.md](./CLAUDE.md) (codebase conventions) and the project memory entries under `~/.claude/projects/-Users-mastan-pgmanage/memory/`.
 
-**Last updated:** 2026-06-15 · commit `e53bfb7` on `main`
+**Last updated:** 2026-07-11 · commit `80b4639` on `main`
 **Live URL:** https://pgmanage.in
 **Prod host:** EC2 `13.126.139.161` (ap-south-1) · Docker Compose behind Caddy
+
+---
+
+## 0. What shipped in the July 2026 sessions
+
+Since the last handoff refresh (mid-June), the following landed on prod:
+
+### Money / attribution model
+- **Fiscal-window attribution** ([[project-period-attribution-rule]]): all cash-flow KPIs (dashboard + rent) now use the property's `settlement_day`-based window on `collected_at`. Expected/Outstanding/Discount stay rent-month-based via the ledger. Alembic **023** made `payments.tenant_id` nullable and added `POWER` to `payment_type_enum`.
+- **POWER payment type** for prepaid meter recharges ([[project-power-payments]]) — property-level, no tenant link, counted in Total Received.
+- **Opening Balance** per (property, month, year) on `billing_periods.opening_balance_paise` (alembic **024**). Editable via a small dialog on Rent & Payments and reflected in Dashboard totals.
+- **Daily Stays** tile on Rent & Payments; **Total Given renamed to Total Spent**. Dashboard restructured into three visual bands: Money Received (green), Money Spent (red), Profit + Ops. Chart legend/tooltip on "Income vs Expenses" now say Total Received / Total Spent; underlying cashflow query folds in bookings + opening balance on income side and refunds on expense side.
+- **Owner profit split** on Dashboard: uses new `property_team` roster to distribute the current month's profit by each owner's `share_pct` (Unassigned bucket highlights any shortfall).
+
+### Team roster + dropdowns
+- New per-property **`property_team`** table (alembic **027**) — Owner / Manager / Collector rows with optional `share_pct` (validated ≤100 for OWNERs). Full CRUD at `/properties/{id}/team` + `/team/{id}`. UI at Properties → Team & Owners tab.
+- **Paid To** (payments) and **Paid By** (expenses) inputs converted from free text to a `<PaidPersonSelect>` dropdown pulling from the roster, with an "Other…" free-text fallback for one-off payees. Historic free-text values grandfathered.
+
+### ROI & Rooms (new sidebar item, owner-only)
+- New endpoint `/dashboard/roi-by-room` — per-room revenue over N months, room-type roll-up (₹/bed/mo, occupancy).
+- New `/roi` page with room-type comparison bars, rules-based next-step suggestions (sub-base-rent rooms, fully vacant rooms, room-type winners to double down on, sub-50% occupancy types), and a per-room revenue table sorted by ₹/bed/mo. Expense-attribution intentionally left out (product call by the user).
+
+### Expense insights
+- `/expenses/summary` also returns `previous_items` + `previous_recurring_items` (same-length window ending the day before). Expenses page shows a **MoM chip** (▲ ▼ new / flat) next to every category and recurring item.
+- `/dashboard/summary` returns `top_recurring_spikes` (bucketed items up ≥50% and ≥₹500 vs prior window). Dashboard renders an amber alert card with the top 5.
+
+### Rent operations
+- **WhatsApp reminder icon** on unpaid/partial rent rows — `wa.me/<phone>?text=<pre-filled overdue message>`. Ad-hoc path (no template), doesn't touch Meta.
+- **Vacant Beds KPI** now navigates to `/properties/<id>` (default Vacant tab) on click.
+- **Payments + Refunds tabs** on Rent & Payments with per-row Edit + Delete (soft) — see [[project-period-attribution-rule]] for how the ledger re-tallies from surviving payments.
+- **Bookings page**: fiscal window applied on `collected_at`; a period badge shows the active window.
+
+### Sidebar reorg
+- Grouped **Activity** (Inbox, Message Log, Job Monitor) and **Settings** (Menu, WhatsApp, Website Integration, Team, Audit Logs). Top-level nav is now: Dashboard, Properties, Tenants, Rent & Payments, Bookings, Expenses, Leads, **ROI & Rooms** (owner-only).
+- **Inbox → Coming Soon**. Route still exists but the page renders a "Coming Soon" card and the unread-count polling is suppressed.
+
+### Mobile (staff APK)
+- **Property Manager** role now unblocked. New `canRecordPayments()` in the mobile store returns true for OWNER / PARTNER / PROPERTY_MANAGER (mirrors backend edit/delete gate). `/payments/new`, Home Quick Actions (Record Payment + new **Add booking**), and Resident detail's Pay button all use it. `canAccessFinancials()` unchanged for money-KPI viewing.
+
+### WhatsApp / notifications / other
+- Migrations **025** (`job_runs`) and **026** (notification detail: To-number, rendered body, delivery status/time visible in Message Log). Message Log page compressed to click-to-view popup with room number.
+- Amount param bug fixed on the rent-reminder template (₹ prefix was being double-rendered).
 
 ---
 
@@ -132,7 +174,28 @@ These live as durable files in `~/.claude/projects/-Users-mastan-pgmanage/memory
 ### Admin tenant inbox (`project-admin-tenant-inbox`)
 - Unified feed of tenant-initiated events in the admin webapp (`/inbox`).
 - Sources: new complaints, notice-to-vacate, KYC updates, feedback (future), other.
-- Org-scoped `tenant_inbox_events` table (migration 022) with read_at. Sidebar nav badge with unread count polls every 30s.
+- Org-scoped `tenant_inbox_events` table (migration 022) with read_at.
+- **Status (2026-07-11):** front-end **swapped to a Coming Soon page** while the write-side + review UI catches up. Backend + resident-app emitters + the sidebar entry all stay wired; the unread-badge query is suppressed. To re-enable, revert `apps/web/src/pages/inbox/InboxPage.tsx` to the archived version and un-mock the unread query in `Layout.tsx`.
+
+### Period attribution rule (`project-period-attribution-rule`)
+- **Cash-flow KPIs** (Collected, Total Received, Total Spent, Profit, Owner splits, Dashboard totals, Bookings totals) use the property's fiscal window (`settlement_day`-based, on `collected_at`).
+- **Rent-month KPIs** (Expected, Outstanding, Discount, Collection Rate) stay keyed to `for_month`/`for_year` on `rent_ledger_entries`.
+- Locked 2026-06-14. Any new revenue/expense flow that lands cash MUST attribute by the fiscal window rule, or the totals will drift.
+
+### Power-meter payments (`project-power-payments`)
+- New `POWER` value on `payment_type_enum`; `payments.tenant_id` is nullable for POWER rows (property-level income, no tenant link).
+- Counted in Total Received alongside rent + advance + daily.
+- **Do not** attribute POWER to a tenant even if it's convenient — the ROI/room analysis breaks if you do.
+
+### Opening balance (`project-opening-balance`)
+- Per-property, per-month cash the owner carries forward before profit-sharing.
+- Stored on `billing_periods.opening_balance_paise` (BIGINT). `close_date` is nullable so an owner can set opening balance without also touching the close date.
+- Formula everywhere: `Total Received = Opening + Rent + Advance + Daily + Power` · `Total Spent = Expenses + Refunds` · `Profit = Received − Spent`.
+
+### Team roster (`project-team-roster`)
+- Per-property `property_team` table with OWNER (with `share_pct`) / MANAGER / COLLECTOR rows. Owners' shares validated ≤ 100.
+- Paid To / Paid By dropdowns come from this roster (Manager + Collector) with an "Other…" free-text fallback. Owner profit split card on the dashboard sums to the current-month profit; anything not covered by an owner share shows as "Unassigned".
+- Kept **separate from `users`** (login staff): most collectors don't have logins. If you need a login for a collector later, create both records.
 
 ---
 
@@ -140,11 +203,15 @@ These live as durable files in `~/.claude/projects/-Users-mastan-pgmanage/memory
 
 ### High-impact, near-term
 
-1. **Meta WhatsApp App Review submission.** Submission package documented at [docs/meta-whatsapp-app-review.md](docs/meta-whatsapp-app-review.md). Once cleared, flip `TENANT_OTP_INLINE=False` in `/etc/pgmanage/.env` and the inline-code banner disappears automatically; WhatsApp template delivery takes over.
+1. **Ship the Inbox review UI** (or delete the sidebar entry). The backend + write-side is intact, only the front-end shows a Coming Soon card. Restoring means bringing back the archived `InboxPage.tsx` render + un-mocking the unread badge in `Layout.tsx`. Owner asked for it — currently blind to complaints/notice/KYC events.
 
-2. **GitHub Actions deploy** to replace the SSH-IP-whitelist dance. Deploy workflow at [.github/workflows/deploy-prod.yml](.github/workflows/deploy-prod.yml) is **disabled** (`if: false`) pending `SSH_HOST` + `SSH_USER` + `SSH_KEY` secrets, OR a switch to AWS SSM Session Manager. The IP-whitelist friction has cost ~6 SG-rule additions in this session alone.
+2. **Meta WhatsApp App Review submission.** Submission package documented at [docs/meta-whatsapp-app-review.md](docs/meta-whatsapp-app-review.md). Once cleared, flip `TENANT_OTP_INLINE=False` in `/etc/pgmanage/.env` and the inline-code banner disappears automatically; WhatsApp template delivery takes over.
 
-3. **Move `tenant-data` to `packages/shared`.** Today the same types + adapters are duplicated in `apps/mobile-tenant/lib/data/` and `apps/web/src/lib/tenant-data/`. Comments call this out. Drift risk grows with every feature.
+3. **GitHub Actions deploy** to replace the SSH-IP-whitelist dance. Deploy workflow at [.github/workflows/deploy-prod.yml](.github/workflows/deploy-prod.yml) is **disabled** (`if: false`) pending `SSH_HOST` + `SSH_USER` + `SSH_KEY` secrets, OR a switch to AWS SSM Session Manager. The IP-whitelist friction cost another ~4 SG-rule additions this session.
+
+4. **Move `tenant-data` to `packages/shared`.** Today the same types + adapters are duplicated in `apps/mobile-tenant/lib/data/` and `apps/web/src/lib/tenant-data/`. Comments call this out. Drift risk grows with every feature.
+
+5. **Team roster onboarding.** New `property_team` table shipped empty. The org running prod (LOOP Modern Coliving PG) needs its Owners (with % shares) + Collectors seeded via Properties → Team & Owners, or the Owner Profit Split card + the Paid To/By dropdowns render empty. Non-blocking (dropdowns fall through to "Other…" free-text) but the profit split is meaningless until this is done.
 
 ### Medium-impact, deliberately deferred
 
@@ -171,7 +238,11 @@ These live as durable files in `~/.claude/projects/-Users-mastan-pgmanage/memory
 
 ### Pre-existing test failures (not my work, not yours either yet)
 
-`tests/test_auth.py` (5 failures): the signup flow now requires admin approval; these tests assert immediate sign-in. `tests/test_expenses.py::test_expense_summary_by_category` — unrelated regression. **Confirmed via `git stash` to predate every commit on this branch.** Total backend suite: ~318 passing / 6 failing.
+`tests/test_auth.py` (5 failures): the signup flow now requires admin approval; these tests assert immediate sign-in. `tests/test_expenses.py::test_expense_summary_by_category` looks for a `by_category` key the endpoint never returned. **Confirmed via `git stash` to predate every commit on this branch.** Total backend suite: ~330 passing / 6 failing after the July session's additions.
+
+### Open reconciliation item (2026-07-11)
+
+- **Gokul 602 ₹7,800 (Jun 24)** — collected by Harshitha, tagged as June rent, paid inside the July fiscal window. Owner's sheet does not list it. Waiting on owner's call whether it's a legit June-rent balance to keep, or a stray entry to soft-delete. Everything else in the July window reconciles ₹-for-₹ across Shammi / Pandu / Mohan / Mastan; Harshi is +₹7,800 in the DB solely because of this row.
 
 ---
 
@@ -183,7 +254,12 @@ These live as durable files in `~/.claude/projects/-Users-mastan-pgmanage/memory
   1. `app/models/schemas_migration.py::provision_org_schema` (for new orgs)
   2. An Alembic migration that loops every existing `org_*` schema and runs the same ALTER
 
-  Skip either side and you'll silently break either new orgs (skip step 1) or existing orgs (skip step 2). All migrations 019-022 follow this rule.
+  Skip either side and you'll silently break either new orgs (skip step 1) or existing orgs (skip step 2). All migrations 019-027 follow this rule. Recent additions:
+   - **023** — `payments.tenant_id` NULL-able + `ALTER TYPE payment_type_enum ADD VALUE IF NOT EXISTS 'POWER'`. The `IF NOT EXISTS` matters — CREATE TYPE is a no-op when the type already exists, so new enum values never appear without the ALTER.
+   - **024** — `billing_periods.opening_balance_paise` + `close_date` made nullable.
+   - **025** — `job_runs`.
+   - **026** — notification detail (to number, rendered body, delivery status/time).
+   - **027** — `property_team` + `team_role_enum`.
 
 - **search_path resets after commit.** If you commit mid-request, you need to `set_schema()` again before further org-scoped queries. The current code commits ONLY at the end of handlers to avoid this.
 
@@ -273,7 +349,11 @@ Backend tests use a real `pgmanage_test` Postgres DB with NullPool. Rate limitin
 /api/v1/menu/{upload, list, {id}/file-url, {id}}   owner menu management
 /api/v1/menu/file/{token}                          public token-signed serve
 /api/v1/inbox /inbox/unread-count
-/api/v1/inbox/{id}/read /inbox/mark-all-read       admin inbox
+/api/v1/inbox/{id}/read /inbox/mark-all-read       admin inbox (page hidden — coming soon)
+/api/v1/dashboard/summary /dashboard/cashflow
+/api/v1/dashboard/roi-by-room                      per-room + room-type revenue + ROI
+/api/v1/properties/{id}/team + /team/{id}          per-property team roster CRUD
+/api/v1/properties/{id}/billing-period/{y}/{m}     close_date + opening_balance
 /api/platform/*                                    platform-admin (separate audience)
 ```
 
