@@ -152,6 +152,22 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         # populate the Paid To / Paid By dropdowns. Kept separate from `users`
         # (which are staff logins) — some collectors don't have logins.
         # See [[project-team-roster]].
+        # Per-month actual profit override for the ROI payback tracker.
+        # If a row exists for (property, year, month), the payback tracker
+        # uses this figure verbatim instead of computing net income from
+        # payments − expenses. Used when the owner joined PGManage mid-cycle
+        # and needs to backfill history their books already know.
+        f"""CREATE TABLE IF NOT EXISTS "{schema}".payback_monthly_actual (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            property_id UUID NOT NULL REFERENCES "{schema}".properties(id) ON DELETE CASCADE,
+            period_year INTEGER NOT NULL,
+            period_month INTEGER NOT NULL CHECK (period_month BETWEEN 1 AND 12),
+            actual_profit_paise BIGINT NOT NULL,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_payback_actual_pmy UNIQUE (property_id, period_year, period_month)
+        )""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".property_team (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             property_id UUID NOT NULL REFERENCES "{schema}".properties(id) ON DELETE CASCADE,

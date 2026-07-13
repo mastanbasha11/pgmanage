@@ -1199,71 +1199,127 @@ async def get_payback_plan(
 
     # Per-owner monthly numbers.
     per_owner = []
+    investment = int(plan["investment_paise"] or 0)
     for o in owners:
         pct = float(o["share_pct"] or 0)
+        # Auto-derive capital from share_pct × investment when the owner
+        # hasn't overridden it. `capital_paise` is the manually-entered
+        # value (nullable); `capital_effective_paise` is what the UI
+        # shows and defaults to the pro-rata share of the total.
+        effective = (
+            int(o["capital_paise"])
+            if o["capital_paise"] is not None
+            else int(round(investment * pct / 100))
+        )
         per_owner.append({
             "name": o["name"],
             "share_pct": pct,
             "capital_paise": o["capital_paise"],
+            "capital_effective_paise": effective,
             "grace_month_share_paise": int(round(calc["grace_month_profit_paise"] * pct / 100)),
             "regular_month_share_paise": int(round(calc["regular_month_profit_paise"] * pct / 100)),
         })
 
-    # Actual-vs-projected: cumulative net_income since the plan_start_date
-    # (fiscal-window rule applies to the monthly totals — we just sum the
-    # per-month dashboard math without re-doing it here).
+    # Actual-vs-projected: cumulative net income since the plan_start_date.
+    # For each elapsed month we prefer the manual actual (from
+    # payback_monthly_actual) if set — that lets an owner who onboarded
+    # mid-year backfill "the books already show ₹X for March". If no
+    # manual value, we compute from the payments/expenses tables.
     actual_cumulative_paise = 0
     months_elapsed = 0
+    monthly_breakdown: list[dict] = []
     if plan["plan_start_date"]:
         from datetime import date as _date
         start = row["roi_plan_start_date"]
         today = _date.today()
-        # Whole calendar months between start and today (rounded down)
         months_elapsed = max(
             0,
             (today.year - start.year) * 12 + (today.month - start.month),
         )
 
-        # Cumulative rent-in-period + advance + power − expenses − refunds,
-        # by calendar month (we don't re-do fiscal-window here; the accuracy
-        # is good enough for a payback tracker).
-        cum_res = await db.execute(
-            text(f"""
-                WITH inc AS (
-                    SELECT SUM(amount_paise) AS a
-                    FROM payments
-                    WHERE property_id = :pid AND is_deleted = false
-                      AND payment_type IN ('RENT','ADVANCE','DEPOSIT','POWER')
-                      AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date >= :start
-                ),
-                bkg AS (
-                    SELECT SUM(amount_paise) AS a
-                    FROM bookings
-                    WHERE property_id = :pid AND is_deleted = false
-                      AND collected_at::date >= :start
-                ),
-                exp AS (
-                    SELECT SUM(amount_paise) AS a
-                    FROM expenses
-                    WHERE property_id = :pid AND is_deleted = false
-                      AND approval_status = 'APPROVED'::expense_approval_enum
-                      AND purchase_date >= :start
-                ),
-                ref AS (
-                    SELECT SUM(amount_paise) AS a
-                    FROM payments
-                    WHERE property_id = :pid AND is_deleted = false
-                      AND payment_type = 'REFUND'
-                      AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date >= :start
-                )
-                SELECT COALESCE((SELECT a FROM inc), 0)
-                     + COALESCE((SELECT a FROM bkg), 0)
-                     - COALESCE((SELECT a FROM exp), 0)
-                     - COALESCE((SELECT a FROM ref), 0) AS net
+        # Pull manual overrides first so the loop below doesn't re-hit DB
+        # per-month.
+        manual_res = await db.execute(
+            text("""
+                SELECT period_year, period_month, actual_profit_paise
+                FROM payback_monthly_actual
+                WHERE property_id = :pid
             """),
-            {"pid": str(property_id), "start": start},
+            {"pid": str(property_id)},
         )
-        actual_cumulative_paise = int(cum_res.scalar() or 0)
+        manual: dict[tuple[int, int], int] = {
+            (int(r["period_year"]), int(r["period_month"])): int(r["actual_profit_paise"])
+            for r in manual_res.mappings().fetchall()
+        }
+
+        # Iterate months in the plan window; for each, use manual if
+        # present, else compute from payments/expenses for that calendar
+        # month (bounded to the plan_start day on the first month).
+        year, month = start.year, start.month
+        for i in range(months_elapsed):
+            key = (year, month)
+            if key in manual:
+                monthly_breakdown.append({
+                    "year": year, "month": month,
+                    "actual_paise": manual[key],
+                    "source": "manual",
+                })
+                actual_cumulative_paise += manual[key]
+            else:
+                # Compute this calendar month's net.
+                m_start = _date(year, month, 1)
+                # Clamp the first month to plan_start_date so we don't
+                # over-count pre-lease days.
+                if (year, month) == (start.year, start.month):
+                    m_start = start
+                m_end = (
+                    _date(year + 1, 1, 1)
+                    if month == 12
+                    else _date(year, month + 1, 1)
+                )
+                cum = await db.execute(
+                    text("""
+                        WITH inc AS (
+                            SELECT COALESCE(SUM(amount_paise), 0) AS a FROM payments
+                            WHERE property_id = :pid AND is_deleted = false
+                              AND payment_type IN ('RENT','ADVANCE','DEPOSIT','POWER')
+                              AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date >= :ms
+                              AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date <  :me
+                        ),
+                        bkg AS (
+                            SELECT COALESCE(SUM(amount_paise), 0) AS a FROM bookings
+                            WHERE property_id = :pid AND is_deleted = false
+                              AND collected_at::date >= :ms AND collected_at::date < :me
+                        ),
+                        exp AS (
+                            SELECT COALESCE(SUM(amount_paise), 0) AS a FROM expenses
+                            WHERE property_id = :pid AND is_deleted = false
+                              AND approval_status = 'APPROVED'::expense_approval_enum
+                              AND purchase_date >= :ms AND purchase_date < :me
+                        ),
+                        ref AS (
+                            SELECT COALESCE(SUM(amount_paise), 0) AS a FROM payments
+                            WHERE property_id = :pid AND is_deleted = false
+                              AND payment_type = 'REFUND'
+                              AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date >= :ms
+                              AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date <  :me
+                        )
+                        SELECT ((SELECT a FROM inc) + (SELECT a FROM bkg)
+                              - (SELECT a FROM exp) - (SELECT a FROM ref)) AS net
+                    """),
+                    {"pid": str(property_id), "ms": m_start, "me": m_end},
+                )
+                v = int(cum.scalar() or 0)
+                monthly_breakdown.append({
+                    "year": year, "month": month,
+                    "actual_paise": v,
+                    "source": "computed",
+                })
+                actual_cumulative_paise += v
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
 
     # Expected cumulative by now: grace months at P_grace, remainder at P_regular.
     if months_elapsed > 0:
@@ -1281,8 +1337,74 @@ async def get_payback_plan(
         "months_elapsed": months_elapsed,
         "actual_cumulative_paise": actual_cumulative_paise,
         "expected_cumulative_paise": expected_cumulative_paise,
+        "monthly_breakdown": monthly_breakdown,
     })
     return result
+
+
+class MonthlyActualUpdate(BaseModel):
+    actual_profit_paise: int
+    notes: str | None = None
+
+
+@router.put(
+    "/properties/{property_id}/payback-plan/monthly/{year}/{month}",
+    summary="Set the manual actual profit for one month",
+)
+async def set_monthly_actual(
+    property_id: UUID,
+    year: int,
+    month: int,
+    body: MonthlyActualUpdate,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(403, "Only owners can override monthly actuals")
+    if month < 1 or month > 12:
+        raise HTTPException(400, "Invalid month")
+    await db.execute(
+        text("""
+            INSERT INTO payback_monthly_actual
+                (property_id, period_year, period_month, actual_profit_paise, notes)
+            VALUES (:pid, :y, :m, :v, :n)
+            ON CONFLICT (property_id, period_year, period_month)
+            DO UPDATE SET actual_profit_paise = EXCLUDED.actual_profit_paise,
+                          notes = COALESCE(EXCLUDED.notes, payback_monthly_actual.notes),
+                          updated_at = NOW()
+        """),
+        {
+            "pid": str(property_id), "y": year, "m": month,
+            "v": int(body.actual_profit_paise),
+            "n": (body.notes or "").strip() or None,
+        },
+    )
+    await db.commit()
+    return {"message": "Monthly actual saved"}
+
+
+@router.delete(
+    "/properties/{property_id}/payback-plan/monthly/{year}/{month}",
+    summary="Clear the manual actual for one month (revert to computed)",
+)
+async def clear_monthly_actual(
+    property_id: UUID,
+    year: int,
+    month: int,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(403, "Only owners can clear monthly actuals")
+    await db.execute(
+        text(
+            "DELETE FROM payback_monthly_actual "
+            "WHERE property_id = :pid AND period_year = :y AND period_month = :m"
+        ),
+        {"pid": str(property_id), "y": year, "m": month},
+    )
+    await db.commit()
+    return {"message": "Monthly actual cleared"}
 
 
 @router.put(

@@ -34,7 +34,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { usePaybackPlan, useSavePaybackPlan, type PaybackPlan } from '@/hooks/usePaybackPlan';
+import {
+  usePaybackPlan,
+  useSavePaybackPlan,
+  useSaveMonthlyActual,
+  useClearMonthlyActual,
+  type PaybackPlan,
+} from '@/hooks/usePaybackPlan';
 import { useToast } from '@/hooks/useToast';
 import { getApiError } from '@/lib/api';
 import { formatPaise } from '@/lib/utils';
@@ -81,7 +87,7 @@ export default function PaybackPlanSection({ propertyId }: { propertyId: string 
               </p>
             </div>
           ) : (
-            <PlanResults data={data!} />
+            <PlanResults data={data!} propertyId={propertyId} />
           )}
         </CardContent>
       </Card>
@@ -97,9 +103,11 @@ export default function PaybackPlanSection({ propertyId }: { propertyId: string 
   );
 }
 
-function PlanResults({ data }: { data: PaybackPlan }) {
+function PlanResults({ data, propertyId }: { data: PaybackPlan; propertyId: string }) {
   const { plan, calc, per_owner: perOwner, months_elapsed: elapsed,
-    actual_cumulative_paise: actual, expected_cumulative_paise: expected } = data;
+    actual_cumulative_paise: actual, expected_cumulative_paise: expected,
+    monthly_breakdown: monthly } = data;
+  const [showBackfill, setShowBackfill] = useState(false);
 
   if (calc?.error) {
     return (
@@ -183,7 +191,12 @@ function PlanResults({ data }: { data: PaybackPlan }) {
                         {o.share_pct}%
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                        {o.capital_paise ? formatPaise(o.capital_paise) : '—'}
+                        {formatPaise(o.capital_effective_paise)}
+                        {o.capital_paise == null && (
+                          <span className="ml-1 text-[10px] text-muted-foreground/70">
+                            (auto)
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatPaise(o.grace_month_share_paise)}
@@ -227,9 +240,14 @@ function PlanResults({ data }: { data: PaybackPlan }) {
               <TrendingUp className="h-4 w-4 text-accent" />
               <span className="text-sm font-medium">Progress</span>
             </div>
-            <span className="text-xs text-muted-foreground">
-              {elapsed ?? 0} of {plan.target_months} months elapsed
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                {elapsed ?? 0} of {plan.target_months} months elapsed
+              </span>
+              <Button size="sm" variant="outline" onClick={() => setShowBackfill(true)}>
+                Fill monthly profits
+              </Button>
+            </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <MiniTile label="Actual so far" value={formatPaise(actual ?? 0)} tone="income" />
@@ -247,6 +265,14 @@ function PlanResults({ data }: { data: PaybackPlan }) {
             />
           </div>
         </div>
+      )}
+
+      {showBackfill && plan.plan_start_date && (
+        <BackfillDialog
+          propertyId={propertyId}
+          months={monthly ?? []}
+          onClose={() => setShowBackfill(false)}
+        />
       )}
     </div>
   );
@@ -492,6 +518,151 @@ function PlanDialog({
           </Button>
           <Button type="button" onClick={submit} disabled={save.isPending}>
             {save.isPending ? 'Saving…' : 'Save plan'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Lets the owner backfill / override the profit received in each elapsed
+ * month. Rows come from the payback plan's month-by-month breakdown; each
+ * one shows the current value (either "manual" from an earlier backfill or
+ * "computed" from payments − expenses) and an inline rupee input to change
+ * it. Blank input = no change; entering 0 keeps the row as 0 (manual).
+ * Clicking Reset on a manual row removes the override so the computed value
+ * takes over again.
+ */
+function BackfillDialog({
+  propertyId,
+  months,
+  onClose,
+}: {
+  propertyId: string;
+  months: PaybackPlan['monthly_breakdown'];
+  onClose: () => void;
+}) {
+  const rows = months ?? [];
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const save = useSaveMonthlyActual(propertyId);
+  const clear = useClearMonthlyActual(propertyId);
+  const { toast } = useToast();
+
+  async function saveAll() {
+    let saved = 0;
+    for (const r of rows) {
+      const key = `${r.year}-${r.month}`;
+      const draft = drafts[key];
+      if (draft === undefined || draft === '') continue;
+      const paise = Math.round(Number(draft) * 100);
+      if (Number.isNaN(paise) || paise < 0) continue;
+      try {
+        await save.mutateAsync({
+          year: r.year,
+          month: r.month,
+          actual_profit_paise: paise,
+        });
+        saved += 1;
+      } catch (err) {
+        toast({
+          title: 'Failed',
+          description: getApiError(err),
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+    toast({
+      title: saved
+        ? `Saved ${saved} month${saved === 1 ? '' : 's'}`
+        : 'No changes to save',
+    });
+    onClose();
+  }
+
+  async function reset(year: number, month: number) {
+    try {
+      await clear.mutateAsync({ year, month });
+      toast({ title: 'Reset to computed' });
+    } catch (err) {
+      toast({
+        title: 'Failed',
+        description: getApiError(err),
+        variant: 'destructive',
+      });
+    }
+  }
+
+  const monthName = (m: number) =>
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1];
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Backfill monthly profit</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          Went live before onboarding to PGManage? Enter the actual profit for
+          each past month here — these override the computed net income. Blank
+          = keep as-is.
+        </p>
+        <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
+          {rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No elapsed months yet — set a plan start date in the past.
+            </p>
+          ) : (
+            rows.map((r) => {
+              const key = `${r.year}-${r.month}`;
+              const isManual = r.source === 'manual';
+              return (
+                <div
+                  key={key}
+                  className="flex items-center gap-2 rounded-md border bg-card p-2"
+                >
+                  <div className="w-24 shrink-0">
+                    <p className="text-sm font-medium">
+                      {monthName(r.month)} {r.year}
+                    </p>
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {isManual ? 'manual' : 'computed'}
+                    </p>
+                  </div>
+                  <div className="flex-1">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="1"
+                      placeholder={`${Math.round(r.actual_paise / 100)}`}
+                      value={drafts[key] ?? ''}
+                      onChange={(e) =>
+                        setDrafts((d) => ({ ...d, [key]: e.target.value }))
+                      }
+                    />
+                  </div>
+                  {isManual && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs"
+                      onClick={() => reset(r.year, r.month)}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+        <DialogFooter className="mt-4">
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          <Button type="button" onClick={saveAll} disabled={save.isPending}>
+            {save.isPending ? 'Saving…' : 'Save all entered'}
           </Button>
         </DialogFooter>
       </DialogContent>

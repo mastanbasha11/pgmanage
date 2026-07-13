@@ -26,12 +26,19 @@ export interface PaybackPlan {
     name: string;
     share_pct: number;
     capital_paise: number | null;
+    capital_effective_paise: number;
     grace_month_share_paise: number;
     regular_month_share_paise: number;
   }[];
   months_elapsed?: number;
   actual_cumulative_paise?: number;
   expected_cumulative_paise?: number;
+  monthly_breakdown?: {
+    year: number;
+    month: number;
+    actual_paise: number;
+    source: 'manual' | 'computed';
+  }[];
 }
 
 export function usePaybackPlan(propertyId?: string) {
@@ -56,6 +63,36 @@ export function useSavePaybackPlan(propertyId?: string) {
   return useMutation({
     mutationFn: (data: PaybackPlanInput) =>
       api.put(`/properties/${propertyId}/payback-plan`, data).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['payback-plan', propertyId] }),
+  });
+}
+
+export function useSaveMonthlyActual(propertyId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ year, month, actual_profit_paise, notes }: {
+      year: number;
+      month: number;
+      actual_profit_paise: number;
+      notes?: string;
+    }) =>
+      api
+        .put(`/properties/${propertyId}/payback-plan/monthly/${year}/${month}`, {
+          actual_profit_paise,
+          notes,
+        })
+        .then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['payback-plan', propertyId] }),
+  });
+}
+
+export function useClearMonthlyActual(propertyId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ year, month }: { year: number; month: number }) =>
+      api
+        .delete(`/properties/${propertyId}/payback-plan/monthly/${year}/${month}`)
+        .then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['payback-plan', propertyId] }),
   });
 }
