@@ -39,8 +39,9 @@ function labelFor(year: number, month: number): string {
   return `${M[month - 1]} ${String(year).slice(-2)}`;
 }
 
-/** Build the full series from first_fiscal through target-months, extending
- *  expected past the elapsed range with the plan targets. */
+/** Build the full series from the go-live month through target-months.
+ *  Both curves start at 0 at the go-live label (Feb) so the chart tells
+ *  a clear origin story. */
 function buildSeries(data: PaybackPlan): Point[] {
   const plan = data.plan;
   const calc = data.calc;
@@ -55,10 +56,20 @@ function buildSeries(data: PaybackPlan): Point[] {
     runA += m.actual_paise;
     cumActualByKey.set(`${m.year}-${m.month}`, runA);
   }
+
+  // Origin point at the go-live month (e.g. Feb). If go-live is Feb 15
+  // and first fiscal month is Mar, the chart still shows Feb as the
+  // starting zero-point so the story reads "started Feb, first billed
+  // in Mar".
+  const startDate = new Date(plan.plan_start_date);
+  const originLabel = labelFor(startDate.getFullYear(), startDate.getMonth() + 1);
+  const points: Point[] = [
+    { label: originLabel, actual: 0, expected: 0, isPast: true },
+  ];
+
   let runE = 0;
   let year = first.year;
   let month = first.month;
-  const points: Point[] = [];
   for (let i = 0; i < total; i++) {
     const per =
       i < grace ? calc.grace_month_profit_paise : calc.regular_month_profit_paise;
@@ -107,11 +118,15 @@ export default function PaybackChart({
   }
 
   const height = compact ? 240 : 320;
-  const yTickFormat = (v: number) => {
-    if (v >= 1e7) return `₹${(v / 1e7).toFixed(1)} Cr`;
-    if (v >= 1e5) return `₹${(v / 1e5).toFixed(1)} L`;
-    if (v >= 1e3) return `₹${Math.round(v / 1e3)} k`;
-    return `₹${v}`;
+  // Y-axis values are in PAISE — convert to rupees first, then compress
+  // to lakhs / crores. ₹1 Cr = 1e7 rupees = 1e9 paise, ₹1 L = 1e5 rupees
+  // = 1e7 paise.
+  const yTickFormat = (paise: number) => {
+    const rupees = paise / 100;
+    if (rupees >= 1e7) return `₹${(rupees / 1e7).toFixed(1)} Cr`;
+    if (rupees >= 1e5) return `₹${(rupees / 1e5).toFixed(1)} L`;
+    if (rupees >= 1e3) return `₹${Math.round(rupees / 1e3)} k`;
+    return `₹${Math.round(rupees)}`;
   };
 
   return (
@@ -141,7 +156,7 @@ export default function PaybackChart({
           <Tooltip
             formatter={(v: number, name: string) => [
               formatPaise(v ?? 0),
-              name === 'actual' ? 'Actual (cumulative)' : 'Expected (cumulative)',
+              name,
             ]}
             contentStyle={{
               backgroundColor: 'hsl(var(--card))',
@@ -152,7 +167,6 @@ export default function PaybackChart({
           />
           {!compact && (
             <Legend
-              formatter={(v) => (v === 'actual' ? 'Actual' : 'Expected')}
               iconType="line"
               iconSize={12}
               wrapperStyle={{ fontSize: '12px' }}
@@ -187,18 +201,24 @@ export default function PaybackChart({
           <Area
             type="monotone"
             dataKey="expected"
+            name="Expected (cumulative)"
             stroke="#3b82f6"
             strokeWidth={2}
             strokeDasharray="4 4"
             fill="url(#expectedGrad)"
+            dot={{ r: 3, fill: '#3b82f6', strokeWidth: 0 }}
+            activeDot={{ r: 5 }}
           />
           <Area
             type="monotone"
             dataKey="actual"
+            name="Actual (cumulative)"
             stroke="#10b981"
             strokeWidth={2.5}
             fill="url(#actualGrad)"
             connectNulls={false}
+            dot={{ r: 3.5, fill: '#10b981', strokeWidth: 0 }}
+            activeDot={{ r: 6 }}
           />
         </AreaChart>
       </ResponsiveContainer>

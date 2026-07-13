@@ -303,7 +303,7 @@ function PlanResults({ data, propertyId }: { data: PaybackPlan; propertyId: stri
 
       {/* Month-by-month actual vs expected */}
       {(monthly?.length ?? 0) > 0 && (
-        <MonthlyBreakdownTable months={monthly!} />
+        <MonthlyBreakdownTable months={monthly!} data={data} />
       )}
 
       {showBackfill && plan.plan_start_date && (
@@ -392,16 +392,30 @@ function CatchUpCard({
 }
 
 /**
- * Compact month × (Expected · Actual · Δ · Cumulative) table so the owner can
- * see exactly which months over/under-shot and how the running gap moves.
+ * Compact per-month tracker.
+ *
+ * "Required" is the dynamic catch-up target for THIS month given what
+ * happened before it — remaining investment ÷ remaining months (grace-
+ * adjusted). When you miss a month, the following months' Required goes
+ * up; when you overshoot, it goes down. Δ compares Actual to Required
+ * so the color always reflects "did I beat what I actually needed?".
+ * The baseline plan target is still available under Expected for
+ * reference.
  */
 function MonthlyBreakdownTable({
   months,
+  data,
 }: {
   months: NonNullable<PaybackPlan['monthly_breakdown']>;
+  data: PaybackPlan;
 }) {
   const monthName = (m: number) =>
     ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1];
+  const investment = data.plan.investment_paise ?? 0;
+  const total = data.plan.target_months ?? 0;
+  const grace = data.plan.grace_months ?? 0;
+  const rent = data.plan.lessor_rent_paise ?? 0;
+
   let cumActual = 0;
   let cumExpected = 0;
   return (
@@ -409,6 +423,9 @@ function MonthlyBreakdownTable({
       <div className="mb-2 flex items-center gap-2">
         <TrendingUp className="h-4 w-4 text-accent" />
         <span className="text-sm font-medium">Month-by-month tracking</span>
+        <span className="text-[11px] text-muted-foreground">
+          Required = dynamic catch-up target given prior months
+        </span>
       </div>
       <div className="overflow-hidden rounded-md border">
         <table className="w-full text-sm">
@@ -416,8 +433,9 @@ function MonthlyBreakdownTable({
             <tr className="border-b bg-muted/50">
               <th className="px-3 py-2 text-left font-medium text-muted-foreground">Month</th>
               <th className="px-3 py-2 text-right font-medium text-muted-foreground">Expected</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Required</th>
               <th className="px-3 py-2 text-right font-medium text-muted-foreground">Actual</th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Δ</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Δ vs required</th>
               <th className="px-3 py-2 text-right font-medium text-muted-foreground">
                 Cumulative actual
               </th>
@@ -427,11 +445,29 @@ function MonthlyBreakdownTable({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {months.map((m) => {
+            {months.map((m, idx) => {
+              // Required this month: recompute the plan solve for the
+              // remaining horizon given cumActual so far. Same formula as
+              // the plan itself, but with remaining investment and
+              // remaining months.
+              const remaining_months = total - idx;
+              const grace_remaining = Math.max(0, grace - idx);
+              const remaining_investment = Math.max(0, investment - cumActual);
+              let required = 0;
+              if (remaining_months > 0) {
+                const p_grace_cu =
+                  (remaining_investment +
+                    (remaining_months - grace_remaining) * rent) /
+                  remaining_months;
+                const p_regular_cu = p_grace_cu - rent;
+                required = idx < grace ? p_grace_cu : p_regular_cu;
+              }
+
               cumActual += m.actual_paise;
               cumExpected += m.expected_paise;
-              const delta = m.actual_paise - m.expected_paise;
+              const delta = m.actual_paise - required;
               const cumDelta = cumActual - cumExpected;
+              const requiredHigherThanBaseline = required > m.expected_paise + 1;
               return (
                 <tr key={`${m.year}-${m.month}`}>
                   <td className="px-3 py-2">
@@ -442,8 +478,22 @@ function MonthlyBreakdownTable({
                       {m.source}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
+                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                     {formatPaise(m.expected_paise)}
+                  </td>
+                  <td
+                    className={
+                      requiredHigherThanBaseline
+                        ? 'px-3 py-2 text-right tabular-nums font-semibold text-amber-700'
+                        : 'px-3 py-2 text-right tabular-nums font-semibold'
+                    }
+                    title={
+                      requiredHigherThanBaseline
+                        ? 'Above the baseline plan — earlier months were behind, catching up requires more this month'
+                        : undefined
+                    }
+                  >
+                    {formatPaise(Math.round(required))}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {formatPaise(m.actual_paise)}
@@ -456,7 +506,7 @@ function MonthlyBreakdownTable({
                     }
                   >
                     {delta >= 0 ? '+' : '−'}
-                    {formatPaise(Math.abs(delta))}
+                    {formatPaise(Math.abs(Math.round(delta)))}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-semibold">
                     {formatPaise(cumActual)}
