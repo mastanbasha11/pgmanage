@@ -33,6 +33,7 @@ import {
 import { useAuthStore } from '@/store/auth';
 import { useROI, type ROIRoom, type ROIRoomType } from '@/hooks/useROI';
 import { formatPaise } from '@/lib/utils';
+import PaybackPlanSection from './PaybackPlanSection';
 
 export default function ROIPage() {
   const { selectedPropertyId, canAccessFinancials } = useAuthStore();
@@ -78,6 +79,8 @@ export default function ROIPage() {
           </CardContent>
         </Card>
       )}
+
+      {selectedPropertyId && <PaybackPlanSection propertyId={selectedPropertyId} />}
 
       {isLoading && selectedPropertyId && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

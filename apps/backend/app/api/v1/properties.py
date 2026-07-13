@@ -1100,3 +1100,227 @@ async def whatsapp_template_variables(
     """
     from app.services.notification_service import BUILT_IN_VARIABLES
     return BUILT_IN_VARIABLES
+
+
+# ── ROI Payback Plan ─────────────────────────────────────────────────────────
+
+class PaybackPlanUpdate(BaseModel):
+    investment_paise: int | None = None
+    target_months: int | None = None
+    grace_months: int | None = None
+    lessor_rent_paise: int | None = None
+    plan_start_date: date | None = None
+
+
+def _compute_payback(
+    investment: int,
+    target_months: int,
+    grace_months: int,
+    lessor_rent: int,
+) -> dict:
+    """Grace = lessor rent is fully waived. Post-grace = full rent applies.
+
+    Break-even:   G·P_grace + (T−G)·P_regular = I
+    Constraint:   P_regular = P_grace − lessor_rent
+    Solving:      P_grace = (I + (T−G)·lessor_rent) / T
+    """
+    if target_months <= 0:
+        return {"error": "target_months must be > 0"}
+    if grace_months < 0 or grace_months > target_months:
+        return {"error": "grace_months must be between 0 and target_months"}
+    p_grace = (investment + (target_months - grace_months) * lessor_rent) / target_months
+    p_regular = p_grace - lessor_rent
+    return {
+        "grace_month_profit_paise": int(round(p_grace)),
+        "regular_month_profit_paise": int(round(p_regular)),
+        "grace_period_total_paise": int(round(p_grace * grace_months)),
+        "regular_period_total_paise": int(round(p_regular * (target_months - grace_months))),
+    }
+
+
+@router.get(
+    "/properties/{property_id}/payback-plan",
+    summary="Payback plan (investment vs target profit) + actual tracking",
+)
+async def get_payback_plan(
+    property_id: UUID,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    row = (await db.execute(
+        text("""
+            SELECT roi_investment_paise, roi_target_months, roi_grace_months,
+                   roi_lessor_rent_paise, roi_plan_start_date
+            FROM properties WHERE id = :pid
+        """),
+        {"pid": str(property_id)},
+    )).mappings().fetchone()
+    if not row:
+        raise HTTPException(404, "Property not found")
+
+    plan = {
+        "investment_paise": row["roi_investment_paise"],
+        "target_months": row["roi_target_months"],
+        "grace_months": row["roi_grace_months"],
+        "lessor_rent_paise": row["roi_lessor_rent_paise"],
+        "plan_start_date": row["roi_plan_start_date"].isoformat() if row["roi_plan_start_date"] else None,
+    }
+    configured = all(
+        plan[k] is not None
+        for k in ("investment_paise", "target_months", "grace_months", "lessor_rent_paise")
+    )
+
+    # Owners breakdown from the team roster.
+    owners_res = await db.execute(
+        text("""
+            SELECT name, share_pct, capital_paise
+            FROM property_team
+            WHERE property_id = :pid AND is_active = true
+              AND role = 'OWNER'::team_role_enum
+            ORDER BY sort_order, name
+        """),
+        {"pid": str(property_id)},
+    )
+    owners = [dict(r) for r in owners_res.mappings().fetchall()]
+
+    result: dict = {"plan": plan, "configured": configured, "owners": owners}
+    if not configured:
+        return result
+
+    calc = _compute_payback(
+        int(plan["investment_paise"] or 0),
+        int(plan["target_months"] or 0),
+        int(plan["grace_months"] or 0),
+        int(plan["lessor_rent_paise"] or 0),
+    )
+    if "error" in calc:
+        result["calc"] = calc
+        return result
+
+    # Per-owner monthly numbers.
+    per_owner = []
+    for o in owners:
+        pct = float(o["share_pct"] or 0)
+        per_owner.append({
+            "name": o["name"],
+            "share_pct": pct,
+            "capital_paise": o["capital_paise"],
+            "grace_month_share_paise": int(round(calc["grace_month_profit_paise"] * pct / 100)),
+            "regular_month_share_paise": int(round(calc["regular_month_profit_paise"] * pct / 100)),
+        })
+
+    # Actual-vs-projected: cumulative net_income since the plan_start_date
+    # (fiscal-window rule applies to the monthly totals — we just sum the
+    # per-month dashboard math without re-doing it here).
+    actual_cumulative_paise = 0
+    months_elapsed = 0
+    if plan["plan_start_date"]:
+        from datetime import date as _date
+        start = row["roi_plan_start_date"]
+        today = _date.today()
+        # Whole calendar months between start and today (rounded down)
+        months_elapsed = max(
+            0,
+            (today.year - start.year) * 12 + (today.month - start.month),
+        )
+
+        # Cumulative rent-in-period + advance + power − expenses − refunds,
+        # by calendar month (we don't re-do fiscal-window here; the accuracy
+        # is good enough for a payback tracker).
+        cum_res = await db.execute(
+            text(f"""
+                WITH inc AS (
+                    SELECT SUM(amount_paise) AS a
+                    FROM payments
+                    WHERE property_id = :pid AND is_deleted = false
+                      AND payment_type IN ('RENT','ADVANCE','DEPOSIT','POWER')
+                      AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date >= :start
+                ),
+                bkg AS (
+                    SELECT SUM(amount_paise) AS a
+                    FROM bookings
+                    WHERE property_id = :pid AND is_deleted = false
+                      AND collected_at::date >= :start
+                ),
+                exp AS (
+                    SELECT SUM(amount_paise) AS a
+                    FROM expenses
+                    WHERE property_id = :pid AND is_deleted = false
+                      AND approval_status = 'APPROVED'::expense_approval_enum
+                      AND purchase_date >= :start
+                ),
+                ref AS (
+                    SELECT SUM(amount_paise) AS a
+                    FROM payments
+                    WHERE property_id = :pid AND is_deleted = false
+                      AND payment_type = 'REFUND'
+                      AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date >= :start
+                )
+                SELECT COALESCE((SELECT a FROM inc), 0)
+                     + COALESCE((SELECT a FROM bkg), 0)
+                     - COALESCE((SELECT a FROM exp), 0)
+                     - COALESCE((SELECT a FROM ref), 0) AS net
+            """),
+            {"pid": str(property_id), "start": start},
+        )
+        actual_cumulative_paise = int(cum_res.scalar() or 0)
+
+    # Expected cumulative by now: grace months at P_grace, remainder at P_regular.
+    if months_elapsed > 0:
+        g = min(months_elapsed, int(plan["grace_months"] or 0))
+        r = months_elapsed - g
+        expected_cumulative_paise = int(
+            g * calc["grace_month_profit_paise"] + r * calc["regular_month_profit_paise"]
+        )
+    else:
+        expected_cumulative_paise = 0
+
+    result.update({
+        "calc": calc,
+        "per_owner": per_owner,
+        "months_elapsed": months_elapsed,
+        "actual_cumulative_paise": actual_cumulative_paise,
+        "expected_cumulative_paise": expected_cumulative_paise,
+    })
+    return result
+
+
+@router.put(
+    "/properties/{property_id}/payback-plan",
+    summary="Set or update the ROI payback plan",
+)
+async def set_payback_plan(
+    property_id: UUID,
+    body: PaybackPlanUpdate,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if ctx.role not in ("OWNER", "PARTNER"):
+        raise HTTPException(403, "Only owners or partners can edit the payback plan")
+
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(400, "Nothing to update")
+
+    key_map = {
+        "investment_paise": "roi_investment_paise",
+        "target_months": "roi_target_months",
+        "grace_months": "roi_grace_months",
+        "lessor_rent_paise": "roi_lessor_rent_paise",
+        "plan_start_date": "roi_plan_start_date",
+    }
+    set_parts = []
+    params: dict[str, object] = {"pid": str(property_id)}
+    for k, v in updates.items():
+        col = key_map[k]
+        set_parts.append(f"{col} = :{col}")
+        params[col] = v
+
+    res = await db.execute(
+        text(f"UPDATE properties SET {', '.join(set_parts)}, updated_at = NOW() WHERE id = :pid"),
+        params,
+    )
+    if res.rowcount == 0:
+        raise HTTPException(404, "Property not found")
+    await db.commit()
+    return {"message": "Payback plan saved"}

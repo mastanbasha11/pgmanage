@@ -9,6 +9,7 @@ export interface TeamMember {
   phone?: string | null;
   role: TeamRole;
   share_pct?: number | null;
+  capital_paise?: number | null;
   sort_order: number;
   is_active: boolean;
   notes?: string | null;
@@ -34,6 +35,7 @@ export interface TeamMemberInput {
   phone?: string;
   role: TeamRole;
   share_pct?: number;
+  capital_paise?: number;
   sort_order?: number;
   notes?: string;
 }

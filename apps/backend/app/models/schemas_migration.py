@@ -118,6 +118,17 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             wa_rent_overdue_template_params JSONB,
             wa_rent_reminder_template_body TEXT,
             wa_rent_overdue_template_body TEXT,
+            -- ROI payback plan (all optional; set via ROI page).
+            -- Break-even model:
+            --   G × P_grace + (T − G) × P_regular = investment
+            --   P_regular = P_grace − lessor_rent
+            -- so we only need investment + target + grace + lessor_rent to
+            -- solve for both period profits.
+            roi_investment_paise BIGINT,
+            roi_target_months INTEGER,
+            roi_grace_months INTEGER,
+            roi_lessor_rent_paise BIGINT,
+            roi_plan_start_date DATE,
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -148,6 +159,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             phone VARCHAR(20),
             role team_role_enum NOT NULL,
             share_pct NUMERIC(5,2) CHECK (share_pct >= 0 AND share_pct <= 100),
+            capital_paise BIGINT CHECK (capital_paise >= 0),
             sort_order INTEGER NOT NULL DEFAULT 0,
             is_active BOOLEAN NOT NULL DEFAULT true,
             notes TEXT,

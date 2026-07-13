@@ -30,6 +30,7 @@ class TeamMemberCreate(BaseModel):
     phone: str | None = None
     role: str
     share_pct: float | None = None
+    capital_paise: int | None = None
     sort_order: int | None = None
     notes: str | None = None
 
@@ -39,6 +40,7 @@ class TeamMemberUpdate(BaseModel):
     phone: str | None = None
     role: str | None = None
     share_pct: float | None = None
+    capital_paise: int | None = None
     sort_order: int | None = None
     is_active: bool | None = None
     notes: str | None = None
@@ -88,8 +90,8 @@ async def list_team(
     where = " AND ".join(conditions)
     res = await db.execute(
         text(f"""
-            SELECT id, name, phone, role::text AS role, share_pct, sort_order,
-                   is_active, notes, created_at, updated_at
+            SELECT id, name, phone, role::text AS role, share_pct, capital_paise,
+                   sort_order, is_active, notes, created_at, updated_at
             FROM property_team
             WHERE {where}
             ORDER BY
@@ -118,14 +120,16 @@ async def create_team_member(
 
     res = await db.execute(
         text("""
-            INSERT INTO property_team (property_id, name, phone, role, share_pct, sort_order, notes)
-            VALUES (:pid, :name, :phone, CAST(:role AS team_role_enum), :share, COALESCE(:so, 0), :notes)
+            INSERT INTO property_team (property_id, name, phone, role, share_pct, capital_paise, sort_order, notes)
+            VALUES (:pid, :name, :phone, CAST(:role AS team_role_enum), :share, :cap, COALESCE(:so, 0), :notes)
             RETURNING id
         """),
         {
             "pid": str(property_id), "name": body.name.strip(),
             "phone": (body.phone or "").strip() or None,
-            "role": body.role, "share": share, "so": body.sort_order,
+            "role": body.role, "share": share,
+            "cap": body.capital_paise if body.capital_paise and body.capital_paise > 0 else None,
+            "so": body.sort_order,
             "notes": (body.notes or "").strip() or None,
         },
     )

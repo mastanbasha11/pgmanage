@@ -171,6 +171,11 @@ function Section({
                   {m.phone && (
                     <p className="text-[11px] text-muted-foreground">{m.phone}</p>
                   )}
+                  {m.role === 'OWNER' && m.capital_paise != null && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Capital ₹{Math.round(m.capital_paise / 100).toLocaleString('en-IN')}
+                    </p>
+                  )}
                   {m.notes && (
                     <p className="text-[11px] text-muted-foreground">{m.notes}</p>
                   )}
@@ -221,6 +226,9 @@ function TeamMemberDialog({
   const [sharePct, setSharePct] = useState<string>(
     existing?.share_pct != null ? String(existing.share_pct) : '',
   );
+  const [capitalRupees, setCapitalRupees] = useState<string>(
+    existing?.capital_paise != null ? String(Math.round(existing.capital_paise / 100)) : '',
+  );
   const [notes, setNotes] = useState(existing?.notes ?? '');
   const { toast } = useToast();
   const create = useCreateTeamMember(propertyId);
@@ -236,6 +244,10 @@ function TeamMemberDialog({
       phone: phone.trim() || undefined,
       role,
       share_pct: role === 'OWNER' && sharePct ? Number(sharePct) : undefined,
+      capital_paise:
+        role === 'OWNER' && capitalRupees
+          ? Math.round(Number(capitalRupees) * 100)
+          : undefined,
       notes: notes.trim() || undefined,
     };
     try {
@@ -282,18 +294,34 @@ function TeamMemberDialog({
             </div>
           </div>
           {role === 'OWNER' && (
-            <div>
-              <Label>Share % — owners' shares must total 100</Label>
-              <Input
-                type="number"
-                min={0}
-                max={100}
-                step="0.01"
-                value={sharePct}
-                onChange={(e) => setSharePct(e.target.value)}
-                placeholder="e.g. 50"
-              />
-            </div>
+            <>
+              <div>
+                <Label>Share % — owners' shares must total 100</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={sharePct}
+                  onChange={(e) => setSharePct(e.target.value)}
+                  placeholder="e.g. 50"
+                />
+              </div>
+              <div>
+                <Label>Capital invested (₹) — optional</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="1"
+                  value={capitalRupees}
+                  onChange={(e) => setCapitalRupees(e.target.value)}
+                  placeholder="e.g. 5000000"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Informational only. Profit split still follows the share %.
+                </p>
+              </div>
+            </>
           )}
           <div>
             <Label>Notes</Label>
