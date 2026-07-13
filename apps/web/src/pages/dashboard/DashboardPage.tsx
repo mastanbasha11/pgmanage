@@ -26,9 +26,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { CashflowChart } from '@/components/charts/CashflowChart';
-import { ExpenseDonut } from '@/components/charts/ExpenseDonut';
+import PaybackChart from '@/components/charts/PaybackChart';
+import { usePaybackPlan } from '@/hooks/usePaybackPlan';
 import { useDashboardSummary, useCashflow } from '@/hooks/useDashboard';
-import { useExpenseSummary } from '@/hooks/useExpenses';
 import { useProperties } from '@/hooks/useProperties';
 import { useAuthStore } from '@/store/auth';
 import { formatPaise, currentMonthYear, monthName } from '@/lib/utils';
@@ -107,11 +107,7 @@ export default function DashboardPage() {
     year,
   );
   const { data: cashflow } = useCashflow(selectedPropertyId ?? undefined);
-  const { data: expenseSummary } = useExpenseSummary({
-    property_id: selectedPropertyId ?? undefined,
-    month,
-    year,
-  });
+  const { data: paybackPlan } = usePaybackPlan(selectedPropertyId ?? undefined);
 
   // No properties yet → push owner to create one.
   if (!loadingProps && (propertiesData?.items.length ?? 0) === 0) {
@@ -439,16 +435,34 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className="cursor-pointer transition-colors hover:border-accent"
+          onClick={() => navigate('/roi')}
+        >
           <CardHeader>
-            <CardTitle className="text-base">Expenses by Category</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2">
+              ROI Payback trajectory
+              <span className="text-[10px] font-medium text-muted-foreground">
+                click to open plan
+              </span>
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            {expenseSummary?.items?.length ? (
-              <ExpenseDonut data={expenseSummary.items} />
+            {paybackPlan?.configured && paybackPlan.calc ? (
+              <PaybackChart data={paybackPlan} compact />
             ) : (
-              <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-                No expense data yet.
+              <div
+                className="flex h-64 flex-col items-center justify-center gap-1 text-center text-sm text-muted-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate('/roi');
+                }}
+              >
+                <p>No payback plan configured yet.</p>
+                <p className="text-xs">
+                  Set one up on the ROI page — investment, target horizon,
+                  grace, and lessor rent.
+                </p>
               </div>
             )}
           </CardContent>

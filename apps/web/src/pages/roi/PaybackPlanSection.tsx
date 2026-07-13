@@ -44,6 +44,7 @@ import {
 import { useToast } from '@/hooks/useToast';
 import { getApiError } from '@/lib/api';
 import { formatPaise } from '@/lib/utils';
+import PaybackChart from '@/components/charts/PaybackChart';
 
 export default function PaybackPlanSection({ propertyId }: { propertyId: string }) {
   const { data, isLoading } = usePaybackPlan(propertyId);
@@ -60,12 +61,25 @@ export default function PaybackPlanSection({ propertyId }: { propertyId: string 
       <Card className="border-slate-300">
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
-            <div>
-              <CardTitle className="text-base flex items-center gap-2">
-                <PiggyBank className="h-4 w-4 text-accent" />
-                Payback Plan
-              </CardTitle>
-              <p className="text-xs text-muted-foreground">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <PiggyBank className="h-4 w-4 text-accent" />
+                  Payback Plan
+                </CardTitle>
+                {configured && data?.plan.plan_start_date && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+                    Go-live: {new Date(data.plan.plan_start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </span>
+                )}
+                {configured && data?.first_fiscal && (
+                  <span className="text-[11px] text-muted-foreground">
+                    · first fiscal month {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][data.first_fiscal.month - 1]}{' '}
+                    {data.first_fiscal.year}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
                 Given the investment + target horizon + grace, this tells each
                 owner how much profit they need to take home each month during
                 grace vs after — and how the actuals are tracking.
@@ -277,6 +291,15 @@ function PlanResults({ data, propertyId }: { data: PaybackPlan; propertyId: stri
           )}
         </div>
       )}
+
+      {/* Actual vs expected trajectory */}
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-accent" />
+          <span className="text-sm font-medium">Actual vs Expected trajectory</span>
+        </div>
+        <PaybackChart data={data} />
+      </div>
 
       {/* Month-by-month actual vs expected */}
       {(monthly?.length ?? 0) > 0 && (

@@ -9,7 +9,9 @@ export interface PaybackPlan {
     grace_months: number | null;
     lessor_rent_paise: number | null;
     plan_start_date: string | null;
+    settlement_day?: number;
   };
+  first_fiscal?: { year: number; month: number } | null;
   owners: {
     name: string;
     share_pct: number | null;

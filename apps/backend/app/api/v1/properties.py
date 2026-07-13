@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -1150,7 +1150,7 @@ async def get_payback_plan(
     row = (await db.execute(
         text("""
             SELECT roi_investment_paise, roi_target_months, roi_grace_months,
-                   roi_lessor_rent_paise, roi_plan_start_date
+                   roi_lessor_rent_paise, roi_plan_start_date, settlement_day
             FROM properties WHERE id = :pid
         """),
         {"pid": str(property_id)},
@@ -1158,12 +1158,14 @@ async def get_payback_plan(
     if not row:
         raise HTTPException(404, "Property not found")
 
+    settlement_day = int(row["settlement_day"] or 10)
     plan = {
         "investment_paise": row["roi_investment_paise"],
         "target_months": row["roi_target_months"],
         "grace_months": row["roi_grace_months"],
         "lessor_rent_paise": row["roi_lessor_rent_paise"],
         "plan_start_date": row["roi_plan_start_date"].isoformat() if row["roi_plan_start_date"] else None,
+        "settlement_day": settlement_day,
     }
     configured = all(
         plan[k] is not None
@@ -1221,21 +1223,41 @@ async def get_payback_plan(
         })
 
     # Actual-vs-projected: cumulative net income since the plan_start_date.
-    # For each elapsed month we prefer the manual actual (from
-    # payback_monthly_actual) if set — that lets an owner who onboarded
-    # mid-year backfill "the books already show ₹X for March". If no
-    # manual value, we compute from the payments/expenses tables.
+    # We iterate FISCAL months (settlement_day-driven windows), not calendar
+    # months — a go-live of Feb 15 with settlement=10 means Feb's fiscal
+    # window (Jan 11 → Feb 10) is entirely pre-lease, and March is the first
+    # month we should be tracked against.
+    #
+    # For each elapsed fiscal month we prefer the manual actual (from
+    # payback_monthly_actual) if set; else we compute from payments/expenses
+    # bounded by the fiscal window for that (property, year, month).
     actual_cumulative_paise = 0
     months_elapsed = 0
     monthly_breakdown: list[dict] = []
+    first_fiscal: dict | None = None
     if plan["plan_start_date"]:
-        from datetime import date as _date
+        from app.services.billing_period import get_fiscal_period as _gfp
         start = row["roi_plan_start_date"]
-        today = _date.today()
-        months_elapsed = max(
-            0,
-            (today.year - start.year) * 12 + (today.month - start.month),
-        )
+        today = date.today()
+
+        # First fiscal month = the month whose fiscal window contains the
+        # go-live date. If go-live day > settlement_day, that's the NEXT
+        # calendar month; else the current calendar month.
+        if start.day > settlement_day:
+            fy = start.year + (1 if start.month == 12 else 0)
+            fm = 1 if start.month == 12 else start.month + 1
+        else:
+            fy, fm = start.year, start.month
+        first_fiscal = {"year": fy, "month": fm}
+
+        # Elapsed = whole fiscal months from first_fiscal to the fiscal
+        # month whose window CONTAINS today. Same day-vs-settlement rule.
+        if today.day > settlement_day:
+            cy = today.year + (1 if today.month == 12 else 0)
+            cm = 1 if today.month == 12 else today.month + 1
+        else:
+            cy, cm = today.year, today.month
+        months_elapsed = max(0, (cy - fy) * 12 + (cm - fm))
 
         # Pull manual overrides first so the loop below doesn't re-hit DB
         # per-month.
@@ -1252,12 +1274,10 @@ async def get_payback_plan(
             for r in manual_res.mappings().fetchall()
         }
 
-        # Iterate months in the plan window; for each, use manual if
-        # present, else compute from payments/expenses for that calendar
-        # month (bounded to the plan_start day on the first month).
-        # Also tag each row with the expected target for that month so the
-        # UI can render actual-vs-expected per month without recomputing.
-        year, month = start.year, start.month
+        # Iterate FISCAL months starting from first_fiscal. Bounds come from
+        # get_fiscal_period so a settlement=10 property gets Feb 11 → Mar 10
+        # for the (Mar, 2026) row, not Mar 1 → Mar 31.
+        year, month = fy, fm
         grace_months = int(plan["grace_months"] or 0)
         for i in range(months_elapsed):
             expected_this_month = (
@@ -1275,17 +1295,11 @@ async def get_payback_plan(
                 })
                 actual_cumulative_paise += manual[key]
             else:
-                # Compute this calendar month's net.
-                m_start = _date(year, month, 1)
-                # Clamp the first month to plan_start_date so we don't
-                # over-count pre-lease days.
-                if (year, month) == (start.year, start.month):
-                    m_start = start
-                m_end = (
-                    _date(year + 1, 1, 1)
-                    if month == 12
-                    else _date(year, month + 1, 1)
-                )
+                fp = await _gfp(property_id, month, year, db)
+                # Clamp the first month's window to the go-live date so we
+                # don't over-count pre-lease days in the same fiscal window.
+                m_start = max(fp.period_start, start)
+                m_end = fp.period_end + timedelta(days=1)  # exclusive upper bound
                 cum = await db.execute(
                     text("""
                         WITH inc AS (
@@ -1392,6 +1406,7 @@ async def get_payback_plan(
         "expected_cumulative_paise": expected_cumulative_paise,
         "monthly_breakdown": monthly_breakdown,
         "catchup": catchup,
+        "first_fiscal": first_fiscal,
     })
     return result
 
