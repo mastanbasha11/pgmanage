@@ -195,19 +195,25 @@ async def _generate_and_remind(event: dict, context) -> dict:
 
 
 # Extracted here so `tests/test_overdue_reminders.py` can import the exact
-# SQL the job runs. Any regression on the WHERE clause / DISTINCT-ON /
-# ORDER BY breaks the tests immediately instead of silently in prod.
+# SQL the job runs. Any regression on the WHERE clause breaks the tests
+# immediately instead of silently in prod.
+#
+# Scope decision: **current calendar month only**. If a tenant has an
+# unpaid ledger row from a prior month, that's stale data — either they
+# paid offline and the row was never reconciled, or they've since moved
+# out. Chasing them daily on WhatsApp for old months is worse than a
+# small human review pass to close those rows. So the query
+# deliberately filters on `rle.month = :month AND rle.year = :year`.
 OVERDUE_SELECT_SQL = """
-    SELECT DISTINCT ON (t.id)
-           t.id, t.name, t.phone, t.property_id,
-           rle.month, rle.year,
+    SELECT t.id, t.name, t.phone, t.property_id,
            rle.amount_due_paise - rle.amount_paid_paise AS outstanding_paise,
            (CURRENT_DATE - rle.due_date) AS days_overdue,
            p.upi_vpa, p.name AS property_name
     FROM rent_ledger_entries rle
     JOIN tenants t ON t.id = rle.tenant_id
     JOIN properties p ON p.id = t.property_id
-    WHERE rle.status IN ('UNPAID', 'PARTIAL')
+    WHERE rle.month = :month AND rle.year = :year
+        AND rle.status IN ('UNPAID', 'PARTIAL')
         AND rle.amount_due_paise > rle.amount_paid_paise
         AND t.status = 'ACTIVE'
         AND t.is_deleted = false
@@ -221,17 +227,19 @@ OVERDUE_SELECT_SQL = """
                 AND nl.status = 'SENT'
                 AND nl.sent_at >= NOW() - (:repeat_days * INTERVAL '1 day')
         )
-    ORDER BY t.id, rle.due_date ASC
 """
 
 
 async def _send_overdue_reminders(event: dict, context) -> dict:
-    """Daily: chase UNPAID/PARTIAL tenants past the grace period (repeat-throttled)."""
+    """Daily: chase UNPAID/PARTIAL tenants for the CURRENT month past grace."""
     from sqlalchemy import text
 
     from app.core.database import AsyncSessionLocal, set_schema
 
     started_at = datetime.now(IST)
+    now_ist = datetime.now(IST)
+    month = now_ist.month
+    year = now_ist.year
 
     results = {
         "job_name": "rent_overdue_daily",
@@ -263,16 +271,10 @@ async def _send_overdue_reminders(event: dict, context) -> dict:
                 try:
                     await set_schema(db, schema_name)
 
-                    # Chase every open (UNPAID/PARTIAL) ledger row across ALL
-                    # months, not just the current calendar month — a June rent
-                    # that's still owed on Jul 14 should keep firing until it's
-                    # paid, or the owner deletes the entry.
-                    #
-                    # `DISTINCT ON (t.id)` + `ORDER BY t.id, rle.due_date ASC`
-                    # picks the OLDEST outstanding row per tenant, so a tenant
-                    # with both June and July unpaid gets a single reminder
-                    # referencing the older month (which is the more urgent
-                    # one) rather than two messages the same morning.
+                    # Chase THIS calendar month's UNPAID/PARTIAL rows only.
+                    # Prior-month rows are treated as stale and require an
+                    # explicit human reconciliation — see OVERDUE_SELECT_SQL's
+                    # comment for the reasoning.
                     #
                     # Throttle window (`OVERDUE_REPEAT_DAYS`, default 1 =
                     # daily) prevents multiple sends per calendar day even if
@@ -280,24 +282,22 @@ async def _send_overdue_reminders(event: dict, context) -> dict:
                     overdue_result = await db.execute(
                         text(OVERDUE_SELECT_SQL),
                         {
+                            "month": month, "year": year,
                             "grace_days": settings.OVERDUE_GRACE_DAYS,
                             "repeat_days": settings.OVERDUE_REPEAT_DAYS,
                         },
                     )
                     overdue = overdue_result.mappings().fetchall()
+                    month_name = calendar.month_name[month]
 
                     for tenant in overdue:
                         from app.services.notification_service import send_rent_overdue
-                        # Use the ledger row's own month/year in the message —
-                        # otherwise a June-unpaid reminder sent on Jul 14 would
-                        # incorrectly say "July 2026" and confuse the tenant.
-                        row_month_name = calendar.month_name[int(tenant["month"])]
                         res = await send_rent_overdue(
                             tenant_id=tenant["id"],
                             tenant_name=tenant["name"],
                             tenant_phone=tenant["phone"],
                             amount_paise=tenant["outstanding_paise"],
-                            month_name=f"{row_month_name} {int(tenant['year'])}",
+                            month_name=f"{month_name} {year}",
                             manager_phone=manager_phone,
                             org_id=org_id,
                             property_id=tenant["property_id"],

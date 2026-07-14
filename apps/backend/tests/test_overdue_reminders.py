@@ -1,21 +1,20 @@
 """
 Regression tests for the daily rent-overdue reminder query.
 
-Guards against two shipped bugs:
+Scope decision (product): the daily chaser only chases the CURRENT
+calendar month's ledger rows. Prior-month unpaid rows are treated as
+stale data and left alone until a human reconciles them. Tests pin
+both directions of that scope:
 
-1. The overdue SELECT hardcoded the CURRENT calendar month, so any
-   unpaid ledger row from a PRIOR month silently fell off the radar the
-   moment the month rolled over. `test_prior_month_unpaid_selected`
-   pins the fix: a June-unpaid row must still be picked up on Jul 14.
+- `test_current_month_unpaid_selected`   → this month, past grace: fire.
+- `test_prior_month_unpaid_NOT_selected` → last month, still unpaid: skip.
+- `test_paid_row_not_selected`           → row where paid >= due: skip.
+- `test_repeat_throttle_default_is_daily`→ config default is 1 day, not 3.
 
-2. The repeat throttle defaulted to 3 days — the job was named
-   "daily" but only truly ran once every 3 days per tenant.
-   `test_repeat_throttle_default_is_daily` pins the config.
-
-The job's own `AsyncSessionLocal()` runs on a different event loop
-from the pytest `db` fixture, so we assert against the SQL directly
-(the SELECT is the piece that actually changed). Any regression on
-the WHERE clause / DISTINCT-ON semantics will show up here.
+The job's own `AsyncSessionLocal()` runs on a different event loop from
+the pytest `db` fixture, so we assert against the SQL directly. The SQL
+is imported from the job module as `OVERDUE_SELECT_SQL` so that any
+regression on the WHERE clause in prod immediately breaks the test.
 """
 from __future__ import annotations
 
@@ -26,11 +25,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
-# Import the PRODUCTION SELECT so any regression on WHERE clause /
-# DISTINCT-ON / ORDER BY in the job file breaks these tests immediately.
-# If tests copied the SQL, prod could drift and the guard would silently
-# stop guarding.
+# Import the PRODUCTION SELECT so any regression on WHERE clause in the
+# job file breaks these tests immediately. If tests copied the SQL, prod
+# could drift and the guard would silently stop guarding.
 from app.tasks.rent_reminders import OVERDUE_SELECT_SQL  # noqa: E402
 
 OVERDUE_SELECT = text(OVERDUE_SELECT_SQL)
@@ -86,65 +83,69 @@ async def _insert_ledger_row(
 
 
 @pytest.mark.asyncio
-async def test_prior_month_unpaid_selected(
+async def test_current_month_unpaid_selected(
     db: AsyncSession, test_tenant: dict
 ) -> None:
-    """A ledger row from a prior calendar month must still be selected.
+    """This month, past grace, still unpaid → selected.
 
-    Regression: SELECT used to filter `rle.month = now.month`, silently
-    dropping June-unpaid rows the moment July started. This test pins the
-    behaviour — a row with any prior (month, year) but a past-grace
-    due_date shows up.
+    Baseline happy-path pin. If this ever stops holding, the chaser
+    silently fires zero messages.
     """
     schema = test_tenant["schema_name"]
     await _set_schema(db, schema)
+    today = date.today()
     await _insert_ledger_row(
         db,
         tenant_id=test_tenant["tenant_id"],
         property_id=test_tenant["property_id"],
-        # Pick a month deliberately different from today to catch the
-        # "current month" regression regardless of when the test runs.
-        month=(date.today().month - 1) or 12,
-        year=date.today().year if date.today().month > 1 else date.today().year - 1,
-        due_date=date.today() - timedelta(days=40),
+        month=today.month,
+        year=today.year,
+        due_date=today - timedelta(days=10),  # comfortably past grace
     )
     rows = (await db.execute(
-        OVERDUE_SELECT, {"grace_days": 3, "repeat_days": 1}
+        OVERDUE_SELECT,
+        {"month": today.month, "year": today.year, "grace_days": 3, "repeat_days": 1},
     )).mappings().fetchall()
-    await db.commit()  # close implicit transaction before teardown
-    assert any(str(r["id"]) == str(test_tenant["tenant_id"]) for r in rows), (
-        f"prior-month unpaid ledger row was not selected: {rows}"
-    )
+    await db.commit()
+    assert any(str(r["id"]) == str(test_tenant["tenant_id"]) for r in rows), rows
 
 
 @pytest.mark.asyncio
-async def test_only_one_row_per_tenant_oldest_first(
+async def test_prior_month_unpaid_NOT_selected(
     db: AsyncSession, test_tenant: dict
 ) -> None:
-    """`DISTINCT ON (t.id)` + `ORDER BY due_date ASC` picks the OLDEST.
+    """Prior calendar-month unpaid rows must NOT be selected.
 
-    Prevents WhatsApp spam when a tenant has multiple open months — one
-    reminder per run, referencing the earliest still-owed month.
+    Product decision: leave stale prior-month rows to a human review
+    instead of chasing them daily on WhatsApp — a tenant who's already
+    moved out would keep getting nagged forever otherwise.
     """
     schema = test_tenant["schema_name"]
     await _set_schema(db, schema)
-    for m, days in [(4, 100), (5, 70), (6, 40)]:
-        await _insert_ledger_row(
-            db,
-            tenant_id=test_tenant["tenant_id"],
-            property_id=test_tenant["property_id"],
-            month=m,
-            year=2026,
-            due_date=date.today() - timedelta(days=days),
-        )
+    today = date.today()
+    # Seed a row in the PRIOR calendar month.
+    prior_month = today.month - 1 or 12
+    prior_year = today.year if today.month > 1 else today.year - 1
+    await _insert_ledger_row(
+        db,
+        tenant_id=test_tenant["tenant_id"],
+        property_id=test_tenant["property_id"],
+        month=prior_month,
+        year=prior_year,
+        due_date=today - timedelta(days=40),  # long past grace
+    )
+    # Query with the CURRENT month's params (what the job actually passes).
     rows = (await db.execute(
-        OVERDUE_SELECT, {"grace_days": 3, "repeat_days": 1}
+        OVERDUE_SELECT,
+        {"month": today.month, "year": today.year, "grace_days": 3, "repeat_days": 1},
     )).mappings().fetchall()
-    await db.commit()  # close implicit transaction before teardown
-    mine = [r for r in rows if str(r["id"]) == str(test_tenant["tenant_id"])]
-    assert len(mine) == 1, mine
-    # Oldest month wins — April.
-    assert mine[0]["month"] == 4, mine[0]
+    await db.commit()
+    assert not any(
+        str(r["id"]) == str(test_tenant["tenant_id"]) for r in rows
+    ), (
+        f"a prior-month ({prior_month}/{prior_year}) unpaid row leaked "
+        f"into the current-month chase: {rows}"
+    )
 
 
 @pytest.mark.asyncio
@@ -158,19 +159,22 @@ async def test_paid_row_not_selected(
     """
     schema = test_tenant["schema_name"]
     await _set_schema(db, schema)
+    today = date.today()
     await _insert_ledger_row(
         db,
         tenant_id=test_tenant["tenant_id"],
         property_id=test_tenant["property_id"],
-        month=6, year=2026,
-        due_date=date.today() - timedelta(days=40),
+        month=today.month,
+        year=today.year,
+        due_date=today - timedelta(days=10),
         amount_due_paise=700000,
         amount_paid_paise=700000,  # fully paid
     )
     rows = (await db.execute(
-        OVERDUE_SELECT, {"grace_days": 3, "repeat_days": 1}
+        OVERDUE_SELECT,
+        {"month": today.month, "year": today.year, "grace_days": 3, "repeat_days": 1},
     )).mappings().fetchall()
-    await db.commit()  # close implicit transaction before teardown
+    await db.commit()
     assert not any(
         str(r["id"]) == str(test_tenant["tenant_id"]) for r in rows
     ), rows
