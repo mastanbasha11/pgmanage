@@ -45,13 +45,17 @@ import {
 } from '@/hooks/useProperties';
 import { useToast } from '@/hooks/useToast';
 import { cn, formatPaise, rupeesToPaise } from '@/lib/utils';
+import TeamRoster from '@/pages/properties/TeamRoster';
+import PaybackPlanSection from '@/pages/roi/PaybackPlanSection';
 
-type Step = 'floors' | 'roomTypes' | 'rooms' | 'review';
+type Step = 'floors' | 'roomTypes' | 'rooms' | 'owners' | 'payback' | 'review';
 
-const STEPS: { key: Step; label: string }[] = [
+const STEPS: { key: Step; label: string; optional?: boolean }[] = [
   { key: 'floors', label: 'Floors' },
   { key: 'roomTypes', label: 'Room Types' },
   { key: 'rooms', label: 'Rooms' },
+  { key: 'owners', label: 'Owners', optional: true },
+  { key: 'payback', label: 'Payback Plan', optional: true },
   { key: 'review', label: 'Review' },
 ];
 
@@ -70,14 +74,15 @@ export default function PropertySetupDialog({ open, onClose, propertyId }: Props
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="h-5 w-5 text-accent" />
             Configure {property?.name ?? 'property'}
           </DialogTitle>
           <DialogDescription>
-            Add floors, define room types, and create rooms with beds.
+            Add floors, define room types, create rooms with beds — then optionally
+            capture owners and the ROI payback plan.
           </DialogDescription>
         </DialogHeader>
 
@@ -112,7 +117,7 @@ export default function PropertySetupDialog({ open, onClose, propertyId }: Props
           ))}
         </div>
 
-        <div className="max-h-[60vh] overflow-y-auto pr-1">
+        <div className="max-h-[65vh] overflow-y-auto pr-1">
           {step === 'floors' && (
             <FloorsStep
               propertyId={propertyId}
@@ -125,6 +130,29 @@ export default function PropertySetupDialog({ open, onClose, propertyId }: Props
               propertyId={propertyId}
               floors={occupancy?.floors ?? []}
             />
+          )}
+          {step === 'owners' && (
+            <div className="py-2">
+              <p className="mb-3 text-xs text-muted-foreground">
+                Optional. Add each owner with their profit share % and (optionally)
+                their capital contribution. Managers and collectors captured here
+                also populate the Paid To / Paid By dropdowns on payments &amp;
+                expenses. You can skip and add them later from the property's
+                Team &amp; Owners tab.
+              </p>
+              <TeamRoster propertyId={propertyId} />
+            </div>
+          )}
+          {step === 'payback' && (
+            <div className="py-2">
+              <p className="mb-3 text-xs text-muted-foreground">
+                Optional. Capture total investment, lease term, grace months,
+                monthly lessor rent, and the annual hike ladder. This powers the
+                ROI Calculator + dashboard payback chart. Skip to add it later
+                from ROI → Payback Plan.
+              </p>
+              <PaybackPlanSection propertyId={propertyId} />
+            </div>
           )}
           {step === 'review' && (
             <ReviewStep floors={occupancy?.floors ?? []} />
@@ -140,9 +168,19 @@ export default function PropertySetupDialog({ open, onClose, propertyId }: Props
             <ChevronLeft className="h-4 w-4 mr-1" /> Back
           </Button>
           {stepIndex < STEPS.length - 1 ? (
-            <Button onClick={() => setStep(STEPS[stepIndex + 1].key)}>
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
+            <div className="flex items-center gap-2">
+              {STEPS[stepIndex].optional && (
+                <Button
+                  variant="ghost"
+                  onClick={() => setStep(STEPS[stepIndex + 1].key)}
+                >
+                  Skip
+                </Button>
+              )}
+              <Button onClick={() => setStep(STEPS[stepIndex + 1].key)}>
+                Next <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
           ) : (
             <Button onClick={onClose}>Done</Button>
           )}

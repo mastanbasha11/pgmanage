@@ -12,6 +12,7 @@ export interface PaybackPlan {
     settlement_day?: number;
     lease_term_months?: number | null;
     annual_rent_hike_pct?: number | null;
+    annual_hikes?: number[] | null;
   };
   first_fiscal?: { year: number; month: number } | null;
   owners: {
@@ -88,6 +89,7 @@ export interface PaybackPlanInput {
   plan_start_date?: string;
   lease_term_months?: number;
   annual_rent_hike_pct?: number;
+  annual_hikes?: number[];
 }
 
 export function useSavePaybackPlan(propertyId?: string) {

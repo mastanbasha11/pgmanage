@@ -626,7 +626,44 @@ function PlanDialog({
       ? String(existing.plan.annual_rent_hike_pct)
       : '5',
   );
+  // Per-year hike mode. When enabled, `perYearHikes[k]` is the hike
+  // percent that moves rent from year (k+1) → year (k+2). Length
+  // auto-sizes to (leaseYears - 1). Toggle defaults ON if the existing
+  // plan has a non-empty ladder saved; else OFF (single flat pct).
+  const initialLeaseYears = Math.max(
+    1,
+    existing?.plan.lease_term_months
+      ? Math.round(existing.plan.lease_term_months / 12)
+      : 3,
+  );
+  const [useLadder, setUseLadder] = useState<boolean>(
+    !!(existing?.plan.annual_hikes && existing.plan.annual_hikes.length),
+  );
+  const [perYearHikes, setPerYearHikes] = useState<string[]>(() => {
+    const saved = existing?.plan.annual_hikes;
+    const n = Math.max(0, initialLeaseYears - 1);
+    const seed = Array.from({ length: n }, (_, i) => {
+      if (saved && i < saved.length) return String(saved[i]);
+      if (saved && saved.length) return String(saved[saved.length - 1]);
+      return existing?.plan.annual_rent_hike_pct != null
+        ? String(existing.plan.annual_rent_hike_pct)
+        : '5';
+    });
+    return seed;
+  });
   const [horizon, setHorizon] = useState<'months' | 'preset'>('months');
+
+  // Keep the per-year list length in sync as the user changes lease years.
+  // Preserve existing values; new tail entries copy the last known hike.
+  useEffect(() => {
+    const n = Math.max(0, Math.round(Number(leaseYears) || 0) - 1);
+    setPerYearHikes((prev) => {
+      if (prev.length === n) return prev;
+      if (n < prev.length) return prev.slice(0, n);
+      const fill = prev.length ? prev[prev.length - 1] : hikePct || '5';
+      return [...prev, ...Array.from({ length: n - prev.length }, () => fill)];
+    });
+  }, [leaseYears, hikePct]);
 
   useEffect(() => {
     if (['12', '18', '24', '36'].includes(targetMonths)) setHorizon('preset');
@@ -643,11 +680,26 @@ function PlanDialog({
     const G = Math.round(Number(graceMonths));
     const R = Math.round(Number(rentRupees) * 100);
     const L = Math.max(T, Math.round(Number(leaseYears)) * 12 || T);
-    const h = Number(hikePct) / 100 || 0;
     if (!I || !T || T <= 0 || G < 0 || G > T) return null;
+
+    // Pre-compute rent per year — same logic as the backend.
+    const flat = Number(hikePct) / 100 || 0;
+    const ladder = useLadder
+      ? perYearHikes.map((s) => (Number(s) || 0) / 100)
+      : null;
+    const yearsNeeded = Math.floor((L - 1) / 12) + 1;
+    const rentByYear: number[] = [R];
+    for (let k = 1; k < yearsNeeded; k++) {
+      const h = ladder
+        ? ladder[Math.min(k - 1, ladder.length - 1)] ?? 0
+        : flat;
+      rentByYear.push(Math.round(rentByYear[k - 1] * (1 + h)));
+    }
+
     const rents: number[] = [];
     for (let i = 0; i < L; i++) {
-      rents.push(i < G ? 0 : Math.round(R * Math.pow(1 + h, Math.floor(i / 12))));
+      const yi = Math.floor(i / 12);
+      rents.push(i < G ? 0 : rentByYear[Math.min(yi, rentByYear.length - 1)]);
     }
     const rentOverT = rents.slice(0, T).reduce((s, r) => s + r, 0);
     const X = (I + rentOverT) / T;
@@ -656,7 +708,16 @@ function PlanDialog({
       .slice(T, L)
       .reduce((s, r) => s + (X - r), 0);
     return { X, p_regular_y1, T, G, L, rents, postPaybackProfit };
-  }, [investmentRupees, targetMonths, graceMonths, rentRupees, leaseYears, hikePct]);
+  }, [
+    investmentRupees,
+    targetMonths,
+    graceMonths,
+    rentRupees,
+    leaseYears,
+    hikePct,
+    useLadder,
+    perYearHikes,
+  ]);
 
   async function submit() {
     const I = Math.round(Number(investmentRupees) * 100);
@@ -685,6 +746,18 @@ function PlanDialog({
       toast({ title: 'Rent hike must be 0–50%', variant: 'destructive' });
       return;
     }
+    let ladder: number[] | undefined;
+    if (useLadder) {
+      const parsed = perYearHikes.map((s) => Number(s));
+      if (parsed.some((n) => !Number.isFinite(n) || n < 0 || n > 50)) {
+        toast({
+          title: 'Each year hike must be 0–50%',
+          variant: 'destructive',
+        });
+        return;
+      }
+      ladder = parsed;
+    }
     try {
       await save.mutateAsync({
         investment_paise: I,
@@ -694,6 +767,9 @@ function PlanDialog({
         plan_start_date: startDate || undefined,
         lease_term_months: L > 0 ? L : undefined,
         annual_rent_hike_pct: Number.isFinite(H) ? H : undefined,
+        // Empty list = explicit clear (falls back to flat pct on the
+        // backend). Sending `undefined` leaves the current value alone.
+        annual_hikes: ladder,
       });
       toast({ title: 'Payback plan saved' });
       onClose();
@@ -801,8 +877,66 @@ function PlanDialog({
                 value={hikePct}
                 onChange={(e) => setHikePct(e.target.value)}
                 placeholder="e.g. 5"
+                disabled={useLadder}
               />
             </div>
+          </div>
+          {/*
+            Per-year hike ladder. Off by default = simple 5% every year.
+            On = show one row per anniversary (Year 2 hike, Year 3 hike, …)
+            so mixed leases (e.g. 5%/5%/6%) can be entered exactly as the
+            agreement reads.
+          */}
+          <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={useLadder}
+                onChange={(e) => setUseLadder(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-400"
+              />
+              <span>Use a different hike each year</span>
+            </label>
+            {useLadder ? (
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {perYearHikes.length === 0 ? (
+                  <p className="col-span-full text-[11px] text-muted-foreground">
+                    Lease is 1 year — no anniversaries, so no hikes to enter.
+                  </p>
+                ) : (
+                  perYearHikes.map((v, k) => (
+                    <div key={k}>
+                      <Label className="text-[11px] text-muted-foreground">
+                        Year {k + 2} hike (%)
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={50}
+                        step="0.1"
+                        value={v}
+                        onChange={(e) =>
+                          setPerYearHikes((prev) => {
+                            const next = [...prev];
+                            next[k] = e.target.value;
+                            return next;
+                          })
+                        }
+                      />
+                    </div>
+                  ))
+                )}
+                {perYearHikes.length > 0 && (
+                  <p className="col-span-full text-[11px] text-muted-foreground">
+                    Each row is the % hike moving from the prior year — e.g. Year 2 = base rent × (1 + Year 2 %).
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Applies {hikePct || 0}% at every anniversary. Turn on for mixed leases (e.g. 5% / 5% / 6%).
+              </p>
+            )}
           </div>
           <div>
             <Label>Plan start date</Label>
@@ -1015,11 +1149,15 @@ function YearSummaryTable({
       <div className="mb-2 flex items-center gap-2">
         <TrendingUp className="h-4 w-4 text-accent" />
         <span className="text-sm font-medium">Year-by-year breakdown</span>
-        {plan.annual_rent_hike_pct != null && plan.annual_rent_hike_pct > 0 && (
+        {plan.annual_hikes && plan.annual_hikes.length > 0 ? (
+          <span className="text-[11px] text-muted-foreground">
+            Rent hikes {plan.annual_hikes.map((h) => `${h}%`).join(' / ')} year-over-year
+          </span>
+        ) : plan.annual_rent_hike_pct != null && plan.annual_rent_hike_pct > 0 ? (
           <span className="text-[11px] text-muted-foreground">
             Rent hikes {plan.annual_rent_hike_pct}% every 12 months
           </span>
-        )}
+        ) : null}
       </div>
       <div className="overflow-hidden rounded-md border">
         <table className="w-full text-sm">

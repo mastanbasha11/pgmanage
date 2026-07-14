@@ -131,6 +131,11 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             roi_plan_start_date DATE,
             roi_lease_term_months INTEGER,
             roi_annual_rent_hike_pct NUMERIC(5,2),
+            -- Per-year hike ladder for uneven year-over-year increases
+            -- (e.g. 5%/5%/6% for a 3-year lease). Index i = hike from
+            -- year (i+1) → year (i+2). Length ≈ lease_years-1. NULL →
+            -- fall back to the flat roi_annual_rent_hike_pct above.
+            roi_annual_hikes JSONB,
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

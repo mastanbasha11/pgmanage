@@ -71,6 +71,7 @@ async def test_save_full_plan_roundtrip(
         "plan_start_date": "2026-02-15",
         "lease_term_months": 36,               # 3-year lease
         "annual_rent_hike_pct": 5.0,
+        "annual_hikes": [5.0, 6.0],            # year1→year2, year2→year3
     }
     resp = await client.put(
         f"/api/v1/properties/{pid}/payback-plan",
@@ -94,6 +95,7 @@ async def test_save_full_plan_roundtrip(
     assert plan["plan_start_date"] == payload["plan_start_date"]
     assert plan["lease_term_months"] == payload["lease_term_months"]
     assert float(plan["annual_rent_hike_pct"]) == payload["annual_rent_hike_pct"]
+    assert plan["annual_hikes"] == payload["annual_hikes"]
 
 
 @pytest.mark.asyncio
@@ -178,6 +180,79 @@ async def test_hike_math_year_stepped(
     assert calc["post_payback_months"] == 48 - T
     expected_post = sum(calc["monthly_targets_paise"][T:])
     assert calc["post_payback_profit_paise"] == expected_post
+
+
+@pytest.mark.asyncio
+async def test_annual_hikes_ladder_beats_flat_pct(
+    client: AsyncClient, test_owner: dict, test_property: dict
+) -> None:
+    """When `annual_hikes` is set, the ladder wins over `annual_rent_hike_pct`.
+
+    Scenario: 3-year lease with hikes [5%, 6%] — year 2 = base × 1.05,
+    year 3 = base × 1.05 × 1.06. The flat 10% is ignored.
+    """
+    pid = test_property["property_id"]
+    base_rent = 4_00_000_00
+    await client.put(
+        f"/api/v1/properties/{pid}/payback-plan",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "investment_paise": 100_00_000_00,
+            "target_months": 24,
+            "grace_months": 2,
+            "lessor_rent_paise": base_rent,
+            "lease_term_months": 36,
+            "annual_rent_hike_pct": 10.0,          # should be shadowed
+            "annual_hikes": [5.0, 6.0],
+        },
+    )
+    got = await client.get(
+        f"/api/v1/properties/{pid}/payback-plan",
+        headers=auth_headers(test_owner["token"]),
+    )
+    calc = got.json()["calc"]
+    rents = calc["rent_by_month_paise"]
+    # Year 1 (post-grace): base rent
+    assert rents[2] == base_rent
+    # Year 2: base × 1.05
+    assert rents[12] == int(round(base_rent * 1.05))
+    # Year 3: base × 1.05 × 1.06
+    assert rents[24] == int(round(base_rent * 1.05 * 1.06))
+    # Ladder shorter than lease → last value reused (year 3 already covers it here).
+
+
+@pytest.mark.asyncio
+async def test_annual_hikes_empty_list_falls_back_to_flat_pct(
+    client: AsyncClient, test_owner: dict, test_property: dict
+) -> None:
+    """`annual_hikes = []` = "not set" → the flat pct still applies.
+
+    Guards against a UI regression where the dialog sends `[]` instead
+    of omitting the field.
+    """
+    pid = test_property["property_id"]
+    base_rent = 4_00_000_00
+    await client.put(
+        f"/api/v1/properties/{pid}/payback-plan",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "investment_paise": 100_00_000_00,
+            "target_months": 24,
+            "grace_months": 0,
+            "lessor_rent_paise": base_rent,
+            "lease_term_months": 36,
+            "annual_rent_hike_pct": 7.5,
+            "annual_hikes": [],
+        },
+    )
+    got = await client.get(
+        f"/api/v1/properties/{pid}/payback-plan",
+        headers=auth_headers(test_owner["token"]),
+    )
+    rents = got.json()["calc"]["rent_by_month_paise"]
+    # Empty ladder → flat 7.5% every year.
+    assert rents[12] == int(round(base_rent * 1.075))
+    assert rents[24] == int(round(base_rent * (1.075 ** 2)))
 
 
 @pytest.mark.asyncio

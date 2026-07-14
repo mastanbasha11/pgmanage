@@ -1112,6 +1112,11 @@ class PaybackPlanUpdate(BaseModel):
     plan_start_date: date | None = None
     lease_term_months: int | None = None
     annual_rent_hike_pct: float | None = None
+    # Per-year hike ladder. `annual_hikes[i]` = hike percent from year
+    # (i+1) → year (i+2). Length is typically lease_years-1 but the
+    # compute tolerates any length (extra entries ignored, missing
+    # entries default to 0 or the flat pct). Pass [] to clear.
+    annual_hikes: list[float] | None = None
 
 
 def _compute_payback(
@@ -1121,15 +1126,20 @@ def _compute_payback(
     base_lessor_rent: int,
     annual_hike_pct: float = 0.0,
     lease_term_months: int | None = None,
+    annual_hikes: list[float] | None = None,
 ) -> dict:
     """Break-even with year-stepped rent.
 
     Rent for month i (0-indexed):
-        0                              if i < grace_months
-        base_rent × (1+h)^(i // 12)    otherwise
-    where h = annual_hike_pct / 100. The "year" for the hike ticks from
-    the lease start, not from grace end — the hike clock keeps running
-    even while rent is zero.
+        0                                if i < grace_months
+        base_rent × ∏(1 + h_k)           otherwise, over the k anniversaries
+                                         that have elapsed before month i.
+
+    Hike selection:
+    - If `annual_hikes` is provided and non-empty, hike at anniversary k
+      (moving from year k → year k+1) is annual_hikes[k-1]. Anniversaries
+      beyond the ladder's length reuse the ladder's last value.
+    - Else the flat `annual_hike_pct` is applied at every anniversary.
 
     Break-even solve: X (revenue − opex, ex-rent) is assumed constant.
         T·X − sum(rents[0..T)) = I
@@ -1150,13 +1160,31 @@ def _compute_payback(
     T = target_months
     G = grace_months
     R = int(base_lessor_rent or 0)
-    h = float(annual_hike_pct or 0) / 100.0
+
+    ladder = [float(x) / 100.0 for x in (annual_hikes or []) if x is not None]
+    flat_h = float(annual_hike_pct or 0) / 100.0
+    use_ladder = bool(ladder)
+
+    def hike_at_anniversary(k: int) -> float:
+        """Hike moving from year k → year k+1 (k=1..)."""
+        if use_ladder:
+            idx = min(k - 1, len(ladder) - 1)
+            return ladder[max(0, idx)]
+        return flat_h
+
+    # Pre-compute the per-year rent multiplier so month lookups are cheap
+    # and consistent across ladder / flat modes.
+    years_in_lease = (L + 11) // 12 + 1
+    rent_by_year: list[int] = [R]
+    for yi in range(1, years_in_lease):
+        prev = rent_by_year[-1]
+        rent_by_year.append(int(round(prev * (1 + hike_at_anniversary(yi)))))
 
     def rent_for(month_idx: int) -> int:
         if month_idx < G:
             return 0
         year_idx = month_idx // 12
-        return int(round(R * ((1 + h) ** year_idx)))
+        return rent_by_year[min(year_idx, len(rent_by_year) - 1)]
 
     rents_full = [rent_for(i) for i in range(L)]  # months 0..L-1
     rent_over_target = sum(rents_full[:T])
@@ -1210,7 +1238,8 @@ async def get_payback_plan(
         text("""
             SELECT roi_investment_paise, roi_target_months, roi_grace_months,
                    roi_lessor_rent_paise, roi_plan_start_date, settlement_day,
-                   roi_lease_term_months, roi_annual_rent_hike_pct
+                   roi_lease_term_months, roi_annual_rent_hike_pct,
+                   roi_annual_hikes
             FROM properties WHERE id = :pid
         """),
         {"pid": str(property_id)},
@@ -1228,6 +1257,11 @@ async def get_payback_plan(
         "settlement_day": settlement_day,
         "lease_term_months": row["roi_lease_term_months"],
         "annual_rent_hike_pct": float(row["roi_annual_rent_hike_pct"]) if row["roi_annual_rent_hike_pct"] is not None else None,
+        "annual_hikes": (
+            [float(x) for x in row["roi_annual_hikes"]]
+            if row["roi_annual_hikes"] is not None
+            else None
+        ),
     }
     configured = all(
         plan[k] is not None
@@ -1258,6 +1292,7 @@ async def get_payback_plan(
         int(plan["lessor_rent_paise"] or 0),
         annual_hike_pct=float(plan["annual_rent_hike_pct"] or 0),
         lease_term_months=int(plan["lease_term_months"]) if plan["lease_term_months"] else None,
+        annual_hikes=plan["annual_hikes"],
     )
     if "error" in calc:
         result["calc"] = calc
@@ -1576,13 +1611,21 @@ async def set_payback_plan(
         "plan_start_date": "roi_plan_start_date",
         "lease_term_months": "roi_lease_term_months",
         "annual_rent_hike_pct": "roi_annual_rent_hike_pct",
+        "annual_hikes": "roi_annual_hikes",
     }
+    # JSONB columns must be bound as text + cast in SQL — psycopg can't
+    # ship a Python list straight into a JSONB parameter.
+    JSONB_COLS = {"roi_annual_hikes"}
     set_parts = []
     params: dict[str, object] = {"pid": str(property_id)}
     for k, v in updates.items():
         col = key_map[k]
-        set_parts.append(f"{col} = :{col}")
-        params[col] = v
+        if col in JSONB_COLS:
+            set_parts.append(f"{col} = CAST(:{col} AS jsonb)")
+            params[col] = json.dumps(v) if v is not None else None
+        else:
+            set_parts.append(f"{col} = :{col}")
+            params[col] = v
 
     res = await db.execute(
         text(f"UPDATE properties SET {', '.join(set_parts)}, updated_at = NOW() WHERE id = :pid"),
