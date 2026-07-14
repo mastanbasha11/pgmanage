@@ -1574,6 +1574,8 @@ async def set_payback_plan(
         "grace_months": "roi_grace_months",
         "lessor_rent_paise": "roi_lessor_rent_paise",
         "plan_start_date": "roi_plan_start_date",
+        "lease_term_months": "roi_lease_term_months",
+        "annual_rent_hike_pct": "roi_annual_rent_hike_pct",
     }
     set_parts = []
     params: dict[str, object] = {"pid": str(property_id)}
