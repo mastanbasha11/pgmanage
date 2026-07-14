@@ -83,10 +83,11 @@ class Settings(BaseSettings):
     # ── Rent overdue chasing (rent_overdue_daily job) ────────────────────────
     # Grace: don't send an overdue notice until this many days AFTER the
     # ledger due_date (so tenants aren't chased the moment rent is generated).
-    # Repeat: after the first overdue notice, wait this many days before the
-    # next one for the same tenant/month — prevents daily WhatsApp spam.
+    # Repeat: minimum days between two overdue notices to the same tenant.
+    # Default 1 = one reminder per calendar day for as long as they owe.
+    # Bump to 2/3 to soften the cadence.
     OVERDUE_GRACE_DAYS: int = 3
-    OVERDUE_REPEAT_DAYS: int = 3
+    OVERDUE_REPEAT_DAYS: int = 1
     # Fills the {{manager_phone}} placeholder in the overdue template. Meta
     # rejects empty template params, so the job falls back to the org's
     # WhatsApp number and finally this literal if both are unset.
