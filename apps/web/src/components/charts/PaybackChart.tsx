@@ -70,9 +70,16 @@ function buildSeries(data: PaybackPlan): Point[] {
   let runE = 0;
   let year = first.year;
   let month = first.month;
+  const monthlyTargets = calc.monthly_targets_paise ?? [];
   for (let i = 0; i < total; i++) {
+    // Prefer per-month target (accounts for rent hikes across years); fall
+    // back to grace/regular pair for older responses.
     const per =
-      i < grace ? calc.grace_month_profit_paise : calc.regular_month_profit_paise;
+      i < monthlyTargets.length
+        ? monthlyTargets[i]
+        : i < grace
+        ? calc.grace_month_profit_paise
+        : calc.regular_month_profit_paise;
     runE += per;
     const key = `${year}-${month}`;
     const isPast = cumActualByKey.has(key);

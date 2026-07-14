@@ -292,6 +292,16 @@ function PlanResults({ data, propertyId }: { data: PaybackPlan; propertyId: stri
         </div>
       )}
 
+      {/* Year-by-year breakdown (rent hikes across lease years) */}
+      {(calc.year_summaries?.length ?? 0) > 0 && (
+        <YearSummaryTable summaries={calc.year_summaries!} plan={plan} />
+      )}
+
+      {/* Post-payback future profit — the icing on the cake */}
+      {(calc.post_payback_months ?? 0) > 0 && (
+        <PostPaybackCard calc={calc} plan={plan} />
+      )}
+
       {/* Actual vs expected trajectory */}
       <div>
         <div className="mb-2 flex items-center gap-2">
@@ -413,8 +423,7 @@ function MonthlyBreakdownTable({
     ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1];
   const investment = data.plan.investment_paise ?? 0;
   const total = data.plan.target_months ?? 0;
-  const grace = data.plan.grace_months ?? 0;
-  const rent = data.plan.lessor_rent_paise ?? 0;
+  const rents = data.calc?.rent_by_month_paise ?? [];
 
   let cumActual = 0;
   let cumExpected = 0;
@@ -446,21 +455,20 @@ function MonthlyBreakdownTable({
           </thead>
           <tbody className="divide-y">
             {months.map((m, idx) => {
-              // Required this month: recompute the plan solve for the
-              // remaining horizon given cumActual so far. Same formula as
-              // the plan itself, but with remaining investment and
-              // remaining months.
+              // Required this month: given cumActual so far and the
+              // remaining months' actual rent schedule (year-stepped),
+              // what does X' need to be, and therefore this month's
+              // profit = X' − rent_this_month.
               const remaining_months = total - idx;
-              const grace_remaining = Math.max(0, grace - idx);
               const remaining_investment = Math.max(0, investment - cumActual);
               let required = 0;
               if (remaining_months > 0) {
-                const p_grace_cu =
-                  (remaining_investment +
-                    (remaining_months - grace_remaining) * rent) /
-                  remaining_months;
-                const p_regular_cu = p_grace_cu - rent;
-                required = idx < grace ? p_grace_cu : p_regular_cu;
+                const rentTail = rents.length
+                  ? rents.slice(idx, total).reduce((s, r) => s + r, 0)
+                  : 0;
+                const xCatchup = (remaining_investment + rentTail) / remaining_months;
+                const rentThis = rents[idx] ?? 0;
+                required = xCatchup - rentThis;
               }
 
               cumActual += m.actual_paise;
@@ -608,6 +616,16 @@ function PlanDialog({
   const [startDate, setStartDate] = useState<string>(
     existing?.plan.plan_start_date ?? new Date().toISOString().slice(0, 10),
   );
+  const [leaseYears, setLeaseYears] = useState<string>(
+    existing?.plan.lease_term_months != null
+      ? String(Math.round(existing.plan.lease_term_months / 12))
+      : '3',
+  );
+  const [hikePct, setHikePct] = useState<string>(
+    existing?.plan.annual_rent_hike_pct != null
+      ? String(existing.plan.annual_rent_hike_pct)
+      : '5',
+  );
   const [horizon, setHorizon] = useState<'months' | 'preset'>('months');
 
   useEffect(() => {
@@ -617,23 +635,36 @@ function PlanDialog({
   const save = useSavePaybackPlan(propertyId);
   const { toast } = useToast();
 
-  // Live preview.
+  // Live preview — mirrors the backend's rent-stepping compute so what
+  // the user sees before Save matches what they see after.
   const preview = useMemo(() => {
     const I = Math.round(Number(investmentRupees) * 100);
     const T = Math.round(Number(targetMonths));
     const G = Math.round(Number(graceMonths));
     const R = Math.round(Number(rentRupees) * 100);
+    const L = Math.max(T, Math.round(Number(leaseYears)) * 12 || T);
+    const h = Number(hikePct) / 100 || 0;
     if (!I || !T || T <= 0 || G < 0 || G > T) return null;
-    const p_grace = (I + (T - G) * R) / T;
-    const p_regular = p_grace - R;
-    return { p_grace, p_regular, T, G };
-  }, [investmentRupees, targetMonths, graceMonths, rentRupees]);
+    const rents: number[] = [];
+    for (let i = 0; i < L; i++) {
+      rents.push(i < G ? 0 : Math.round(R * Math.pow(1 + h, Math.floor(i / 12))));
+    }
+    const rentOverT = rents.slice(0, T).reduce((s, r) => s + r, 0);
+    const X = (I + rentOverT) / T;
+    const p_regular_y1 = X - R;
+    const postPaybackProfit = rents
+      .slice(T, L)
+      .reduce((s, r) => s + (X - r), 0);
+    return { X, p_regular_y1, T, G, L, rents, postPaybackProfit };
+  }, [investmentRupees, targetMonths, graceMonths, rentRupees, leaseYears, hikePct]);
 
   async function submit() {
     const I = Math.round(Number(investmentRupees) * 100);
     const T = Math.round(Number(targetMonths));
     const G = Math.round(Number(graceMonths));
     const R = Math.round(Number(rentRupees) * 100);
+    const L = Math.round(Number(leaseYears)) * 12;
+    const H = Number(hikePct);
     if (!I || I < 0) {
       toast({ title: 'Enter total investment', variant: 'destructive' });
       return;
@@ -646,6 +677,14 @@ function PlanDialog({
       toast({ title: 'Grace months out of range', variant: 'destructive' });
       return;
     }
+    if (L > 0 && L < T) {
+      toast({ title: 'Lease term must be ≥ target', variant: 'destructive' });
+      return;
+    }
+    if (H < 0 || H > 50) {
+      toast({ title: 'Rent hike must be 0–50%', variant: 'destructive' });
+      return;
+    }
     try {
       await save.mutateAsync({
         investment_paise: I,
@@ -653,6 +692,8 @@ function PlanDialog({
         grace_months: G,
         lessor_rent_paise: R,
         plan_start_date: startDate || undefined,
+        lease_term_months: L > 0 ? L : undefined,
+        annual_rent_hike_pct: Number.isFinite(H) ? H : undefined,
       });
       toast({ title: 'Payback plan saved' });
       onClose();
@@ -737,6 +778,32 @@ function PlanDialog({
               placeholder="e.g. 400000"
             />
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Lease term (years)</Label>
+              <Input
+                type="number"
+                min={1}
+                max={20}
+                step="1"
+                value={leaseYears}
+                onChange={(e) => setLeaseYears(e.target.value)}
+                placeholder="e.g. 3"
+              />
+            </div>
+            <div>
+              <Label>Annual rent hike (%)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={50}
+                step="0.1"
+                value={hikePct}
+                onChange={(e) => setHikePct(e.target.value)}
+                placeholder="e.g. 5"
+              />
+            </div>
+          </div>
           <div>
             <Label>Plan start date</Label>
             <Input
@@ -755,12 +822,19 @@ function PlanDialog({
                 Preview
               </p>
               <p className="mt-1">
-                Grace ({preview.G} mo): <strong>{formatPaise(preview.p_grace)}</strong>/mo
+                Grace ({preview.G} mo): <strong>{formatPaise(preview.X)}</strong>/mo
               </p>
               <p>
-                Regular ({preview.T - preview.G} mo):{' '}
-                <strong>{formatPaise(preview.p_regular)}</strong>/mo
+                Year-1 regular ({preview.T - preview.G} mo target window):{' '}
+                <strong>{formatPaise(preview.p_regular_y1)}</strong>/mo
               </p>
+              {preview.L > preview.T && (
+                <p className="mt-1 text-[11px] text-emerald-800">
+                  Post-payback future profit over remaining {preview.L - preview.T} lease months:{' '}
+                  <strong>{formatPaise(preview.postPaybackProfit)}</strong>
+                  {Number(hikePct) > 0 && ' (with annual hikes applied)'}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -919,5 +993,127 @@ function BackfillDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Year-by-year breakdown — one row per lease year, showing how rent
+ * steps up on each anniversary and how that eats into the monthly
+ * target profit. Year 1 gets a "(inc. grace)" note when the grace
+ * months live inside it.
+ */
+function YearSummaryTable({
+  summaries,
+  plan,
+}: {
+  summaries: NonNullable<NonNullable<PaybackPlan['calc']>['year_summaries']>;
+  plan: PaybackPlan['plan'];
+}) {
+  const grace = plan.grace_months ?? 0;
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <TrendingUp className="h-4 w-4 text-accent" />
+        <span className="text-sm font-medium">Year-by-year breakdown</span>
+        {plan.annual_rent_hike_pct != null && plan.annual_rent_hike_pct > 0 && (
+          <span className="text-[11px] text-muted-foreground">
+            Rent hikes {plan.annual_rent_hike_pct}% every 12 months
+          </span>
+        )}
+      </div>
+      <div className="overflow-hidden rounded-md border">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="px-3 py-2 text-left font-medium text-muted-foreground">Year</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Months</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Monthly rent</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Monthly target</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Year rent</th>
+              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Year target</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {summaries.map((y) => (
+              <tr key={y.year_index}>
+                <td className="px-3 py-2 font-medium">
+                  Year {y.year_index}
+                  {y.year_index === 1 && grace > 0 && (
+                    <span className="ml-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      (inc. {grace}-mo grace)
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">{y.months_in_year}</td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {formatPaise(y.monthly_rent_paise)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                  {formatPaise(y.monthly_target_paise)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                  {formatPaise(y.year_rent_total_paise)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                  {formatPaise(y.year_target_total_paise)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Post-payback future profit — after month T the investment is fully
+ * recovered; any remaining lease months at the target X still throw off
+ * (X − rent) per month. That's pure gain, and it's the story owners
+ * care about most: "what do I take home over the full lease?"
+ */
+function PostPaybackCard({
+  calc,
+  plan,
+}: {
+  calc: NonNullable<PaybackPlan['calc']>;
+  plan: PaybackPlan['plan'];
+}) {
+  const T = plan.target_months ?? 0;
+  const L = plan.lease_term_months ?? T;
+  const postMonths = calc.post_payback_months ?? 0;
+  const postProfit = calc.post_payback_profit_paise ?? 0;
+  const totalProfit = calc.total_lease_profit_paise ?? 0;
+  return (
+    <div className="rounded-md border border-emerald-200 bg-emerald-50/40 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <PiggyBank className="h-4 w-4 text-emerald-700" />
+        <span className="text-sm font-medium text-emerald-900">
+          After payback — future profit over the rest of the lease
+        </span>
+      </div>
+      <p className="text-[11px] text-emerald-800/80">
+        Investment is recovered by month {T}. Remaining lease months keep
+        throwing off (target − rent) — all pure gain.
+      </p>
+      <div className="mt-2 grid gap-3 sm:grid-cols-3">
+        <div>
+          <p className="text-[11px] text-muted-foreground">Post-payback months</p>
+          <p className="text-sm font-semibold">
+            {postMonths} of {L}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] text-muted-foreground">Future profit (post-ROI)</p>
+          <p className="text-sm font-semibold text-emerald-700">
+            {formatPaise(postProfit)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] text-muted-foreground">Total lease profit</p>
+          <p className="text-sm font-semibold">{formatPaise(totalProfit)}</p>
+        </div>
+      </div>
+    </div>
   );
 }

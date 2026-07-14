@@ -129,6 +129,8 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             roi_grace_months INTEGER,
             roi_lessor_rent_paise BIGINT,
             roi_plan_start_date DATE,
+            roi_lease_term_months INTEGER,
+            roi_annual_rent_hike_pct NUMERIC(5,2),
             is_active BOOLEAN NOT NULL DEFAULT true,
             created_by UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

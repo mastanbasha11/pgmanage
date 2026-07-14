@@ -1110,31 +1110,90 @@ class PaybackPlanUpdate(BaseModel):
     grace_months: int | None = None
     lessor_rent_paise: int | None = None
     plan_start_date: date | None = None
+    lease_term_months: int | None = None
+    annual_rent_hike_pct: float | None = None
 
 
 def _compute_payback(
     investment: int,
     target_months: int,
     grace_months: int,
-    lessor_rent: int,
+    base_lessor_rent: int,
+    annual_hike_pct: float = 0.0,
+    lease_term_months: int | None = None,
 ) -> dict:
-    """Grace = lessor rent is fully waived. Post-grace = full rent applies.
+    """Break-even with year-stepped rent.
 
-    Break-even:   G·P_grace + (T−G)·P_regular = I
-    Constraint:   P_regular = P_grace − lessor_rent
-    Solving:      P_grace = (I + (T−G)·lessor_rent) / T
+    Rent for month i (0-indexed):
+        0                              if i < grace_months
+        base_rent × (1+h)^(i // 12)    otherwise
+    where h = annual_hike_pct / 100. The "year" for the hike ticks from
+    the lease start, not from grace end — the hike clock keeps running
+    even while rent is zero.
+
+    Break-even solve: X (revenue − opex, ex-rent) is assumed constant.
+        T·X − sum(rents[0..T)) = I
+        ⇒ X = (I + sum(rents[0..T))) / T
+        ⇒ target_profit_i = X − rents[i]
+
+    Post-payback: for months [T, lease_term), profit at target X keeps
+    flowing (minus that month's stepped rent) — that's the "future
+    profit" beyond the ROI horizon.
     """
     if target_months <= 0:
         return {"error": "target_months must be > 0"}
     if grace_months < 0 or grace_months > target_months:
         return {"error": "grace_months must be between 0 and target_months"}
-    p_grace = (investment + (target_months - grace_months) * lessor_rent) / target_months
-    p_regular = p_grace - lessor_rent
+    L = int(lease_term_months) if lease_term_months and lease_term_months > 0 else target_months
+    if L < target_months:
+        return {"error": "lease_term_months must be >= target_months"}
+    T = target_months
+    G = grace_months
+    R = int(base_lessor_rent or 0)
+    h = float(annual_hike_pct or 0) / 100.0
+
+    def rent_for(month_idx: int) -> int:
+        if month_idx < G:
+            return 0
+        year_idx = month_idx // 12
+        return int(round(R * ((1 + h) ** year_idx)))
+
+    rents_full = [rent_for(i) for i in range(L)]  # months 0..L-1
+    rent_over_target = sum(rents_full[:T])
+    X = (investment + rent_over_target) / T
+    monthly_targets = [int(round(X - r)) for r in rents_full]
+
+    # Year-by-year summary (year 1 = months [0..11], year 2 = [12..23], etc.)
+    year_summaries: list[dict] = []
+    for yi in range(0, (L + 11) // 12):
+        start = yi * 12
+        end = min(start + 12, L)
+        year_rents = rents_full[start:end]
+        year_targets = monthly_targets[start:end]
+        year_summaries.append({
+            "year_index": yi + 1,
+            "months_in_year": end - start,
+            "monthly_rent_paise": max(year_rents),  # rent constant within a year
+            "monthly_target_paise": int(round(X - max(year_rents))) if year_rents else 0,
+            "year_rent_total_paise": sum(year_rents),
+            "year_target_total_paise": sum(year_targets),
+        })
+
     return {
-        "grace_month_profit_paise": int(round(p_grace)),
-        "regular_month_profit_paise": int(round(p_regular)),
-        "grace_period_total_paise": int(round(p_grace * grace_months)),
-        "regular_period_total_paise": int(round(p_regular * (target_months - grace_months))),
+        "grace_month_profit_paise": int(round(X)),
+        "regular_month_profit_paise": int(round(X - R)),
+        "grace_period_total_paise": int(round(X * G)),
+        "regular_period_total_paise": sum(monthly_targets[G:T]),
+        # New year-aware fields
+        "target_x_paise": int(round(X)),
+        "monthly_targets_paise": monthly_targets,   # length = L
+        "rent_by_month_paise": rents_full,          # length = L
+        "total_rent_over_target_paise": int(rent_over_target),
+        "total_rent_over_lease_paise": int(sum(rents_full)),
+        "post_payback_months": max(0, L - T),
+        "post_payback_profit_paise": int(sum(monthly_targets[T:L])),
+        "total_lease_profit_paise": int(sum(monthly_targets)),
+        "year_summaries": year_summaries,
     }
 
 
@@ -1150,7 +1209,8 @@ async def get_payback_plan(
     row = (await db.execute(
         text("""
             SELECT roi_investment_paise, roi_target_months, roi_grace_months,
-                   roi_lessor_rent_paise, roi_plan_start_date, settlement_day
+                   roi_lessor_rent_paise, roi_plan_start_date, settlement_day,
+                   roi_lease_term_months, roi_annual_rent_hike_pct
             FROM properties WHERE id = :pid
         """),
         {"pid": str(property_id)},
@@ -1166,6 +1226,8 @@ async def get_payback_plan(
         "lessor_rent_paise": row["roi_lessor_rent_paise"],
         "plan_start_date": row["roi_plan_start_date"].isoformat() if row["roi_plan_start_date"] else None,
         "settlement_day": settlement_day,
+        "lease_term_months": row["roi_lease_term_months"],
+        "annual_rent_hike_pct": float(row["roi_annual_rent_hike_pct"]) if row["roi_annual_rent_hike_pct"] is not None else None,
     }
     configured = all(
         plan[k] is not None
@@ -1194,6 +1256,8 @@ async def get_payback_plan(
         int(plan["target_months"] or 0),
         int(plan["grace_months"] or 0),
         int(plan["lessor_rent_paise"] or 0),
+        annual_hike_pct=float(plan["annual_rent_hike_pct"] or 0),
+        lease_term_months=int(plan["lease_term_months"]) if plan["lease_term_months"] else None,
     )
     if "error" in calc:
         result["calc"] = calc
@@ -1279,12 +1343,18 @@ async def get_payback_plan(
         # for the (Mar, 2026) row, not Mar 1 → Mar 31.
         year, month = fy, fm
         grace_months = int(plan["grace_months"] or 0)
+        monthly_targets = calc.get("monthly_targets_paise") or []
         for i in range(months_elapsed):
-            expected_this_month = (
-                calc["grace_month_profit_paise"]
-                if i < grace_months
-                else calc["regular_month_profit_paise"]
-            )
+            # Use the year-stepped per-month target if available (accounts
+            # for rent hikes in later years); else fall back to grace/regular.
+            if i < len(monthly_targets):
+                expected_this_month = monthly_targets[i]
+            else:
+                expected_this_month = (
+                    calc["grace_month_profit_paise"]
+                    if i < grace_months
+                    else calc["regular_month_profit_paise"]
+                )
             key = (year, month)
             if key in manual:
                 monthly_breakdown.append({
@@ -1355,22 +1425,22 @@ async def get_payback_plan(
     else:
         expected_cumulative_paise = 0
 
-    # Catch-up: given what's already banked (actual_cumulative_paise), what
-    # do the remaining months need to average so we still hit the total
-    # investment by month T? Same shape as the original solve, but the
-    # "remaining" horizon and "remaining" investment replace T and I.
+    # Catch-up: given what's already banked, what does the average X have
+    # to be from now on to still hit total investment by month T? With
+    # rent stepping up by year, we solve for a NEW target X' such that
+    # sum(X' - rent_i) for i in [elapsed, T) = remaining_investment.
     catchup: dict | None = None
     if plan["target_months"] and months_elapsed is not None:
         T = int(plan["target_months"])
         G = int(plan["grace_months"] or 0)
-        rent = int(plan["lessor_rent_paise"] or 0)
+        base_rent = int(plan["lessor_rent_paise"] or 0)
+        rents_full = calc.get("rent_by_month_paise") or []
         remaining_months = max(0, T - months_elapsed)
         remaining_investment = int(plan["investment_paise"] or 0) - actual_cumulative_paise
         grace_remaining = max(0, G - months_elapsed)
         regular_remaining = remaining_months - grace_remaining
         if remaining_months > 0:
             if remaining_investment <= 0:
-                # Already fully recovered.
                 catchup = {
                     "remaining_months": remaining_months,
                     "grace_remaining": grace_remaining,
@@ -1381,13 +1451,18 @@ async def get_payback_plan(
                     "on_track": True,
                 }
             else:
-                # Solve P_grace' × grace_remaining + P_regular' × regular_remaining
-                #        = remaining_investment
-                # with P_regular' = P_grace' − rent.
-                p_grace_cu = (
-                    remaining_investment + regular_remaining * rent
-                ) / remaining_months
-                p_regular_cu = p_grace_cu - rent
+                # New X': sum over remaining months of (X' - rent_i) = remaining_investment
+                # ⇒ X' = (remaining_investment + sum(rents[elapsed..T))) / remaining_months
+                rent_remaining = sum(rents_full[months_elapsed:T]) if rents_full else regular_remaining * base_rent
+                x_catchup = (remaining_investment + rent_remaining) / remaining_months
+                # p_grace_catchup only makes sense if there are grace months
+                # left — else we use the first non-grace year's rent for
+                # the reported regular target.
+                first_rent_after_grace = (
+                    rents_full[G] if rents_full and G < len(rents_full) else base_rent
+                )
+                p_grace_cu = x_catchup
+                p_regular_cu = x_catchup - first_rent_after_grace
                 catchup = {
                     "remaining_months": remaining_months,
                     "grace_remaining": grace_remaining,

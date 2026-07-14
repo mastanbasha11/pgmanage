@@ -10,6 +10,8 @@ export interface PaybackPlan {
     lessor_rent_paise: number | null;
     plan_start_date: string | null;
     settlement_day?: number;
+    lease_term_months?: number | null;
+    annual_rent_hike_pct?: number | null;
   };
   first_fiscal?: { year: number; month: number } | null;
   owners: {
@@ -22,6 +24,22 @@ export interface PaybackPlan {
     regular_month_profit_paise: number;
     grace_period_total_paise: number;
     regular_period_total_paise: number;
+    target_x_paise?: number;
+    monthly_targets_paise?: number[];
+    rent_by_month_paise?: number[];
+    total_rent_over_target_paise?: number;
+    total_rent_over_lease_paise?: number;
+    post_payback_months?: number;
+    post_payback_profit_paise?: number;
+    total_lease_profit_paise?: number;
+    year_summaries?: {
+      year_index: number;
+      months_in_year: number;
+      monthly_rent_paise: number;
+      monthly_target_paise: number;
+      year_rent_total_paise: number;
+      year_target_total_paise: number;
+    }[];
     error?: string;
   };
   per_owner?: {
@@ -68,6 +86,8 @@ export interface PaybackPlanInput {
   grace_months?: number;
   lessor_rent_paise?: number;
   plan_start_date?: string;
+  lease_term_months?: number;
+  annual_rent_hike_pct?: number;
 }
 
 export function useSavePaybackPlan(propertyId?: string) {
