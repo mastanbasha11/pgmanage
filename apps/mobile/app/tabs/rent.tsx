@@ -27,6 +27,7 @@ import { colors, radius, space, type as fontSize } from '../../lib/theme';
 import {
   Card,
   Empty,
+  Fab,
   Header,
   Loading,
   rupees,
@@ -221,6 +222,7 @@ export default function RentTab() {
           }
         />
       )}
+      <Fab name="add" accessibilityLabel="Record payment" onPress={() => router.push('/payments/new')} />
     </Screen>
   );
 }

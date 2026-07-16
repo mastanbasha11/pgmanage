@@ -102,8 +102,18 @@ export default function SettingsTab() {
             />
             <Row
               iconName="megaphone-outline"
-              label="Leads"
+              label="Leads (Kanban)"
               onPress={() => router.push('/tabs/leads')}
+            />
+            <Row
+              iconName="calendar-outline"
+              label="Bookings"
+              onPress={() => router.push('/bookings')}
+            />
+            <Row
+              iconName="mail-open-outline"
+              label="Inbox"
+              onPress={() => router.push('/inbox')}
             />
             <Row
               iconName="receipt-outline"
@@ -111,14 +121,41 @@ export default function SettingsTab() {
               onPress={() => router.push('/tabs/expenses')}
             />
             <Row
-              iconName="bed-outline"
-              label={t('tab.rooms')}
-              onPress={() => router.push('/tabs/rooms')}
+              iconName="analytics-outline"
+              label="ROI & Payback plan"
+              onPress={() => router.push('/roi')}
+            />
+          </View>
+        </Card>
+
+        {/* Admin */}
+        <Card>
+          <Text style={styles.label}>Admin</Text>
+          <View style={{ gap: space.xs, marginTop: space.sm }}>
+            <Row
+              iconName="people-circle-outline"
+              label="Team"
+              onPress={() => router.push('/settings/team')}
+            />
+            <Row
+              iconName="restaurant-outline"
+              label="Weekly menu"
+              onPress={() => router.push('/settings/menu')}
             />
             <Row
               iconName="chatbubbles-outline"
-              label="WA Message Log"
+              label="WA message log"
               onPress={() => router.push('/messages')}
+            />
+            <Row
+              iconName="hardware-chip-outline"
+              label="Job monitor"
+              onPress={() => router.push('/settings/jobs')}
+            />
+            <Row
+              iconName="document-text-outline"
+              label="Audit log"
+              onPress={() => router.push('/settings/audit')}
             />
           </View>
         </Card>
