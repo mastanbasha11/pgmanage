@@ -93,13 +93,18 @@ function KPICard({
 }
 
 export default function DashboardPage() {
-  const { selectedPropertyId, canAccessFinancials } = useAuthStore();
+  const { selectedPropertyId, canAccessFinancials, user } = useAuthStore();
   const navigate = useNavigate();
   const cmy = currentMonthYear();
   const [month, setMonth] = useState(cmy.month);
   const [year, setYear] = useState(cmy.year);
 
-  if (!canAccessFinancials()) return <Navigate to="/tenants" replace />;
+  if (!canAccessFinancials()) {
+    // Marketing reps land on the leads pipeline — that's their day-1 view.
+    // Everyone else without financial access (supervisors / managers)
+    // continues to land on tenants, unchanged.
+    return <Navigate to={user?.role === 'MARKETING' ? '/leads' : '/tenants'} replace />;
+  }
 
   const { data: propertiesData, isLoading: loadingProps } = useProperties();
   const { data: summary, isLoading } = useDashboardSummary(

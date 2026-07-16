@@ -757,8 +757,10 @@ class StaffCreate(BaseModel):
     @classmethod
     def _role(cls, v: str) -> str:
         v = (v or "").upper()
-        if v not in {"PROPERTY_MANAGER", "SUPERVISOR", "PARTNER"}:
-            raise ValueError("Role must be PROPERTY_MANAGER, SUPERVISOR, or PARTNER")
+        if v not in {"PROPERTY_MANAGER", "SUPERVISOR", "PARTNER", "MARKETING"}:
+            raise ValueError(
+                "Role must be PROPERTY_MANAGER, SUPERVISOR, PARTNER, or MARKETING"
+            )
         return v
 
 

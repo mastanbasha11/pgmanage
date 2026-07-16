@@ -51,6 +51,10 @@ type NavItem = {
   label: string;
   exact?: boolean;
   ownerOnly?: boolean;
+  // Hidden from these roles even if the visibility rule otherwise
+  // allows them. Used to keep MARKETING focused on
+  // leads / tenants / onboarding — no financial or ops noise.
+  hideForRoles?: Array<'MARKETING'>;
 };
 
 // Top-level nav is one long list, but rendered with section headers (a plain
@@ -59,9 +63,9 @@ const NAV_ITEMS: (NavItem | { section: string })[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true, ownerOnly: true },
   { to: '/properties', icon: Building2, label: 'Properties' },
   { to: '/tenants', icon: Users, label: 'Tenants' },
-  { to: '/rent', icon: IndianRupee, label: 'Rent & Payments' },
+  { to: '/rent', icon: IndianRupee, label: 'Rent & Payments', hideForRoles: ['MARKETING'] },
   { to: '/bookings', icon: CalendarCheck, label: 'Bookings' },
-  { to: '/expenses', icon: Receipt, label: 'Expenses' },
+  { to: '/expenses', icon: Receipt, label: 'Expenses', hideForRoles: ['MARKETING'] },
   { to: '/leads', icon: UserCircle, label: 'Leads' },
   { to: '/roi', icon: TrendingUp, label: 'ROI & Rooms', ownerOnly: true },
 
@@ -71,7 +75,7 @@ const NAV_ITEMS: (NavItem | { section: string })[] = [
   { to: '/settings/jobs', icon: Activity, label: 'Job Monitor', ownerOnly: true },
 
   { section: 'Settings' },
-  { to: '/settings/menu', icon: UtensilsCrossed, label: 'Menu' },
+  { to: '/settings/menu', icon: UtensilsCrossed, label: 'Menu', hideForRoles: ['MARKETING'] },
   { to: '/settings/whatsapp', icon: MessageSquare, label: 'WhatsApp', ownerOnly: true },
   { to: '/settings/website-integration', icon: Globe, label: 'Website Integration', ownerOnly: true },
   { to: '/settings/team', icon: UserCog, label: 'Team', ownerOnly: true },
@@ -113,9 +117,11 @@ export default function Layout({ children }: Props) {
 
   // Filter items by role; drop section headers that would end up with no
   // visible items under them.
+  const role = user?.role;
   const filtered = NAV_ITEMS.filter((item) => {
     if ('section' in item) return true;
     if (item.ownerOnly && !canAccessFinancials()) return false;
+    if (role && item.hideForRoles?.includes(role as 'MARKETING')) return false;
     return true;
   });
   const visibleNav = filtered.filter((item, i) => {

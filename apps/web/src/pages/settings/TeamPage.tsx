@@ -35,7 +35,7 @@ interface StaffMember {
   name: string;
   email?: string;
   phone: string;
-  role: 'OWNER' | 'PARTNER' | 'PROPERTY_MANAGER' | 'SUPERVISOR';
+  role: 'OWNER' | 'PARTNER' | 'PROPERTY_MANAGER' | 'SUPERVISOR' | 'MARKETING';
   is_active: boolean;
   last_login_at?: string;
   created_at: string;
@@ -46,6 +46,7 @@ const ROLE_LABEL: Record<StaffMember['role'], string> = {
   PARTNER: 'Partner',
   PROPERTY_MANAGER: 'Manager',
   SUPERVISOR: 'Supervisor',
+  MARKETING: 'Marketing',
 };
 
 export default function TeamPage() {
@@ -163,7 +164,7 @@ const addManagerSchema = z.object({
   email: z.string().email('Valid email required'),
   phone: z.string().refine((v) => normaliseIndianPhone(v) !== null, PHONE_HELP),
   password: z.string().min(8, 'Min 8 characters'),
-  role: z.enum(['PROPERTY_MANAGER', 'SUPERVISOR', 'PARTNER']),
+  role: z.enum(['PROPERTY_MANAGER', 'SUPERVISOR', 'PARTNER', 'MARKETING']),
 });
 type AddManagerForm = z.infer<typeof addManagerSchema>;
 
@@ -275,6 +276,9 @@ function AddManagerDialog({ open, onClose }: { open: boolean; onClose: () => voi
                 </SelectItem>
                 <SelectItem value="SUPERVISOR">
                   Supervisor — bill uploads + check-in/out only
+                </SelectItem>
+                <SelectItem value="MARKETING">
+                  Marketing — leads + tenant onboarding, no financials
                 </SelectItem>
                 <SelectItem value="PARTNER">Partner — same access as you (admin)</SelectItem>
               </SelectContent>

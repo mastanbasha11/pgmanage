@@ -369,6 +369,48 @@ async def test_supervisor(db: AsyncSession, test_org: dict, test_property: dict)
     return {"user_id": user_id, "token": token, "role": "SUPERVISOR", **test_property}
 
 
+@pytest_asyncio.fixture
+async def test_marketing(db: AsyncSession, test_org: dict, test_property: dict) -> dict:
+    """Create a MARKETING user with access to one property.
+
+    Same shape as `test_supervisor` — a user who can log leads and check
+    in tenants but should be blocked from every financial / settings
+    endpoint. Tests use this fixture to prove both the allow-list and
+    the deny-list of the MARKETING role.
+    """
+    schema = test_org["schema_name"]
+    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+
+    user_id = uuid.uuid4()
+    pw_hash = get_password_hash("password123")
+    prop_ids = [str(test_property["property_id"])]
+    await db.execute(
+        text("""
+            INSERT INTO users (id, org_id, name, phone, email, password_hash, role, property_access, is_active)
+            VALUES (:id, :org_id, 'Test Marketing', '+919876543212', 'mkt@test.com',
+                :pw_hash, 'MARKETING'::user_role_enum, :props, true)
+        """),
+        {
+            "id": str(user_id),
+            "org_id": str(test_org["org_id"]),
+            "pw_hash": pw_hash,
+            "props": prop_ids,
+        },
+    )
+    await db.commit()
+
+    token = create_access_token({
+        "sub": str(user_id),
+        "user_id": str(user_id),
+        "org_id": str(test_org["org_id"]),
+        "role": "MARKETING",
+        "name": "Test Marketing",
+        "email": "mkt@test.com",
+        "property_ids": prop_ids,
+    })
+    return {"user_id": user_id, "token": token, "role": "MARKETING", **test_property}
+
+
 # ── Tenant fixture ────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture

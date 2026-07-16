@@ -34,7 +34,10 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
 
     # Create enum types (created once globally)
     enum_types = [
-        ("user_role_enum", "'OWNER','PARTNER','PROPERTY_MANAGER','SUPERVISOR','TENANT'"),
+        # MARKETING = lead/onboarding-focused rep. Can add + work leads, do
+        # tenant check-ins, view vacant beds; NO financial totals, NO settings,
+        # NO ROI/dashboard money widgets.
+        ("user_role_enum", "'OWNER','PARTNER','PROPERTY_MANAGER','SUPERVISOR','MARKETING','TENANT'"),
         ("room_status_enum", "'ACTIVE','INACTIVE','UNDER_MAINTENANCE'"),
         ("bed_status_enum", "'VACANT','OCCUPIED','RESERVED','MAINTENANCE'"),
         ("id_type_enum", "'AADHAR','PASSPORT','DRIVING_LICENSE','OTHER'"),
@@ -76,6 +79,9 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
     await db.execute(text("ALTER TYPE payment_type_enum ADD VALUE IF NOT EXISTS 'POWER'"))
     await db.execute(text(
         "ALTER TYPE lead_status_enum ADD VALUE IF NOT EXISTS 'BOOKED' AFTER 'NEGOTIATING'"
+    ))
+    await db.execute(text(
+        "ALTER TYPE user_role_enum ADD VALUE IF NOT EXISTS 'MARKETING'"
     ))
     await db.commit()
 

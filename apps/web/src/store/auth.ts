@@ -2,7 +2,15 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from '@/lib/api';
 
-export type Role = 'OWNER' | 'PARTNER' | 'PROPERTY_MANAGER' | 'SUPERVISOR';
+export type Role =
+  | 'OWNER'
+  | 'PARTNER'
+  | 'PROPERTY_MANAGER'
+  | 'SUPERVISOR'
+  // Lead / onboarding-focused rep. No financials, no settings, no ROI —
+  // just leads pipeline, tenant check-in, vacant beds. See MARKETING_ROLE
+  // section of the backend for the exact allow/deny surface.
+  | 'MARKETING';
 
 export interface AuthUser {
   user_id: string;

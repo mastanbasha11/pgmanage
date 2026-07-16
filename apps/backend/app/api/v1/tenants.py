@@ -1152,7 +1152,9 @@ async def upload_id_proof(
     JPEG (max 1600px wide, q85). PDFs are stored as-is. Stored under
     /app/uploads/{org_id}/tenants/{tenant_id}.{ext}.
     """
-    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER", "SUPERVISOR"):
+    # MARKETING included so a rep can complete the tenant-check-in flow
+    # (upload Aadhar / DL / passport) end-to-end from a booked lead.
+    if ctx.role not in ("OWNER", "PARTNER", "PROPERTY_MANAGER", "SUPERVISOR", "MARKETING"):
         raise HTTPException(403, "Insufficient permission to upload ID proofs")
 
     own = await db.execute(
