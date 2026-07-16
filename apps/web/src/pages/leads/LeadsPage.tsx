@@ -463,7 +463,8 @@ export default function LeadsPage() {
   // `openLeadId` = drawer visible for that lead. `checkinPrefill` = open the
   // tenant check-in wizard, seeded with what we knew about the lead so the
   // rep can copy the phone/name across at a glance.
-  const [openLeadId, setOpenLeadId] = useState<string | null>(null);
+  const initialOpenLead = searchParams.get('openLead');
+  const [openLeadId, setOpenLeadId] = useState<string | null>(initialOpenLead);
   const [checkinOpen, setCheckinOpen] = useState(false);
 
   return (

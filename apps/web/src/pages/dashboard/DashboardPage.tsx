@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/select';
 import { CashflowChart } from '@/components/charts/CashflowChart';
 import PaybackChart from '@/components/charts/PaybackChart';
+import FollowupsDueToday from './FollowupsDueToday';
 import { usePaybackPlan } from '@/hooks/usePaybackPlan';
 import { useDashboardSummary, useCashflow } from '@/hooks/useDashboard';
 import { useProperties } from '@/hooks/useProperties';
@@ -374,6 +375,11 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* CRM: today's rep worklist. Renders nothing when there are no leads
+          with next_followup_at = today, so the dashboard stays tidy when the
+          pipeline is quiet. */}
+      <FollowupsDueToday propertyId={selectedPropertyId ?? undefined} />
 
       {(summary.top_recurring_spikes?.length ?? 0) > 0 && (
         <Card className="border-amber-200 bg-amber-50/40">
