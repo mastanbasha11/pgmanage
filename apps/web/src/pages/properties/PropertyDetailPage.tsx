@@ -6,7 +6,6 @@ import {
   Building2,
   CheckCircle2,
   Settings,
-  AlertCircle,
   Wrench,
   Lock,
   Unlock,
@@ -165,15 +164,26 @@ export default function PropertyDetailPage() {
         </Button>
       </div>
 
-      {/* Stat strip */}
-      <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
+      {/* Stat strip. Reserved beds roll into "Occupied" — from an
+          owner's perspective a reserved bed is not sellable today, same
+          as an occupied one, so grouping them keeps the occupancy % a
+          real "how full is this property" number. The reserved count is
+          still surfaced as a small annotation on the Occupied tile. */}
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
         <StatCard label="Total beds" value={stats.total} icon={Building2} tone="default" />
         <StatCard
           label="Occupied"
-          value={stats.occupied}
+          value={stats.occupied + stats.reserved}
           icon={CheckCircle2}
           tone="occupied"
-          pct={stats.total ? Math.round((stats.occupied / stats.total) * 100) : 0}
+          pct={
+            stats.total
+              ? Math.round(((stats.occupied + stats.reserved) / stats.total) * 100)
+              : 0
+          }
+          footnote={
+            stats.reserved > 0 ? `Reserved beds (${stats.reserved})` : undefined
+          }
         />
         <StatCard
           label="Vacant"
@@ -181,13 +191,6 @@ export default function PropertyDetailPage() {
           icon={BedDouble}
           tone="vacant"
           pct={stats.total ? Math.round((stats.vacant / stats.total) * 100) : 0}
-        />
-        <StatCard
-          label="Reserved"
-          value={stats.reserved}
-          icon={AlertCircle}
-          tone="reserved"
-          pct={stats.total ? Math.round((stats.reserved / stats.total) * 100) : 0}
         />
         <StatCard
           label="Maintenance"
@@ -349,12 +352,16 @@ function StatCard({
   icon: Icon,
   tone,
   pct,
+  footnote,
 }: {
   label: string;
   value: number;
   icon: typeof BedDouble;
   tone: 'default' | 'occupied' | 'vacant' | 'reserved' | 'maintenance';
   pct?: number;
+  /** Secondary line printed below the percent (e.g. "Reserved beds (10)"
+   *  under the Occupied tile so the roll-up is still transparent). */
+  footnote?: string;
 }) {
   const toneCls = {
     default: 'bg-muted text-muted-foreground',
@@ -375,6 +382,9 @@ function StatCard({
         <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
         {pct !== undefined && (
           <p className="text-[11px] text-muted-foreground">{pct}% of total</p>
+        )}
+        {footnote && (
+          <p className="mt-0.5 text-[11px] font-medium text-amber-700">{footnote}</p>
         )}
       </CardContent>
     </Card>
