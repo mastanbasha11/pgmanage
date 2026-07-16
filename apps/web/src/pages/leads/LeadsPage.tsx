@@ -68,6 +68,9 @@ interface Lead {
   budget_max_paise?: number;
   advance_paise?: number | null;
   next_followup_at?: string;
+  last_contacted_at?: string;
+  assigned_to?: string | null;
+  assigned_to_name?: string | null;
   created_at: string;
 }
 
@@ -394,20 +397,58 @@ export default function LeadsPage() {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState(searchParams.get('tab') === 'website' ? 'website' : 'pipeline');
 
-  // Pipeline search + source filter.
+  // Pipeline filters. `quickFilter` is a mutually-exclusive one-shot chip
+  // set — a rep is either working "everyone", their own leads, today's
+  // follow-ups, leads with no follow-up scheduled, or stale (idle > 7 days).
+  // Kept plain-string in state (not object-y) to keep URL persistence easy.
+  const { user } = useAuthStore();
   const [pipelineSearch, setPipelineSearch] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string>('ALL');
+  type QuickFilter = 'ALL' | 'MINE' | 'DUE_TODAY' | 'NO_FOLLOWUP' | 'IDLE_7D';
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>('ALL');
 
   const leads = data?.items ?? [];
   const filteredLeads = useMemo(() => {
     const q = pipelineSearch.trim().toLowerCase();
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
     return leads.filter((l) => {
       if (sourceFilter !== 'ALL' && l.source !== sourceFilter) return false;
-      if (!q) return true;
-      return l.name.toLowerCase().includes(q) || (l.phone ?? '').toLowerCase().includes(q);
+      if (q) {
+        const matches =
+          l.name.toLowerCase().includes(q) || (l.phone ?? '').toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+      // Quick filters — these narrow the visible set, they don't stack.
+      if (quickFilter === 'MINE') {
+        if (!user?.user_id || l.assigned_to !== user.user_id) return false;
+      } else if (quickFilter === 'DUE_TODAY') {
+        if (!l.next_followup_at) return false;
+        if (l.next_followup_at.slice(0, 10) !== todayStr) return false;
+      } else if (quickFilter === 'NO_FOLLOWUP') {
+        // Only meaningful for still-open leads.
+        if (l.status === 'CONVERTED' || l.status === 'LOST') return false;
+        if (l.next_followup_at) return false;
+      } else if (quickFilter === 'IDLE_7D') {
+        if (l.status === 'CONVERTED' || l.status === 'LOST') return false;
+        // "Idle" = no contact in the last 7 days. Falls back to created_at
+        // when the lead has never been contacted.
+        const last = new Date(l.last_contacted_at ?? l.created_at);
+        if (last > sevenDaysAgo) return false;
+      }
+      return true;
     });
-  }, [leads, pipelineSearch, sourceFilter]);
+  }, [leads, pipelineSearch, sourceFilter, quickFilter, user?.user_id]);
   const byStatus = (s: LeadStatus) => filteredLeads.filter((l) => l.status === s);
+
+  const QUICK_FILTERS: { key: QuickFilter; label: string }[] = [
+    { key: 'ALL', label: 'All' },
+    { key: 'MINE', label: 'Mine' },
+    { key: 'DUE_TODAY', label: 'Due today' },
+    { key: 'NO_FOLLOWUP', label: 'No follow-up' },
+    { key: 'IDLE_7D', label: 'Idle > 7 days' },
+  ];
 
   // ── Drag-to-move ────────────────────────────────────────────────────────
   // Optimistic status update: patch the cache immediately so the card jumps
@@ -496,7 +537,33 @@ export default function LeadsPage() {
         </TabsList>
 
         <TabsContent value="pipeline" className="mt-4 space-y-6">
-      {/* Search + source filter */}
+      {/* Quick filter chips — mutually exclusive one-shot narrowers */}
+      <div className="flex flex-wrap gap-1.5">
+        {QUICK_FILTERS.map((f) => {
+          const active = quickFilter === f.key;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setQuickFilter(f.key)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                active
+                  ? 'border-accent bg-accent text-accent-foreground'
+                  : 'border-input bg-background hover:bg-muted'
+              }`}
+            >
+              {f.label}
+            </button>
+          );
+        })}
+        {filteredLeads.length !== leads.length && (
+          <span className="ml-2 self-center text-xs text-muted-foreground">
+            {filteredLeads.length} of {leads.length}
+          </span>
+        )}
+      </div>
+
+      {/* Source select + name/phone search */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <Select value={sourceFilter} onValueChange={setSourceFilter}>
           <SelectTrigger className="h-9 w-[180px]">
