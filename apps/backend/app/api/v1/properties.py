@@ -67,6 +67,7 @@ class RoomCreate(BaseModel):
     display_name: str
     capacity: int | None = None
     monthly_base_rent_paise: int | None = None
+    has_ac: bool = False
     bed_labels: list[str] | None = None  # if None, auto-label A, B, C...
 
 
@@ -77,6 +78,7 @@ class RoomUpdate(BaseModel):
     capacity: int | None = None
     room_type_id: UUID | None = None
     monthly_base_rent_paise: int | None = None
+    has_ac: bool | None = None
 
 
 class BedCreate(BaseModel):
@@ -247,6 +249,7 @@ async def property_occupancy(
         rooms_result = await db.execute(
             text("""
                 SELECT r.id, r.room_number, r.display_name, r.capacity, r.status,
+                       r.has_ac,
                        rt.name as room_type_name,
                        COUNT(b.id) FILTER (WHERE b.status = 'VACANT') as vacant_count,
                        COUNT(b.id) FILTER (WHERE b.status = 'OCCUPIED') as occupied_count,
@@ -312,6 +315,7 @@ async def vacant_beds(
                    r.id AS room_id, r.room_number, r.display_name AS room_name,
                    f.id AS floor_id, f.floor_number, f.display_name AS floor_name,
                    rt.name AS room_type,
+                   r.has_ac,
                    r.monthly_base_rent_paise,
                    'VACANT' AS status,
                    CURRENT_DATE AS available_from,
@@ -337,6 +341,7 @@ async def vacant_beds(
                        r.id AS room_id, r.room_number, r.display_name AS room_name,
                        f.id AS floor_id, f.floor_number, f.display_name AS floor_name,
                        rt.name AS room_type,
+                       r.has_ac,
                        r.monthly_base_rent_paise,
                        'UPCOMING' AS status,
                        t.expected_move_out_date AS available_from,
@@ -571,15 +576,15 @@ async def create_room(
 
     room_result = await db.execute(
         text("""
-            INSERT INTO rooms (floor_id, property_id, org_id, room_number, display_name, room_type_id, capacity, monthly_base_rent_paise)
-            VALUES (:floor_id, :pid, :org_id, :room_num, :display, :rt_id, :cap, :rent)
-            RETURNING id, room_number, display_name, capacity
+            INSERT INTO rooms (floor_id, property_id, org_id, room_number, display_name, room_type_id, capacity, monthly_base_rent_paise, has_ac)
+            VALUES (:floor_id, :pid, :org_id, :room_num, :display, :rt_id, :cap, :rent, :has_ac)
+            RETURNING id, room_number, display_name, capacity, has_ac
         """),
         {
             "floor_id": str(body.floor_id), "pid": str(property_id), "org_id": str(ctx.org_id),
             "room_num": body.room_number, "display": body.display_name,
             "rt_id": str(body.room_type_id) if body.room_type_id else None,
-            "cap": capacity, "rent": rent,
+            "cap": capacity, "rent": rent, "has_ac": body.has_ac,
         },
     )
     room = room_result.mappings().fetchone()

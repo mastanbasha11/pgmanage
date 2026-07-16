@@ -95,32 +95,29 @@ export function truncate(str: string, len = 30): string {
 }
 
 /**
- * Human-readable room-type label for pills / dropdowns / cards. Prefers
- * legible labels ("2-Share", "Suite") over ultra-compressed codes so a rep
- * scanning the vacancies board doesn't need a decoder key.
+ * Human-readable room-type label — sharing count only. AC is a
+ * per-ROOM attribute (see `rooms.has_ac`) so we intentionally do NOT
+ * pull "AC" out of the type name; the card renders a separate AC pill
+ * based on the room's own has_ac flag.
  *
- *  "Single AC"        → "1-Share AC"
- *  "Double Sharing"   → "2-Share"
- *  "Double AC"        → "2-Share AC"
- *  "Triple Sharing"   → "3-Share"
- *  "Suite"            → "Suite"
- *  "Three" (freeform) → "3-Share"
+ *  "Single" / "Single AC"        → "1-Share"
+ *  "Double Sharing" / "Double AC" → "2-Share"
+ *  "Triple Sharing"              → "3-Share"
+ *  "Suite" / "SUI"               → "Suite"
+ *  "Three" (owner freeform)      → "3-Share"
  *
- * Unknown/free-form names are returned verbatim (title-cased on first
- * letter only) so an owner's custom name like "Deluxe" doesn't get mangled.
+ * Unknown/free-form names are returned verbatim (first-letter caps)
+ * so an owner's custom "Deluxe" doesn't get mangled.
  */
 export function shortRoomType(label: string | undefined | null): string {
   if (!label) return '';
   const s = label.toUpperCase();
-  const hasAC = s.includes('AC');
-  const suffix = hasAC ? ' AC' : '';
-  if (/^SINGLE/.test(s) || /^\b1\b/.test(s) || /^ONE/.test(s)) return `1-Share${suffix}`;
-  if (/^DOUBLE/.test(s) || /^\b2\b/.test(s) || /^TWO/.test(s)) return `2-Share${suffix}`;
-  if (/^TRIPLE/.test(s) || /^\b3\b/.test(s) || /^THREE/.test(s)) return `3-Share${suffix}`;
-  if (/^QUAD/.test(s) || /^\b4\b/.test(s) || /^FOUR/.test(s)) return `4-Share${suffix}`;
+  if (/^SINGLE/.test(s) || /^\b1\b/.test(s) || /^ONE/.test(s)) return '1-Share';
+  if (/^DOUBLE/.test(s) || /^\b2\b/.test(s) || /^TWO/.test(s)) return '2-Share';
+  if (/^TRIPLE/.test(s) || /^\b3\b/.test(s) || /^THREE/.test(s)) return '3-Share';
+  if (/^QUAD/.test(s) || /^\b4\b/.test(s) || /^FOUR/.test(s)) return '4-Share';
   if (/^SUITE/.test(s) || s === 'SUI') return 'Suite';
   if (/^DORM/.test(s)) return 'Dormitory';
-  // Unknown owner-defined name: keep as typed (first letter cap).
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 

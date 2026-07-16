@@ -232,6 +232,10 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             monthly_base_rent_paise INTEGER NOT NULL DEFAULT 0,
             amenities_json JSONB NOT NULL DEFAULT '[]',
             status room_status_enum NOT NULL DEFAULT 'ACTIVE',
+            -- AC is a per-room attribute, not per-room-type: a "Double
+            -- Sharing" room type can have both AC and non-AC rooms in the
+            -- same property. Rendered as a small badge on vacancy cards.
+            has_ac BOOLEAN NOT NULL DEFAULT false,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",

@@ -26,7 +26,7 @@ import {
 } from '@/hooks/useProperties';
 import { useVacantBeds, type VacantBed } from '@/hooks/useTenants';
 import TeamRoster from './TeamRoster';
-import { formatPaise, formatDate, shortRoomType, cn } from '@/lib/utils';
+import { formatPaise, shortRoomType, cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import PropertySetupDialog from './PropertySetupDialog';
 
@@ -487,6 +487,9 @@ interface RoomVacancy {
   floor_number: number;
   floor_name: string;
   room_type?: string;
+  /** Per-ROOM AC flag (see rooms.has_ac). Rendered as a small blue pill
+   *  next to the room-type badge. */
+  has_ac: boolean;
   monthly_base_rent_paise: number;
   beds: VacantBed[];
   /** UPCOMING if any bed here is upcoming, else VACANT. Mixed rooms
@@ -509,6 +512,7 @@ function groupByRoom(beds: VacantBed[]): RoomVacancy[] {
         floor_number: b.floor_number,
         floor_name: b.floor_name,
         room_type: b.room_type,
+        has_ac: !!b.has_ac,
         monthly_base_rent_paise: b.monthly_base_rent_paise,
         beds: [],
         status: 'VACANT',
@@ -607,9 +611,11 @@ function VacancyFloors({
   );
 }
 
-/** Compact room card — replaces the old per-bed card. When multiple beds
- *  in the same room are open (or vacating), they collapse into a single
- *  card so the board doesn't misrepresent the true vacancy count. */
+/** Room-shaped container that clusters all vacant beds of the same room
+ *  as separate mini-cards inside a single outer border. So a 2-share room
+ *  with both beds vacant still shows TWO boxes — visually grouped, not
+ *  merged. A room with just one vacant bed shows one bed box inside its
+ *  own room wrapper for a uniform layout. */
 function VacancyRoomCard({
   room,
   onHold,
@@ -624,19 +630,18 @@ function VacancyRoomCard({
   statusPending: boolean;
 }) {
   const isUpcoming = room.status === 'UPCOMING';
-  const bedCount = room.beds.length;
-  const bedLabels = room.beds.map((b) => b.bed_label).join(', ');
   return (
     <div
       className={cn(
-        'rounded-md border p-2.5 text-sm transition-colors',
+        'rounded-md border p-2 transition-colors',
         isUpcoming
-          ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50'
-          : 'border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50',
+          ? 'border-amber-300 bg-amber-50/50 hover:bg-amber-50'
+          : 'border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50',
       )}
     >
+      {/* Room header — number · type · AC · rent. Same for both statuses. */}
       <div className="flex items-baseline justify-between gap-2">
-        <div className="flex items-baseline gap-1.5 min-w-0">
+        <div className="flex flex-wrap items-baseline gap-1.5 min-w-0">
           <p className="text-sm font-semibold tabular-nums leading-none">
             {room.room_number}
           </p>
@@ -645,83 +650,95 @@ function VacancyRoomCard({
               {shortRoomType(room.room_type)}
             </Badge>
           )}
+          {room.has_ac && (
+            <Badge className="text-[10px] font-medium bg-sky-100 text-sky-800 border-sky-200 hover:bg-sky-100">
+              AC
+            </Badge>
+          )}
         </div>
         <p className="text-[11px] text-muted-foreground tabular-nums shrink-0">
           {formatPaise(room.monthly_base_rent_paise)}/mo
         </p>
       </div>
-      <p className="mt-1 text-[11px]">
-        <span
-          className={cn(
-            'font-medium',
-            isUpcoming ? 'text-amber-900' : 'text-emerald-900',
-          )}
-        >
-          {bedCount === 1 ? `Bed ${bedLabels}` : `Beds ${bedLabels}`}
-        </span>
-        <span className="text-muted-foreground"> · {bedCount} vacant</span>
-      </p>
 
-      {isUpcoming && room.earliest_available_from && (
-        <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-800">
-          <Calendar className="h-3 w-3" />
-          {formatDate(room.earliest_available_from)} ·{' '}
-          {relativeDays(room.earliest_available_from)}
-        </p>
-      )}
-
-      {isUpcoming && room.beds.some((b) => b.current_tenant_name) && (
-        <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-          <User className="h-3 w-3" />
-          {room.beds
-            .filter((b) => b.current_tenant_name)
-            .map((b) => b.current_tenant_name)
-            .join(', ')}{' '}
-          vacating
-        </p>
-      )}
-
-      {!isUpcoming && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {room.beds.map((bed) => (
-            <div key={bed.id} className="flex items-center gap-0.5">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 gap-1 px-1.5 text-[11px]"
-                disabled={statusPending}
-                onClick={() =>
-                  onHold(
-                    bed.id,
-                    'RESERVED',
-                    `${room.room_number}·${bed.bed_label} held (single occupancy)`,
-                  )
-                }
-                title={`Hold bed ${bed.bed_label}`}
+      {/* Nested bed cards — one small box per vacant bed. Two beds in the
+          same room render side by side inside the room wrapper. */}
+      <div
+        className={cn(
+          'mt-2 grid gap-1.5',
+          room.beds.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
+        )}
+      >
+        {room.beds.map((bed) => (
+          <div
+            key={bed.id}
+            className={cn(
+              'rounded border bg-white/70 p-1.5 text-[11px]',
+              isUpcoming ? 'border-amber-200' : 'border-emerald-200',
+            )}
+          >
+            <p className="text-xs font-medium">
+              Bed{' '}
+              <span
+                className={cn(
+                  isUpcoming ? 'text-amber-900' : 'text-emerald-900',
+                )}
               >
-                <Lock className="h-3 w-3" />
-                {bedCount > 1 && bed.bed_label}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 gap-1 px-1 text-[11px] text-amber-700"
-                disabled={statusPending}
-                onClick={() =>
-                  onHold(
-                    bed.id,
-                    'MAINTENANCE',
-                    `${room.room_number}·${bed.bed_label} marked for maintenance`,
-                  )
-                }
-                title={`Bed ${bed.bed_label} out for maintenance`}
-              >
-                <Wrench className="h-3 w-3" />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
+                {bed.bed_label}
+              </span>
+            </p>
+            {isUpcoming && bed.available_from && (
+              <p className="mt-0.5 flex items-center gap-0.5 text-[10px] text-amber-800">
+                <Calendar className="h-2.5 w-2.5 shrink-0" />
+                {relativeDays(bed.available_from)}
+              </p>
+            )}
+            {isUpcoming && bed.current_tenant_name && (
+              <p className="mt-0.5 flex items-center gap-0.5 text-[10px] text-muted-foreground truncate">
+                <User className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{bed.current_tenant_name}</span>
+              </p>
+            )}
+            {!isUpcoming && (
+              <div className="mt-1 flex gap-0.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-5 gap-0.5 px-1 text-[10px]"
+                  disabled={statusPending}
+                  onClick={() =>
+                    onHold(
+                      bed.id,
+                      'RESERVED',
+                      `${room.room_number}·${bed.bed_label} held (single occupancy)`,
+                    )
+                  }
+                  title="Hold bed"
+                >
+                  <Lock className="h-2.5 w-2.5" />
+                  Hold
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-5 gap-0.5 px-1 text-[10px] text-amber-700"
+                  disabled={statusPending}
+                  onClick={() =>
+                    onHold(
+                      bed.id,
+                      'MAINTENANCE',
+                      `${room.room_number}·${bed.bed_label} marked for maintenance`,
+                    )
+                  }
+                  title="Out for maintenance"
+                >
+                  <Wrench className="h-2.5 w-2.5" />
+                </Button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

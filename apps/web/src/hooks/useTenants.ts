@@ -45,6 +45,8 @@ export interface VacantBed {
   floor_number: number;
   floor_name: string;
   room_type?: string;
+  /** Per-room AC flag (rooms.has_ac). Rendered as a small badge. */
+  has_ac?: boolean;
   monthly_base_rent_paise: number;
   /** "VACANT" right now, or "UPCOMING" when an active tenant's vacate date is set. */
   status?: 'VACANT' | 'UPCOMING';

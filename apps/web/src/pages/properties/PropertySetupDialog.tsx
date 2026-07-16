@@ -574,7 +574,7 @@ function RoomsStep({
   floors,
 }: {
   propertyId: string;
-  floors: Array<{ id: string; display_name: string; floor_number: number; rooms: Array<{ id: string; room_number: string; display_name?: string; capacity: number; total_beds: number }> }>;
+  floors: Array<{ id: string; display_name: string; floor_number: number; rooms: Array<{ id: string; room_number: string; display_name?: string; capacity: number; total_beds: number; has_ac?: boolean }> }>;
 }) {
   const { data: roomTypes } = useRoomTypes(propertyId);
   const { mutateAsync, isPending } = useAddRoom(propertyId);
@@ -706,7 +706,13 @@ function RoomRow({
   room,
   propertyId,
 }: {
-  room: { id: string; room_number: string; capacity: number; total_beds?: number };
+  room: {
+    id: string;
+    room_number: string;
+    capacity: number;
+    total_beds?: number;
+    has_ac?: boolean;
+  };
   propertyId: string;
 }) {
   const [editing, setEditing] = useState(false);
@@ -724,6 +730,22 @@ function RoomRow({
       const message =
         (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
           ?.message ?? 'Could not rename room.';
+      toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
+
+  /** Toggle the room's has_ac flag inline. Optimistic feel — no dialog. */
+  async function toggleAC() {
+    try {
+      await update.mutateAsync({ room_id: room.id, has_ac: !room.has_ac });
+      toast({
+        title: !room.has_ac ? 'Marked as AC' : 'AC removed',
+        description: `Room ${room.room_number}`,
+      });
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
+          ?.message ?? 'Could not update AC flag.';
       toast({ title: 'Failed', description: message, variant: 'destructive' });
     }
   }
@@ -772,6 +794,20 @@ function RoomRow({
         <Badge variant="outline" className="text-[10px]">
           {room.total_beds ?? room.capacity} beds
         </Badge>
+        <button
+          type="button"
+          onClick={toggleAC}
+          disabled={update.isPending}
+          title={room.has_ac ? 'Remove AC' : 'Mark as AC'}
+          className={cn(
+            'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+            room.has_ac
+              ? 'bg-sky-100 text-sky-800 border-sky-200 hover:bg-sky-200'
+              : 'bg-muted text-muted-foreground border-input hover:bg-muted/70',
+          )}
+        >
+          {room.has_ac ? 'AC' : '+ AC'}
+        </button>
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditing(true)}>
           <Pencil className="h-3.5 w-3.5" />
         </Button>

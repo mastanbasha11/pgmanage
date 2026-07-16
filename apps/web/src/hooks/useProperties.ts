@@ -227,6 +227,7 @@ export function useUpdateRoom(propertyId: string) {
       capacity?: number;
       monthly_base_rent_paise?: number;
       status?: string;
+      has_ac?: boolean;
     }) => {
       const { room_id, ...rest } = data;
       return api.patch(`/rooms/${room_id}`, rest).then((r) => r.data);
