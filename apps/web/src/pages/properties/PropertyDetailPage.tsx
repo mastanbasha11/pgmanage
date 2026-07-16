@@ -405,63 +405,214 @@ function VacancySections({
   ) => void;
   statusPending: boolean;
 }) {
-  const available = beds.filter((b) => b.status !== 'UPCOMING');
-  const upcoming = beds.filter((b) => b.status === 'UPCOMING');
+  const availableBeds = beds.filter((b) => b.status !== 'UPCOMING');
+  const upcomingBeds = beds.filter((b) => b.status === 'UPCOMING');
 
   return (
     <div className="space-y-8">
-      {available.length > 0 && (
-        <section>
-          <SectionHeader
-            dotClass="bg-emerald-500"
-            title="Available now"
-            count={available.length}
-            hint="Ready to check a tenant into today."
-          />
-          <VacancyFloors beds={available} onHold={onHold} statusPending={statusPending} />
-        </section>
+      {availableBeds.length > 0 && (
+        <VacancyBoard
+          mode="now"
+          beds={availableBeds}
+          onHold={onHold}
+          statusPending={statusPending}
+        />
       )}
-
-      {upcoming.length > 0 && (
-        <section>
-          <SectionHeader
-            dotClass="bg-amber-500"
-            title="Upcoming vacancies"
-            count={upcoming.length}
-            hint="Tenants who've given notice. Use these to plan replacements early."
-          />
-          {/* Upcoming vacancies now render floor-grouped (same shape as
-              "Available now") so reps scan the building spatially rather
-              than by time. Time is still visible per card via the
-              "in N days" hint. */}
-          <VacancyFloors beds={upcoming} onHold={onHold} statusPending={statusPending} />
-        </section>
+      {upcomingBeds.length > 0 && (
+        <VacancyBoard
+          mode="soon"
+          beds={upcomingBeds}
+          onHold={onHold}
+          statusPending={statusPending}
+        />
       )}
     </div>
   );
 }
 
-function SectionHeader({
-  dotClass,
-  title,
-  count,
-  hint,
+// ── Filter chip state ───────────────────────────────────────────────────
+// Kept plain-string in state so the chip toolbar stays trivial. Chips are
+// mutually exclusive: pick one, everything else clears.
+type VacancyFilter = 'all' | 'whole' | '2' | '3' | 'suite' | 'ac' | 'nonac';
+
+function matchesFilter(r: RoomVacancy, f: VacancyFilter): boolean {
+  if (f === 'all') return true;
+  const capacity = r.room_capacity ?? r.beds.length;
+  if (f === 'whole') return r.beds.length >= capacity;
+  const label = shortRoomType(r.room_type ?? '');
+  if (f === '2') return capacity === 2 || label === '2-Share';
+  if (f === '3') return capacity === 3 || label === '3-Share';
+  if (f === 'suite') return label === 'Suite';
+  if (f === 'ac') return !!r.has_ac;
+  if (f === 'nonac') return !r.has_ac;
+  return true;
+}
+
+function VacancyBoard({
+  mode,
+  beds,
+  onHold,
+  statusPending,
 }: {
-  dotClass: string;
-  title: string;
-  count: number;
-  hint: string;
+  mode: 'now' | 'soon';
+  beds: VacantBed[];
+  onHold: (
+    bedId: string,
+    status: 'VACANT' | 'RESERVED' | 'MAINTENANCE',
+    description: string,
+  ) => void;
+  statusPending: boolean;
+}) {
+  const rooms = groupByRoom(beds);
+  const [filter, setFilter] = useState<VacancyFilter>('all');
+  const visible = rooms.filter((r) => matchesFilter(r, filter));
+
+  const totalBeds = rooms.reduce((s, r) => s + r.beds.length, 0);
+  const wholeRooms = rooms.filter(
+    (r) => r.beds.length >= (r.room_capacity ?? r.beds.length),
+  ).length;
+  const totalRooms = rooms.length;
+
+  const isNow = mode === 'now';
+  const chips: { key: VacancyFilter; label: string; count?: number }[] = isNow
+    ? [
+        { key: 'all', label: 'All', count: rooms.length },
+        { key: 'whole', label: 'Whole rooms', count: wholeRooms },
+        { key: 'ac', label: 'AC', count: rooms.filter((r) => r.has_ac).length },
+        { key: 'nonac', label: 'Non-AC', count: rooms.filter((r) => !r.has_ac).length },
+      ]
+    : [
+        { key: 'all', label: 'All', count: rooms.length },
+        { key: 'whole', label: 'Whole rooms', count: wholeRooms },
+        { key: '2', label: '2-Share' },
+        { key: '3', label: '3-Share' },
+        { key: 'suite', label: 'Suite' },
+        { key: 'ac', label: 'AC', count: rooms.filter((r) => r.has_ac).length },
+        { key: 'nonac', label: 'Non-AC', count: rooms.filter((r) => !r.has_ac).length },
+      ];
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                'h-2.5 w-2.5 rounded-full',
+                isNow ? 'bg-emerald-500' : 'bg-amber-500',
+              )}
+              style={{
+                boxShadow: isNow
+                  ? '0 0 0 4px rgb(220 252 231)'
+                  : '0 0 0 4px rgb(254 243 199)',
+              }}
+            />
+            <h2 className="text-base font-bold tracking-tight">
+              {isNow ? 'Vacant now' : 'Upcoming vacancies'}{' '}
+              <span className="text-muted-foreground font-normal">({totalBeds})</span>
+            </h2>
+          </div>
+          <p className="mt-1 ml-5 text-xs text-muted-foreground">
+            {isNow
+              ? 'Beds empty today — ready to assign, on hold, or under maintenance.'
+              : 'Rooms freeing up in the next 30 days · grouped by floor · full rooms flagged.'}
+          </p>
+        </div>
+        {/* Stat tiles — total beds / total rooms / whole rooms highlighted */}
+        <div className="flex gap-2">
+          <StatTile label="beds" value={totalBeds} />
+          <StatTile label="rooms" value={totalRooms} />
+          <StatTile
+            label="whole rooms"
+            value={wholeRooms}
+            tone={isNow ? 'emerald' : 'emerald'}
+          />
+        </div>
+      </div>
+
+      {/* Filter chips */}
+      <div className="mb-4 ml-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map((c) => {
+            const active = filter === c.key;
+            return (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setFilter(c.key)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                  active
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-200 text-slate-600 hover:border-amber-300',
+                )}
+              >
+                {c.label}
+                {typeof c.count === 'number' && (
+                  <span className={cn('text-[10px]', active ? 'opacity-70' : 'opacity-60')}>
+                    {c.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+          {isNow ? (
+            <>
+              <LegendKey color="bg-emerald-600" label="Available" />
+              <LegendKey color="bg-amber-500" label="On hold" />
+              <LegendKey color="bg-slate-400" label="Maintenance" />
+            </>
+          ) : (
+            <>
+              <LegendKey color="bg-emerald-600" label="Whole room free" />
+              <LegendKey color="bg-amber-500" label="Partly free" />
+            </>
+          )}
+        </div>
+      </div>
+
+      <VacancyFloors
+        rooms={visible}
+        mode={mode}
+        onHold={onHold}
+        statusPending={statusPending}
+      />
+    </section>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: 'emerald';
 }) {
   return (
-    <div className="mb-3 flex items-baseline justify-between gap-3">
-      <div className="flex items-center gap-2">
-        <span className={cn('h-2 w-2 rounded-full', dotClass)} />
-        <h2 className="text-sm font-semibold tracking-tight">
-          {title} <span className="text-muted-foreground font-normal">({count})</span>
-        </h2>
-      </div>
-      <p className="text-xs text-muted-foreground hidden sm:block">{hint}</p>
+    <div className="rounded-lg border bg-card px-3 py-1.5 text-center min-w-[62px]">
+      <p
+        className={cn(
+          'text-lg font-bold tabular-nums leading-none',
+          tone === 'emerald' ? 'text-emerald-700' : 'text-foreground',
+        )}
+      >
+        {value}
+      </p>
+      <p className="mt-0.5 text-[10px] text-muted-foreground">{label}</p>
     </div>
+  );
+}
+
+function LegendKey({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={cn('h-2.5 w-2.5 rounded-sm', color)} />
+      {label}
+    </span>
   );
 }
 
@@ -490,6 +641,10 @@ interface RoomVacancy {
   /** Per-ROOM AC flag (see rooms.has_ac). Rendered as a small blue pill
    *  next to the room-type badge. */
   has_ac: boolean;
+  /** Total beds configured on the room (rooms.capacity). Used to render
+   *  the occupancy dots and decide whether this is a WHOLE-room vacancy
+   *  (all beds are free) or a partial one. */
+  room_capacity: number;
   monthly_base_rent_paise: number;
   beds: VacantBed[];
   /** UPCOMING if any bed here is upcoming, else VACANT. Mixed rooms
@@ -513,6 +668,10 @@ function groupByRoom(beds: VacantBed[]): RoomVacancy[] {
         floor_name: b.floor_name,
         room_type: b.room_type,
         has_ac: !!b.has_ac,
+        // Fall back to the bed count if the backend didn't populate
+        // capacity — keeps the UI degrading gracefully instead of
+        // showing 0-of-0 dots.
+        room_capacity: b.room_capacity ?? 0,
         monthly_base_rent_paise: b.monthly_base_rent_paise,
         beds: [],
         status: 'VACANT',
@@ -531,19 +690,30 @@ function groupByRoom(beds: VacantBed[]): RoomVacancy[] {
       }
     }
   }
-  // Sort beds within each room by label so A shows before B.
+  // Sort beds within each room by label so A shows before B. Also fall
+  // back capacity to the number of vacant beds when the backend didn't
+  // supply it — better than treating capacity as 0 for the occupancy dots.
   for (const r of rooms.values()) {
     r.beds.sort((a, b) => a.bed_label.localeCompare(b.bed_label));
+    if (!r.room_capacity || r.room_capacity < r.beds.length) {
+      r.room_capacity = r.beds.length;
+    }
   }
   return Array.from(rooms.values());
 }
 
+/** Floor tag on the LEFT (short id + long name + per-floor meta),
+ *  rooms flow to the RIGHT in a flex-wrap of ~330px cards. Matches the
+ *  design mockup at ~/Downloads/vacancies2.html. Wraps naturally on
+ *  narrow screens (floor tag becomes a header row). */
 function VacancyFloors({
-  beds,
+  rooms,
+  mode,
   onHold,
   statusPending,
 }: {
-  beds: VacantBed[];
+  rooms: RoomVacancy[];
+  mode: 'now' | 'soon';
   onHold: (
     bedId: string,
     status: 'VACANT' | 'RESERVED' | 'MAINTENANCE',
@@ -551,10 +721,6 @@ function VacancyFloors({
   ) => void;
   statusPending: boolean;
 }) {
-  // Group beds → rooms → floors. Two levels: floor sections at top, room
-  // cards inside each floor. Rooms are sorted by their numeric prefix so
-  // 101 sits before 102 (works for "101", "101-A", etc.).
-  const rooms = groupByRoom(beds);
   const byFloor: Record<
     string,
     { floor_name: string; floor_number: number; rooms: RoomVacancy[] }
@@ -582,45 +748,195 @@ function VacancyFloors({
     });
   }
 
+  if (floors.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed py-8 text-center text-xs text-muted-foreground">
+        No rooms match the current filter.
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4">
-      {floors.map((f) => (
-        <div key={f.floor_name}>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {f.floor_name}{' '}
-            <span className="text-muted-foreground/70 font-normal normal-case">
-              ({f.rooms.length} {f.rooms.length === 1 ? 'room' : 'rooms'} ·{' '}
-              {f.rooms.reduce((s, r) => s + r.beds.length, 0)} beds)
-            </span>
-          </h3>
-          {/* Denser grid — 4 columns on wide screens, 2 on medium. Cards
-              are smaller because they now represent one room, not one bed. */}
-          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-            {f.rooms.map((r) => (
-              <VacancyRoomCard
-                key={r.room_id}
-                room={r}
-                onHold={onHold}
-                statusPending={statusPending}
-              />
-            ))}
+    <div className="ml-5 divide-y divide-slate-200">
+      {floors.map((f) => {
+        const fb = f.rooms.reduce((s, r) => s + r.beds.length, 0);
+        return (
+          <div
+            key={f.floor_name}
+            className="grid grid-cols-[80px_1fr] gap-4 py-3 sm:grid-cols-[92px_1fr] items-start"
+          >
+            <div className="sm:sticky sm:top-3">
+              <div className="text-sm font-bold tracking-tight">
+                {shortFloorTag(f.floor_name, f.floor_number)}
+              </div>
+              <div className="mt-0.5 text-[10.5px] text-muted-foreground">
+                {f.floor_name}
+              </div>
+              <div className="mt-1.5 text-[10.5px] text-muted-foreground/70 leading-snug">
+                {f.rooms.length} room{f.rooms.length === 1 ? '' : 's'}
+                <br />
+                {fb} bed{fb === 1 ? '' : 's'}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {f.rooms.map((r) => (
+                <VacancyRoomCard
+                  key={r.room_id}
+                  room={r}
+                  mode={mode}
+                  onHold={onHold}
+                  statusPending={statusPending}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-/** Room-shaped container that clusters all vacant beds of the same room
- *  as separate mini-cards inside a single outer border. So a 2-share room
- *  with both beds vacant still shows TWO boxes — visually grouped, not
- *  merged. A room with just one vacant bed shows one bed box inside its
- *  own room wrapper for a uniform layout. */
+/** Short floor id like "5F" or "1F". Falls back to "F<n>" when the name
+ *  doesn't start with a digit. */
+function shortFloorTag(name: string, num: number): string {
+  const m = name.match(/^(\d+)/);
+  if (m) return `${m[1]}F`;
+  if (num === 0) return 'GF';
+  return `${num}F`;
+}
+
+/** Room card at the ~330px width of the mockup. Contains:
+ *  - Header: room number, type pill, Non-AC pill (only when not AC), rent
+ *  - Occupancy dots (N of M free), or "Whole room" green pill when all beds
+ *    are free — surfaces the important upsell signal
+ *  - Left green accent bar when the whole room is available
+ *  - One nested bed card per vacant bed (with status/date/tenant per mode)
+ */
 function VacancyRoomCard({
+  room,
+  mode,
+  onHold,
+  statusPending,
+}: {
+  room: RoomVacancy;
+  mode: 'now' | 'soon';
+  onHold: (
+    bedId: string,
+    status: 'VACANT' | 'RESERVED' | 'MAINTENANCE',
+    description: string,
+  ) => void;
+  statusPending: boolean;
+}) {
+  const isNow = mode === 'now';
+  const total = room.room_capacity || room.beds.length;
+  const free = room.beds.length;
+  const isWholeRoom = free >= total && total > 0;
+  const isSuite = shortRoomType(room.room_type ?? '') === 'Suite';
+
+  return (
+    <article
+      className={cn(
+        'relative w-[330px] max-w-full rounded-2xl border p-3 shadow-sm transition-all',
+        'hover:shadow-md hover:-translate-y-px',
+        isNow
+          ? 'bg-emerald-50/40 border-emerald-200'
+          : 'bg-amber-50/40 border-amber-200',
+      )}
+    >
+      {/* Whole-room accent bar on the left (only when every bed is free). */}
+      {isWholeRoom && (
+        <span
+          aria-hidden
+          className="absolute left-0 top-3 bottom-3 w-[3px] rounded-r bg-emerald-600"
+        />
+      )}
+
+      {/* Header — number / tags / price */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-base font-bold tabular-nums tracking-tight">
+            {room.room_number}
+          </span>
+          {room.room_type && (
+            <span
+              className={cn(
+                'rounded-md border px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap',
+                isSuite
+                  ? 'bg-violet-100 text-violet-800 border-violet-200'
+                  : 'bg-amber-100 text-amber-900 border-amber-200',
+              )}
+            >
+              {shortRoomType(room.room_type)}
+            </span>
+          )}
+          {!room.has_ac && (
+            <span className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10.5px] font-semibold text-slate-500 whitespace-nowrap">
+              Non-AC
+            </span>
+          )}
+        </div>
+        <p className="text-[12.5px] font-bold text-right tabular-nums whitespace-nowrap">
+          {formatPaise(room.monthly_base_rent_paise)}
+          <span className="text-[10px] font-semibold text-muted-foreground/70">
+            /mo
+          </span>
+        </p>
+      </div>
+
+      {/* Occupancy dots + "Whole room" pill */}
+      <div className="mt-2 flex items-center gap-2 text-[11.5px] font-semibold text-muted-foreground">
+        <span className="flex gap-[3px]">
+          {Array.from({ length: total }).map((_, i) => (
+            <span
+              key={i}
+              className={cn(
+                'h-[9px] w-[9px] rounded-[3px]',
+                i < free
+                  ? isNow
+                    ? 'bg-emerald-600'
+                    : 'bg-amber-500'
+                  : 'bg-slate-200',
+              )}
+            />
+          ))}
+        </span>
+        {isWholeRoom ? (
+          <span className="rounded-full bg-emerald-600 px-2 py-[2px] text-[10px] font-bold uppercase tracking-wide text-white">
+            Whole room
+          </span>
+        ) : (
+          <span>
+            {free} of {total} free
+          </span>
+        )}
+      </div>
+
+      {/* Nested bed cards */}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {room.beds.map((bed) => (
+          <BedSubCard
+            key={bed.id}
+            bed={bed}
+            isNow={isNow}
+            room={room}
+            onHold={onHold}
+            statusPending={statusPending}
+          />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function BedSubCard({
+  bed,
+  isNow,
   room,
   onHold,
   statusPending,
 }: {
+  bed: VacantBed;
+  isNow: boolean;
   room: RoomVacancy;
   onHold: (
     bedId: string,
@@ -629,116 +945,96 @@ function VacancyRoomCard({
   ) => void;
   statusPending: boolean;
 }) {
-  const isUpcoming = room.status === 'UPCOMING';
   return (
-    <div
-      className={cn(
-        'rounded-md border p-2 transition-colors',
-        isUpcoming
-          ? 'border-amber-300 bg-amber-50/50 hover:bg-amber-50'
-          : 'border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50',
-      )}
-    >
-      {/* Room header — number · type · AC · rent. Same for both statuses. */}
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="flex flex-wrap items-baseline gap-1.5 min-w-0">
-          <p className="text-sm font-semibold tabular-nums leading-none">
-            {room.room_number}
-          </p>
-          {room.room_type && (
-            <Badge variant="outline" className="text-[10px] font-normal">
-              {shortRoomType(room.room_type)}
-            </Badge>
-          )}
-          {room.has_ac && (
-            <Badge className="text-[10px] font-medium bg-sky-100 text-sky-800 border-sky-200 hover:bg-sky-100">
-              AC
-            </Badge>
-          )}
-        </div>
-        <p className="text-[11px] text-muted-foreground tabular-nums shrink-0">
-          {formatPaise(room.monthly_base_rent_paise)}/mo
-        </p>
+    <div className="flex-1 basis-[130px] min-w-[120px] rounded-xl border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(24,30,45,.04)]">
+      <div className="flex items-center justify-between gap-1.5">
+        <span className="text-[12.5px] font-bold">
+          Bed{' '}
+          <span className={isNow ? 'text-emerald-700' : 'text-amber-700'}>
+            {bed.bed_label}
+          </span>
+        </span>
       </div>
 
-      {/* Nested bed cards — one small box per vacant bed. Two beds in the
-          same room render side by side inside the room wrapper. */}
-      <div
-        className={cn(
-          'mt-2 grid gap-1.5',
-          room.beds.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
-        )}
-      >
-        {room.beds.map((bed) => (
-          <div
-            key={bed.id}
-            className={cn(
-              'rounded border bg-white/70 p-1.5 text-[11px]',
-              isUpcoming ? 'border-amber-200' : 'border-emerald-200',
-            )}
+      {isNow ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10.5px] font-bold text-emerald-800">
+            <CheckIcon className="h-3 w-3" /> Available
+          </span>
+          <button
+            type="button"
+            title="Hold bed"
+            disabled={statusPending}
+            onClick={() =>
+              onHold(
+                bed.id,
+                'RESERVED',
+                `${room.room_number}·${bed.bed_label} held (single occupancy)`,
+              )
+            }
+            className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-slate-200 text-slate-400 hover:text-slate-700 hover:border-slate-300"
           >
-            <p className="text-xs font-medium">
-              Bed{' '}
-              <span
-                className={cn(
-                  isUpcoming ? 'text-amber-900' : 'text-emerald-900',
-                )}
-              >
-                {bed.bed_label}
+            <Lock className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            title="Out for maintenance"
+            disabled={statusPending}
+            onClick={() =>
+              onHold(
+                bed.id,
+                'MAINTENANCE',
+                `${room.room_number}·${bed.bed_label} marked for maintenance`,
+              )
+            }
+            className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-slate-200 text-slate-400 hover:text-slate-700 hover:border-slate-300"
+          >
+            <Wrench className="h-3 w-3" />
+          </button>
+        </div>
+      ) : (
+        <>
+          {bed.available_from && (
+            <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-amber-700">
+              <Calendar className="h-3 w-3 shrink-0" />
+              {formatShortDate(bed.available_from)}
+              <span className="font-semibold text-muted-foreground/70">
+                · {relativeDays(bed.available_from)}
               </span>
             </p>
-            {isUpcoming && bed.available_from && (
-              <p className="mt-0.5 flex items-center gap-0.5 text-[10px] text-amber-800">
-                <Calendar className="h-2.5 w-2.5 shrink-0" />
-                {relativeDays(bed.available_from)}
-              </p>
-            )}
-            {isUpcoming && bed.current_tenant_name && (
-              <p className="mt-0.5 flex items-center gap-0.5 text-[10px] text-muted-foreground truncate">
-                <User className="h-2.5 w-2.5 shrink-0" />
-                <span className="truncate">{bed.current_tenant_name}</span>
-              </p>
-            )}
-            {!isUpcoming && (
-              <div className="mt-1 flex gap-0.5">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-5 gap-0.5 px-1 text-[10px]"
-                  disabled={statusPending}
-                  onClick={() =>
-                    onHold(
-                      bed.id,
-                      'RESERVED',
-                      `${room.room_number}·${bed.bed_label} held (single occupancy)`,
-                    )
-                  }
-                  title="Hold bed"
-                >
-                  <Lock className="h-2.5 w-2.5" />
-                  Hold
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-5 gap-0.5 px-1 text-[10px] text-amber-700"
-                  disabled={statusPending}
-                  onClick={() =>
-                    onHold(
-                      bed.id,
-                      'MAINTENANCE',
-                      `${room.room_number}·${bed.bed_label} marked for maintenance`,
-                    )
-                  }
-                  title="Out for maintenance"
-                >
-                  <Wrench className="h-2.5 w-2.5" />
-                </Button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+          )}
+          {bed.current_tenant_name && (
+            <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground truncate">
+              <User className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {bed.current_tenant_name} leaving
+              </span>
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M4 12.5l5 5L20 6.5" />
+    </svg>
+  );
+}
+
+/** "31 Jul" style short label — matches the mockup's date pill. */
+function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }

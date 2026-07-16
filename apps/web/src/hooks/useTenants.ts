@@ -47,6 +47,9 @@ export interface VacantBed {
   room_type?: string;
   /** Per-room AC flag (rooms.has_ac). Rendered as a small badge. */
   has_ac?: boolean;
+  /** Total beds in the room (rooms.capacity). Used to render the
+   *  "N of M free" dots and to detect whole-room availability. */
+  room_capacity?: number;
   monthly_base_rent_paise: number;
   /** "VACANT" right now, or "UPCOMING" when an active tenant's vacate date is set. */
   status?: 'VACANT' | 'UPCOMING';
