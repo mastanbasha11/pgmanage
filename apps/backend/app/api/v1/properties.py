@@ -228,7 +228,11 @@ async def property_stats(
     row = result.mappings().fetchone()
     stats = dict(row)
     total = stats["total"] or 1
-    stats["occupancy_rate"] = round(stats["occupied"] / total * 100, 1)
+    # Reserved beds count as occupied for the % — they're not sellable
+    # today. Matches the dashboard endpoint's convention.
+    stats["occupancy_rate"] = round(
+        (stats["occupied"] + stats["reserved"]) / total * 100, 1,
+    )
     return stats
 
 

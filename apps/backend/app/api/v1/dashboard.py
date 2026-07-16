@@ -113,12 +113,16 @@ async def dashboard_summary(
         )
     expenses = exp_result.mappings().fetchone()
 
-    # Occupancy
+    # Occupancy. RESERVED beds roll into `occupied` for the ratio — from
+    # the owner's POV a reserved bed is not sellable today, same as an
+    # occupied one, so the dashboard number should reflect "how full is
+    # the property" not just "who's physically living in it".
     bed_filter = "AND b.property_id = :pid" if property_id else ""
     occ_result = await db.execute(
         text(f"""
             SELECT
-                COUNT(*) FILTER (WHERE b.status = 'OCCUPIED') as occupied,
+                COUNT(*) FILTER (WHERE b.status IN ('OCCUPIED', 'RESERVED')) as occupied,
+                COUNT(*) FILTER (WHERE b.status = 'RESERVED') as reserved,
                 COUNT(*) as total
             FROM beds b
             JOIN rooms r ON r.id = b.room_id
@@ -136,7 +140,11 @@ async def dashboard_summary(
     settled = collected + discount_total
     total_expenses = expenses["total_expenses"] or 0
     total_beds = occ["total"] or 0
+    # `occupied` here already includes RESERVED (see SELECT above), so the
+    # ratio is truthful. `reserved_beds` is broken out so the frontend can
+    # render an inline "of which N reserved" if it wants.
     occupied = occ["occupied"] or 0
+    reserved_beds = occ["reserved"] or 0
     vacant_beds = max(total_beds - occupied, 0)
 
     # Advance + Refund (fiscal period when property given, else calendar month)
@@ -550,9 +558,10 @@ async def dashboard_summary(
         "net_income_paise": cash_in - cash_out,
         "expenses_by_person": expenses_by_person,
         "cash_in_by_person": cash_in_by_person,
-        "occupancy_rate": round(occupancy_rate, 4),          # 0..1 fraction
+        "occupancy_rate": round(occupancy_rate, 4),          # 0..1 fraction; INCLUDES reserved
         "total_tenants": rent["total_tenants"] or 0,
         "vacant_beds": vacant_beds,
+        "reserved_beds": reserved_beds,
         "total_beds": total_beds,
         "overdue_tenants": overdue_tenants or 0,
         "month": m,
