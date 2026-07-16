@@ -32,12 +32,8 @@ import {
   type NotificationEntry,
   type NotificationFilters,
 } from '@/hooks/useNotifications';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { FilterChip, NameAvatar, Pill, RoomBadge } from '@/components/ui/redesign';
 import { MessageCircle } from 'lucide-react';
 
 const STATUS_META: Record<
@@ -139,38 +135,58 @@ export default function MessageLogPage() {
       );
   }
 
+  // ── Group sends into per-tenant/template sequences (mock layout) ─────────
+  // "Rent reminder ×4 to Shravan" reads as one story, not four identical rows.
+  const groups = new Map<string, NotificationEntry[]>();
+  for (const n of items) {
+    const key = `${n.recipient_id ?? n.recipient_phone ?? n.tenant_phone ?? n.id}|${n.template_name ?? ''}`;
+    const arr = groups.get(key) ?? [];
+    arr.push(n);
+    groups.set(key, arr);
+  }
+  const groupList = Array.from(groups.values()).map((arr) =>
+    arr.sort(
+      (a, b) =>
+        new Date(b.sent_at ?? b.created_at ?? 0).getTime() -
+        new Date(a.sent_at ?? a.created_at ?? 0).getTime(),
+    ),
+  );
+
   return (
     <TooltipProvider delayDuration={150}>
-    <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
-          <Send className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Message Log</h1>
-          <p className="text-sm text-muted-foreground">
-            Every WhatsApp &amp; email the app sent. Hover a name for the message body;
-            a green <span className="font-medium text-emerald-700">Replied</span> chip means the tenant wrote back.
-          </p>
-        </div>
+    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+      <div>
+        <h1 className="text-[21px] font-extrabold tracking-tight">Message Log</h1>
+        <p className="mt-1 text-[12.5px] text-muted-foreground">
+          Sends grouped into sequences per tenant — the story, not identical rows. A green
+          Replied chip means the tenant wrote back.
+        </p>
       </div>
 
-      {/* Filters */}
+      {/* Filters — status as chips (mock), search + channel kept */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
+        {(
+          [
+            ['all', 'All'],
+            ['FAILED', 'Failed'],
+            ['SENT', 'Sent'],
+            ['PENDING', 'Pending'],
+          ] as [string, string][]
+        ).map(([key, label]) => (
+          <FilterChip
+            key={key}
+            active={status === key}
+            warn={key === 'FAILED'}
+            onClick={() => {
+              setStatus(key);
               setPage(1);
             }}
-            placeholder="Search name or phone…"
-            className="pl-8"
-          />
-        </div>
+          >
+            {label}
+          </FilterChip>
+        ))}
         <Select value={channel} onValueChange={(v) => { setChannel(v); setPage(1); }}>
-          <SelectTrigger className="w-[140px]">
+          <SelectTrigger className="h-9 w-[140px] rounded-full text-xs font-bold">
             <SelectValue placeholder="Channel" />
           </SelectTrigger>
           <SelectContent>
@@ -181,36 +197,33 @@ export default function MessageLogPage() {
             <SelectItem value="SMS">SMS</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
-          <SelectTrigger className="w-[130px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All status</SelectItem>
-            <SelectItem value="SENT">Sent</SelectItem>
-            <SelectItem value="FAILED">Failed</SelectItem>
-            <SelectItem value="PENDING">Pending</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="relative min-w-[200px] flex-1">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search name or phone…"
+            className="h-9 rounded-full pl-8 text-xs font-semibold"
+          />
+        </div>
+        <span className="hidden items-center gap-2.5 text-[11px] font-semibold text-muted-foreground lg:flex">
+          <span>✓ Sent</span>
+          <span className="text-[#15803d]">✓✓ Delivered</span>
+          <span className="text-[#1c5cab]">✓✓ Read</span>
+          <span className="text-destructive">✗ Failed</span>
+        </span>
       </div>
 
-      {/* Column header */}
-      {items.length > 0 && (
-        <div className="flex items-center gap-3 px-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          <span className="w-12 shrink-0">Room</span>
-          <span className="min-w-0 flex-1">Recipient</span>
-          <span className="hidden w-28 shrink-0 sm:block">Sent</span>
-          <span className="w-20 shrink-0 text-right">Status</span>
-        </div>
-      )}
-
-      {/* List */}
+      {/* Grouped list */}
       {isLoading ? (
         <p className="py-12 text-center text-sm text-muted-foreground">Loading…</p>
       ) : isError ? (
         <p className="py-12 text-center text-sm text-destructive">Couldn't load the message log.</p>
-      ) : items.length === 0 ? (
-        <div className="rounded-lg border border-dashed py-16 text-center">
+      ) : groupList.length === 0 ? (
+        <div className="rounded-2xl border border-dashed py-16 text-center">
           <Send className="mx-auto h-8 w-8 text-muted-foreground/50" />
           <p className="mt-3 text-sm font-medium">No messages yet</p>
           <p className="text-xs text-muted-foreground">
@@ -218,98 +231,87 @@ export default function MessageLogPage() {
           </p>
         </div>
       ) : (
-        <div className="space-y-1">
-          {items.map((n) => {
-            const s = STATUS_META[n.status];
-            const ChannelIcon = channelIcon(n.channel);
-            const delivery = n.delivery_status ? DELIVERY_META[n.delivery_status] : null;
-            const to = n.recipient_phone || n.tenant_phone;
-            const who = n.tenant_name || to || n.recipient_type;
-            const replies = repliesFor(n);
+        <div className="space-y-2">
+          {groupList.map((group) => {
+            const latest = group[0];
+            const who =
+              latest.tenant_name ||
+              latest.recipient_phone ||
+              latest.tenant_phone ||
+              latest.recipient_type;
+            const anyFailed = group.some((g) => g.status === 'FAILED');
+            const replies = repliesFor(latest);
+            const ChannelIcon = channelIcon(latest.channel);
             return (
-              <div
-                key={n.id}
-                className="flex w-full items-center gap-3 rounded-lg border bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50"
+              <button
+                key={latest.id}
+                type="button"
+                onClick={() => setSelected(latest)}
+                className="block w-full rounded-2xl border border-border bg-card p-3.5 text-left shadow-sm transition-colors hover:border-[#cfd8e6]"
               >
-                <button
-                  type="button"
-                  onClick={() => setSelected(n)}
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                >
-                  <span className="w-12 shrink-0 truncate font-mono text-xs text-muted-foreground">
-                    {n.room_number || '—'}
-                  </span>
-                  <span className="flex min-w-0 flex-1 items-center gap-2">
-                    <ChannelIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="truncate">{who}</span>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-sm">
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                          Sent · {n.template_name || '—'}
-                        </p>
-                        <p className="mt-1 whitespace-pre-line text-sm">
-                          {n.rendered_message || n.message_body || '(no body)'}
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </span>
-                </button>
-
-                {replies.length > 0 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        className="inline-flex cursor-help items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelected(n);
-                        }}
-                      >
-                        <MessageCircle className="h-3 w-3" />
-                        Replied{replies.length > 1 ? ` (${replies.length})` : ''}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-sm">
-                      <p className="text-[10px] uppercase tracking-wider text-emerald-800">
-                        Replied by {n.tenant_name ?? 'tenant'}
-                      </p>
-                      {replies.slice(0, 3).map((r) => (
-                        <div key={r.id} className="mt-2">
-                          <p className="text-[10px] text-muted-foreground">
-                            {fmt(r.sent_at ?? r.created_at)}
-                          </p>
-                          <p className="whitespace-pre-line text-sm">
-                            {r.rendered_message || r.message_body || '(no body)'}
-                          </p>
-                        </div>
-                      ))}
-                      {replies.length > 3 && (
-                        <p className="mt-2 text-[11px] italic text-muted-foreground">
-                          + {replies.length - 3} more — click to see all
-                        </p>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-
-                <span className="hidden w-28 shrink-0 text-xs text-muted-foreground sm:block">
-                  {n.sent_at ? format(new Date(n.sent_at), 'd MMM, HH:mm') : '—'}
-                </span>
-                <span className="flex w-20 shrink-0 items-center justify-end gap-1">
-                  {delivery ? (
-                    <span className={`inline-flex items-center gap-1 text-xs ${delivery.cls}`}>
-                      <delivery.Icon className="h-3.5 w-3.5" />
+                <div className="flex flex-wrap items-center gap-2">
+                  <NameAvatar name={who ?? '?'} size={28} />
+                  <b className="text-[13px]">{who}</b>
+                  {latest.room_number && <RoomBadge room={latest.room_number} />}
+                  <Pill tone="v" dot={false}>
+                    {latest.template_name?.replace(/_/g, ' ') || latest.channel}
+                  </Pill>
+                  {group.length > 1 && (
+                    <span className="text-[11px] font-semibold text-[#98a0ad]">
+                      {group.length} sends
                     </span>
-                  ) : null}
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${s.cls}`}
-                  >
-                    <s.Icon className="h-3 w-3" />
+                  )}
+                  <span className="ml-auto flex items-center gap-1.5">
+                    {anyFailed ? (
+                      <Pill tone="r">Failed ✗</Pill>
+                    ) : replies.length > 0 ? (
+                      <Pill tone="g">
+                        <MessageCircle className="h-3 w-3" /> Replied
+                        {replies.length > 1 ? ` (${replies.length})` : ''}
+                      </Pill>
+                    ) : (
+                      <Pill tone="s">No reply yet</Pill>
+                    )}
                   </span>
-                </span>
-              </div>
+                </div>
+                {/* Per-send timeline chips */}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {group.slice(0, 6).map((n) => {
+                    const delivery = n.delivery_status
+                      ? DELIVERY_META[n.delivery_status]
+                      : null;
+                    return (
+                      <span
+                        key={n.id}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground"
+                      >
+                        <ChannelIcon className="h-3 w-3" />
+                        {n.sent_at ? format(new Date(n.sent_at), 'd MMM') : '—'} ·{' '}
+                        {n.status === 'FAILED' ? (
+                          <span className="font-bold text-destructive">
+                            ✗ {n.error_message?.slice(0, 32) || 'Failed'}
+                          </span>
+                        ) : delivery ? (
+                          <span className={`font-bold ${delivery.cls}`}>
+                            {n.delivery_status === 'read'
+                              ? '✓✓ Read'
+                              : n.delivery_status === 'delivered'
+                                ? '✓✓ Delivered'
+                                : '✓ Sent'}
+                          </span>
+                        ) : (
+                          <span>{STATUS_META[n.status].label}</span>
+                        )}
+                      </span>
+                    );
+                  })}
+                  {group.length > 6 && (
+                    <span className="self-center text-[11px] font-semibold text-[#98a0ad]">
+                      +{group.length - 6} more
+                    </span>
+                  )}
+                </div>
+              </button>
             );
           })}
         </div>

@@ -816,6 +816,9 @@ async def overdue_tenants(
                    COUNT(rle.id) as months_overdue,
                    SUM(rle.amount_due_paise - rle.amount_paid_paise - COALESCE(rle.discount_paise,0))
                        as total_outstanding_paise,
+                   -- Oldest unpaid rent month — drives the receivables-aging
+                   -- buckets in the web Rent & Payments screen.
+                   MIN(make_date(rle.year, rle.month, 1)) as oldest_due_date,
                    b.bed_label, r.room_number
             FROM tenants t
             JOIN rent_ledger_entries rle ON rle.tenant_id = t.id

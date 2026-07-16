@@ -143,7 +143,7 @@ export default function AuditLogsPage() {
             <ClipboardList className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
+            <h1 className="text-[21px] font-extrabold tracking-tight">Audit Logs</h1>
             <p className="text-sm text-muted-foreground">
               {total.toLocaleString('en-IN')} recorded {total === 1 ? 'action' : 'actions'} · accountability across your org
             </p>

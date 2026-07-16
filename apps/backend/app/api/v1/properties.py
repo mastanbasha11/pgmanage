@@ -106,13 +106,18 @@ async def list_properties(
                 p.is_active, p.created_at,
                 COALESCE(b.total_beds, 0) AS total_beds,
                 COALESCE(b.occupied_beds, 0) AS occupied_beds,
+                COALESCE(b.reserved_beds, 0) AS reserved_beds,
                 COALESCE(b.vacant_beds, 0) AS vacant_beds
             FROM properties p
             LEFT JOIN (
                 SELECT
                     property_id,
                     COUNT(*) AS total_beds,
-                    COUNT(*) FILTER (WHERE status = 'OCCUPIED') AS occupied_beds,
+                    -- Occupancy includes RESERVED: a held bed is not sellable,
+                    -- so it counts as full for the headline % (same rule as
+                    -- /dashboard/summary and /properties/{id}/stats).
+                    COUNT(*) FILTER (WHERE status IN ('OCCUPIED', 'RESERVED')) AS occupied_beds,
+                    COUNT(*) FILTER (WHERE status = 'RESERVED') AS reserved_beds,
                     COUNT(*) FILTER (WHERE status = 'VACANT') AS vacant_beds
                 FROM beds
                 GROUP BY property_id

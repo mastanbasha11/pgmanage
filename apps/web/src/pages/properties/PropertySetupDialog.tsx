@@ -74,45 +74,49 @@ export default function PropertySetupDialog({ open, onClose, propertyId }: Props
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 text-[17px] font-extrabold tracking-tight">
             <Building2 className="h-5 w-5 text-accent" />
-            Configure {property?.name ?? 'property'}
+            Configure — {property?.name ?? 'property'}
           </DialogTitle>
           <DialogDescription>
-            Add floors, define room types, create rooms with beds — then optionally
-            capture owners and the ROI payback plan.
+            Floors → room types → rooms &amp; beds → owners → payback plan. Click any step to
+            jump.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Stepper */}
-        <div className="flex items-center gap-1 text-xs">
+        {/* Stepper — mock-style pill steps: done = green ✓, active = dark fill */}
+        <div className="flex flex-wrap items-center gap-1.5">
           {STEPS.map((s, i) => (
-            <div key={s.key} className="flex items-center gap-1 shrink-0">
+            <div key={s.key} className="flex shrink-0 items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => setStep(s.key)}
                 className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold transition-colors',
-                  i < stepIndex
-                    ? 'bg-accent text-accent-foreground'
-                    : i === stepIndex
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground',
+                  'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition-colors',
+                  s.key === step
+                    ? 'border-[#161b26] bg-[#161b26] text-white'
+                    : 'border-border bg-card text-[#4a5261] hover:bg-secondary',
                 )}
               >
-                {i < stepIndex ? <Check className="h-3 w-3" /> : i + 1}
-              </button>
-              <span
-                className={cn(
-                  'hidden sm:block',
-                  i === stepIndex ? 'text-foreground font-medium' : 'text-muted-foreground',
-                )}
-              >
+                <span
+                  className={cn(
+                    'inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-extrabold',
+                    i < stepIndex
+                      ? 'bg-[#15803d] text-white'
+                      : s.key === step
+                        ? 'bg-white text-[#161b26]'
+                        : 'bg-secondary text-muted-foreground',
+                  )}
+                >
+                  {i < stepIndex ? <Check className="h-2.5 w-2.5" /> : i + 1}
+                </span>
                 {s.label}
-              </span>
-              {i < STEPS.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+              </button>
+              {i < STEPS.length - 1 && (
+                <ChevronRight className="h-3 w-3 text-[#c5ccd8]" />
+              )}
             </div>
           ))}
         </div>

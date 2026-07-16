@@ -10,7 +10,9 @@ export interface Property {
   state: string;
   pincode: string;
   total_beds: number;
+  /** Includes RESERVED beds — a held bed counts as full for the headline %. */
   occupied_beds: number;
+  reserved_beds?: number;
   vacant_beds: number;
   is_active: boolean;
 }

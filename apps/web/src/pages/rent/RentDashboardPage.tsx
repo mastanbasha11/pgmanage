@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -6,20 +6,10 @@ import {
   IndianRupee,
   RefreshCw,
   AlertCircle,
-  TrendingUp,
-  Wallet,
-  Receipt,
-  Tag,
-  Users,
   Plus,
-  ArrowDownToLine,
-  ArrowUpFromLine,
   CalendarDays,
   Pencil,
   Trash2,
-  Zap,
-  CalendarRange,
-  PiggyBank,
   MessageCircle,
 } from 'lucide-react';
 import AddPaymentDialog from './AddPaymentDialog';
@@ -29,9 +19,7 @@ import PaidPersonSelect from '@/components/PaidPersonSelect';
 import { api } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -52,11 +40,21 @@ import { useAuthStore } from '@/store/auth';
 import {
   formatPaise,
   monthName,
-  statusBadgeVariant,
   currentMonthYear,
   rupeesToPaise,
   shortRoomType,
 } from '@/lib/utils';
+import {
+  FilterChip,
+  NameAvatar,
+  PageHeader,
+  Pill,
+  RankBars,
+  RoomBadge,
+  SectionCard,
+  Track,
+  type PillTone,
+} from '@/components/ui/redesign';
 import { useToast } from '@/hooks/useToast';
 import {
   Dialog,
@@ -472,36 +470,71 @@ function EditPaymentDialog({
   );
 }
 
+/** Hero KPI card — mock style: label / big value / foot. */
 function StatCard({
   label,
   value,
-  icon: Icon,
-  tone = 'default',
+  foot,
+  valueClass,
+  children,
+  onClick,
 }: {
-  label: string;
+  label: ReactNode;
   value: string;
-  icon: typeof TrendingUp;
-  tone?: 'default' | 'success' | 'destructive';
+  foot?: ReactNode;
+  valueClass?: string;
+  children?: ReactNode;
+  onClick?: () => void;
 }) {
-  const toneClass =
-    tone === 'success'
-      ? 'text-green-600 bg-green-50'
-      : tone === 'destructive'
-      ? 'text-destructive bg-destructive/10'
-      : 'text-accent bg-accent/10';
   return (
-    <Card>
-      <CardContent className="pt-5 pb-4">
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <div className={`flex h-8 w-8 items-center justify-center rounded-full ${toneClass}`}>
-            <Icon className="h-4 w-4" />
-          </div>
-        </div>
-        <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
-      </CardContent>
-    </Card>
+    <div
+      className={`rounded-2xl border border-border bg-card p-4 shadow-sm ${
+        onClick ? 'cursor-pointer transition-colors hover:border-accent' : ''
+      }`}
+      onClick={onClick}
+    >
+      <div className="text-xs font-bold text-muted-foreground">{label}</div>
+      <div className={`tnum mt-1.5 text-[21px] font-extrabold tracking-tight ${valueClass ?? ''}`}>
+        {value}
+      </div>
+      {children}
+      {foot && (
+        <div className="mt-1 text-[11px] font-semibold text-[#98a0ad]">{foot}</div>
+      )}
+    </div>
   );
+}
+
+/** Receivables-aging buckets — month-based, chase window tops out ~45 days. */
+const AGING_BUCKETS = [
+  { label: '0–15 days', max: 15, color: '#eda100' },
+  { label: '16–30 days', max: 30, color: '#eb6834' },
+  { label: '31–45 days', max: 45, color: '#e34948' },
+  { label: '45+ days', max: Infinity, color: '#b3261e' },
+] as const;
+
+interface OverdueItem {
+  id: string;
+  name: string;
+  phone?: string | null;
+  months_overdue: number;
+  total_outstanding_paise: number;
+  oldest_due_date?: string | null;
+  bed_label?: string | null;
+  room_number?: string | null;
+}
+
+function buildAging(items: OverdueItem[]) {
+  const today = Date.now();
+  const buckets = AGING_BUCKETS.map((b) => ({ ...b, amount: 0, count: 0 }));
+  for (const it of items) {
+    const due = it.oldest_due_date ? Date.parse(it.oldest_due_date) : today;
+    const days = Math.max(0, Math.floor((today - due) / 86_400_000));
+    const bucket = buckets.find((b) => days <= b.max) ?? buckets[buckets.length - 1];
+    bucket.amount += it.total_outstanding_paise;
+    bucket.count += 1;
+  }
+  return buckets.filter((b) => b.count > 0 || b.max !== Infinity);
 }
 
 export default function RentDashboardPage() {
@@ -655,19 +688,44 @@ export default function RentDashboardPage() {
     return true;
   });
 
+  // "Avg days to collect" — mean gap between the fiscal period opening and
+  // each row's most-recent payment. Clear replacement for the mock's
+  // "DSO / on-time" jargon.
+  const paidGaps: number[] = [];
+  if (period) {
+    const start = Date.parse(period.period_start);
+    for (const e of entries) {
+      if (e.paid_on) {
+        const gap = (Date.parse(e.paid_on) - start) / 86_400_000;
+        if (gap >= 0 && gap < 90) paidGaps.push(gap);
+      }
+    }
+  }
+  const avgDaysToCollect =
+    paidGaps.length > 0
+      ? (paidGaps.reduce((a, b) => a + b, 0) / paidGaps.length).toFixed(1)
+      : null;
+
+  const overdueItems: OverdueItem[] = overdue?.items ?? [];
+  const aging = buildAging(overdueItems);
+  const agingMax = Math.max(...aging.map((b) => b.amount), 1);
+  const billedTenants = entries.length;
+
   return (
     <>
-      <div className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Rent &amp; Payments</h1>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span>Track collection for {monthName(month)} {year}</span>
+      <div className="mx-auto max-w-[1280px] space-y-4">
+        <PageHeader
+          title="Rent & Payments"
+          sub={
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <span>
+                {monthName(month)} {year}
+              </span>
               {period && (
                 <button
                   type="button"
                   onClick={() => setShowEditClose(true)}
-                  className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-xs hover:border-accent hover:text-accent transition-colors"
+                  className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-xs transition-colors hover:border-accent hover:text-accent"
                   title="Edit fiscal close date"
                 >
                   <CalendarDays className="h-3 w-3" />
@@ -675,214 +733,246 @@ export default function RentDashboardPage() {
                   {' – '}
                   {new Date(period.period_end).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                   {period.overridden && (
-                    <span className="ml-1 text-[10px] uppercase text-amber-600">override</span>
+                    <Pill tone="a" dot={false} className="ml-1">
+                      OVERRIDE
+                    </Pill>
                   )}
                   <Pencil className="h-3 w-3 opacity-60" />
                 </button>
               )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
-              <SelectTrigger className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MONTHS.map((m) => (
-                  <SelectItem key={m.value} value={String(m.value)}>
-                    {m.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-              <SelectTrigger className="w-24">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {YEARS.map((y) => (
-                  <SelectItem key={y} value={String(y)}>
-                    {y}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleGenerate}
-              disabled={generating || !selectedPropertyId}
-              className="gap-1"
-            >
-              <RefreshCw className={`h-4 w-4 ${generating ? 'animate-spin' : ''}`} />
-              Generate
-            </Button>
-            <Button
-              size="sm"
-              className="gap-1"
-              onClick={() => setShowAddPayment(true)}
-              disabled={!selectedPropertyId}
-            >
-              <Plus className="h-4 w-4" />
-              Add Payment
-            </Button>
-          </div>
-        </div>
+            </span>
+          }
+          actions={
+            <>
+              <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
+                <SelectTrigger className="h-9 w-32 rounded-xl font-bold shadow-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MONTHS.map((m) => (
+                    <SelectItem key={m.value} value={String(m.value)}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+                <SelectTrigger className="h-9 w-24 rounded-xl font-bold shadow-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {YEARS.map((y) => (
+                    <SelectItem key={y} value={String(y)}>
+                      {y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerate}
+                disabled={generating || !selectedPropertyId}
+                className="h-9 gap-1 rounded-xl font-bold"
+              >
+                <RefreshCw className={`h-4 w-4 ${generating ? 'animate-spin' : ''}`} />
+                Generate
+              </Button>
+              <Button
+                size="sm"
+                className="h-9 gap-1 rounded-xl font-bold"
+                onClick={() => setShowAddPayment(true)}
+                disabled={!selectedPropertyId}
+              >
+                <Plus className="h-4 w-4" />
+                Add Payment
+              </Button>
+            </>
+          }
+        />
 
         {/* Summary — totals hidden for managers, only progress shown */}
         {showMoneyTotals ? (
           <>
+            {/* Hero KPIs — mock row of 4 */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard
-                label="Expected"
+                label={
+                  <span title="Billed rent for this month only — advances & arrears excluded">
+                    Expected (this month's rent) ⓘ
+                  </span>
+                }
                 value={formatPaise(stats.expected_paise)}
-                icon={TrendingUp}
+                foot={`${billedTenants} tenants billed`}
               />
               <StatCard
-                label="Collected"
+                label={`Collected — ${monthName(month)} rent`}
                 value={formatPaise(stats.collected_paise)}
-                icon={Wallet}
-                tone="success"
-              />
-              <StatCard
-                label="Discount given"
-                value={formatPaise(stats.discount_paise)}
-                icon={Tag}
-                tone={stats.discount_paise > 0 ? 'success' : 'default'}
-              />
+                foot={
+                  <>
+                    <b className="text-accent">{collectionPct}%</b> of billed
+                    {stats.discount_paise > 0 && (
+                      <> · {formatPaise(stats.discount_paise)} discounts</>
+                    )}
+                  </>
+                }
+              >
+                <Track pct={collectionPct} className="mt-2" />
+              </StatCard>
               <StatCard
                 label="Outstanding"
                 value={formatPaise(stats.outstanding_paise)}
-                icon={Receipt}
-                tone={stats.outstanding_paise > 0 ? 'destructive' : 'success'}
-              />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <StatCard
-                label="Advance received"
-                value={formatPaise(advanceReceived)}
-                icon={ArrowDownToLine}
-                tone={advanceReceived > 0 ? 'success' : 'default'}
+                valueClass={stats.outstanding_paise > 0 ? 'text-destructive' : ''}
+                foot={
+                  overdueItems.length > 0
+                    ? `${overdueItems.length} tenants · see aging →`
+                    : 'all clear'
+                }
               />
               <StatCard
-                label="Refunds given"
-                value={formatPaise(refundsGiven)}
-                icon={ArrowUpFromLine}
-                tone={refundsGiven > 0 ? 'destructive' : 'default'}
+                label={
+                  <span title="Average gap between the period opening and each tenant's payment — lower means rent comes in faster.">
+                    Avg days to collect ⓘ
+                  </span>
+                }
+                value={avgDaysToCollect ? `${avgDaysToCollect} days` : '—'}
+                foot={
+                  paidGaps.length > 0
+                    ? `across ${paidGaps.length} payments this period`
+                    : 'no payments yet this period'
+                }
               />
-              <StatCard
-                label="Collection rate"
-                value={`${collectionPct}%`}
-                icon={TrendingUp}
-              />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <StatCard
-                label="Daily stays"
-                value={formatPaise(dailyStays)}
-                icon={CalendarRange}
-                tone={dailyStays > 0 ? 'success' : 'default'}
-              />
-              <StatCard
-                label="Power meters"
-                value={formatPaise(powerReceived)}
-                icon={Zap}
-                tone={powerReceived > 0 ? 'success' : 'default'}
-              />
-              <Card className="cursor-pointer hover:border-accent" onClick={() => setShowOpeningBalance(true)}>
-                <CardContent className="pt-5 pb-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">Opening balance</p>
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/10 text-accent">
-                      <PiggyBank className="h-4 w-4" />
-                    </div>
-                  </div>
-                  <p className="mt-1 text-2xl font-bold tabular-nums">
-                    {formatPaise(openingBalance)}
-                  </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Carry-forward from previous month · Click to edit
-                  </p>
-                </CardContent>
-              </Card>
             </div>
 
-            {/* Collected by breakdown */}
-            {collectors.length > 0 && (
-              <Card>
-                <CardContent className="pt-4 pb-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-accent">
-                      <Users className="h-3.5 w-3.5" />
+            {/* Also received this period — proper tiles (bigger than the mock strip) */}
+            <SectionCard
+              title="Also received this period"
+              sub="Everything besides this month's rent that moved through the till."
+            >
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
+                {[
+                  { label: 'Advances', value: advanceReceived, color: '#1baf7a' },
+                  { label: 'Daily stays', value: dailyStays, color: '#eda100' },
+                  { label: 'Power meters', value: powerReceived, color: '#eb6834' },
+                  {
+                    label: 'Opening balance',
+                    value: openingBalance,
+                    color: '#98a0ad',
+                    onClick: () => setShowOpeningBalance(true),
+                    note: 'click to edit',
+                  },
+                  {
+                    label: 'Refunds given',
+                    value: -refundsGiven,
+                    color: '#dc2626',
+                    negative: refundsGiven > 0,
+                  },
+                  {
+                    label: 'Discounts',
+                    value: -stats.discount_paise,
+                    color: '#b45309',
+                    negative: stats.discount_paise > 0,
+                  },
+                ].map((m) => (
+                  <div
+                    key={m.label}
+                    onClick={m.onClick}
+                    className={`flex flex-col gap-1 rounded-xl border border-border bg-card p-3 ${
+                      m.onClick ? 'cursor-pointer transition-colors hover:border-accent' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-muted-foreground">
+                        {m.label}
+                      </span>
+                      <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: m.color }} />
                     </div>
-                    <p className="text-sm font-medium">
-                      Collected by — {monthName(month)} {year}
-                    </p>
+                    <div
+                      className={`tnum text-[19px] font-extrabold tracking-tight ${
+                        m.negative ? 'text-destructive' : ''
+                      }`}
+                    >
+                      {m.negative ? '−' : ''}
+                      {formatPaise(Math.abs(m.value))}
+                    </div>
+                    {m.note && <div className="text-[10.5px] text-[#98a0ad]">{m.note}</div>}
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {collectors.map((c) => {
-                      const rent = c.rent_paise ?? c.amount_paise;
-                      const adv = c.advance_paise ?? 0;
-                      return (
-                        <div
-                          key={c.collector}
-                          className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
-                        >
-                          <div className="min-w-0">
-                            <p className="font-medium truncate">{c.collector}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              <span>Rent {formatPaise(rent)}</span>
-                              {adv > 0 && (
-                                <span className="ml-2">· Advance {formatPaise(adv)}</span>
-                              )}
-                            </p>
-                          </div>
-                          <p className="font-semibold tabular-nums">
-                            {formatPaise(c.amount_paise)}
-                          </p>
-                        </div>
-                      );
-                    })}
+                ))}
+              </div>
+            </SectionCard>
+
+            {/* Aging + collected-by */}
+            <div className="grid gap-3.5 lg:grid-cols-2">
+              <SectionCard
+                title="⏳ Receivables aging"
+                sub="Overdue rent by how long it's been pending — chase window runs to ~45 days."
+              >
+                {aging.every((b) => b.count === 0) ? (
+                  <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                    <Pill tone="g">All clear</Pill> no overdue rent right now.
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                ) : (
+                  <div className="flex flex-col gap-2.5">
+                    {aging.map((b) => (
+                      <div
+                        key={b.label}
+                        className="grid grid-cols-[86px_1fr_120px] items-center gap-2.5 text-xs"
+                      >
+                        <b className="text-[#3a4150]">{b.label}</b>
+                        <Track pct={(b.amount / agingMax) * 100} color={b.color} className="h-[9px]" />
+                        <span className="tnum text-right font-extrabold">
+                          {formatPaise(b.amount)}
+                          <span className="font-semibold text-[#98a0ad]"> · {b.count}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+
+              {collectors.length > 0 && (
+                <SectionCard
+                  title={`💵 Collected by — ${monthName(month)} ${year}`}
+                  sub="Who received the money this period."
+                >
+                  <RankBars
+                    rows={collectors.map((c, i) => ({
+                      label: c.collector,
+                      sub: `${c.payments} payment${c.payments === 1 ? '' : 's'}${
+                        (c.advance_paise ?? 0) > 0
+                          ? ` · adv ${formatPaise(c.advance_paise ?? 0)}`
+                          : ''
+                      }`,
+                      value: c.amount_paise,
+                      display: formatPaise(c.amount_paise),
+                      color: ['#2a78d6', '#1baf7a', '#e87ba4', '#eda100', '#eb6834', '#98a0ad'][
+                        i % 6
+                      ],
+                    }))}
+                  />
+                </SectionCard>
+              )}
+            </div>
           </>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <StatCard label="Collection rate" value={`${collectionPct}%`} icon={TrendingUp} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StatCard label="Collection rate" value={`${collectionPct}%`}>
+              <Track pct={collectionPct} className="mt-2" />
+            </StatCard>
             <StatCard
               label="Tenants"
               value={`${entries.filter((e) => e.status === 'PAID').length}/${entries.length} paid`}
-              icon={Wallet}
-              tone="success"
             />
           </div>
         )}
 
-        {/* Progress bar */}
-        {stats.expected_paise > 0 && (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Collection progress</span>
-              <span className="font-medium text-foreground">{collectionPct}%</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-accent transition-all"
-                style={{ width: `${Math.min(collectionPct, 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
-
         {/* Overdue banner */}
-        {(overdue?.items?.length ?? 0) > 0 && (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+        {overdueItems.length > 0 && (
+          <div className="flex items-center gap-2.5 rounded-2xl border border-[#f3d59b] bg-[#fff6e2] px-3.5 py-2.5 text-[12.5px] text-[#7c4a12]">
+            <AlertCircle className="h-4 w-4 flex-shrink-0 text-[#b45309]" />
             <span>
-              <strong>{overdue.items.length}</strong> tenants have overdue rent from previous
-              months.
+              <b className="text-[#5f380d]">{overdueItems.length} tenants</b> have overdue rent
+              from previous months.
             </span>
           </div>
         )}
@@ -903,40 +993,54 @@ export default function RentDashboardPage() {
             </div>
           ) : (
             <>
-              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as RentTab)}>
-                <TabsList>
-                  <TabsTrigger value="tenants">Tenants ({entries.length})</TabsTrigger>
-                  <TabsTrigger value="payments">
-                    Payments ({paymentRows.length})
-                  </TabsTrigger>
-                  <TabsTrigger value="refunds">
-                    Refunds ({refundRows.length})
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+              {/* Tabs — mock style: dark active pill */}
+              <div className="flex w-fit gap-1 rounded-xl border border-border bg-card p-1 shadow-sm">
+                {(
+                  [
+                    ['tenants', `Tenants (${entries.length})`],
+                    ['payments', `Payments (${paymentRows.length})`],
+                    ['refunds', `Refunds (${refundRows.length})`],
+                  ] as [RentTab, string][]
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setActiveTab(key)}
+                    className={`rounded-lg px-3.5 py-1.5 text-[12.5px] font-bold transition-colors ${
+                      activeTab === key
+                        ? 'bg-[#161b26] text-white'
+                        : 'text-[#4a5261] hover:bg-secondary'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
               {activeTab === 'tenants' && (
               <>
-              {/* Filter bar */}
+              {/* Filter chips */}
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs text-muted-foreground mr-1">Filter:</p>
-                <Select
-                  value={statusFilter}
-                  onValueChange={(v) => setStatusFilter(v as LedgerStatus)}
-                >
-                  <SelectTrigger className="h-8 w-36 text-xs">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All statuses</SelectItem>
-                    <SelectItem value="UNPAID">Unpaid</SelectItem>
-                    <SelectItem value="PARTIAL">Partial</SelectItem>
-                    <SelectItem value="PAID">Paid</SelectItem>
-                  </SelectContent>
-                </Select>
+                {(
+                  [
+                    ['ALL', 'All', entries.length],
+                    ['UNPAID', 'Unpaid', entries.filter((e) => e.status === 'UNPAID').length],
+                    ['PARTIAL', 'Partial', entries.filter((e) => e.status === 'PARTIAL').length],
+                    ['PAID', 'Paid', entries.filter((e) => e.status === 'PAID').length],
+                  ] as [LedgerStatus, string, number][]
+                ).map(([key, label, count]) => (
+                  <FilterChip
+                    key={key}
+                    active={statusFilter === key}
+                    onClick={() => setStatusFilter(key)}
+                    count={count}
+                  >
+                    {label}
+                  </FilterChip>
+                ))}
                 {showMoneyTotals && (
                   <Select value={collectorFilter} onValueChange={setCollectorFilter}>
-                    <SelectTrigger className="h-8 w-44 text-xs">
+                    <SelectTrigger className="h-8 w-44 rounded-full text-xs font-bold">
                       <SelectValue placeholder="Collected by" />
                     </SelectTrigger>
                     <SelectContent>
@@ -960,7 +1064,7 @@ export default function RentDashboardPage() {
                         setStatusFilter('ALL');
                         setCollectorFilter('ALL');
                       }}
-                      className="text-xs text-accent font-medium hover:underline"
+                      className="text-xs font-bold text-accent hover:underline"
                     >
                       Clear
                     </button>
@@ -968,123 +1072,133 @@ export default function RentDashboardPage() {
                 )}
               </div>
 
-              <div className="overflow-hidden rounded-lg border bg-card">
+              <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    <tr className="border-b bg-[#fbfcfe]">
+                      <th className="px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad]">
                         Room
                       </th>
-                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      <th className="px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad]">
                         Tenant
                       </th>
                       {showMoneyTotals && (
                         <>
-                          <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground md:table-cell">
+                          <th className="hidden px-3 py-2.5 text-right text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] md:table-cell">
                             Due
                           </th>
-                          <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
+                          <th className="hidden px-3 py-2.5 text-right text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] lg:table-cell">
                             Paid
                           </th>
-                          <th className="hidden px-4 py-3 text-right font-medium text-muted-foreground lg:table-cell">
+                          <th className="hidden px-3 py-2.5 text-right text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] lg:table-cell">
                             Discount
                           </th>
-                          <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground lg:table-cell">
-                            Paid on
-                          </th>
-                          <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground xl:table-cell">
-                            Collected by
+                          <th className="hidden px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] lg:table-cell">
+                            Paid on · by
                           </th>
                         </>
                       )}
-                      <th className="px-4 py-3 text-center font-medium text-muted-foreground">
+                      <th className="px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad]">
                         Status
                       </th>
-                      <th className="px-4 py-3" />
+                      <th className="px-3 py-2.5" />
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
+                  <tbody className="divide-y divide-[#e9edf4]">
                     {filteredEntries.map((e) => (
-                      <tr key={e.id} className="hover:bg-muted/30">
-                        <td className="px-4 py-3 text-sm">
+                      <tr
+                        key={e.id}
+                        className={
+                          e.status === 'UNPAID'
+                            ? 'bg-[#fdf6f6] hover:bg-[#fbeeee]'
+                            : e.status === 'PARTIAL'
+                              ? 'bg-[#fffdf4] hover:bg-[#fdf8e8]'
+                              : 'hover:bg-muted/30'
+                        }
+                      >
+                        <td className="px-3 py-2.5">
                           {e.room_number ? (
                             <div className="flex items-center gap-1.5">
-                              <span className="inline-flex items-center justify-center min-w-[2.25rem] rounded-md bg-accent/10 px-1.5 py-0.5 text-accent font-bold tabular-nums">
-                                {e.room_number}
-                              </span>
-                              {e.bed_label && (
-                                <span className="text-muted-foreground tabular-nums">
-                                  ·{e.bed_label}
-                                </span>
-                              )}
+                              <RoomBadge room={e.room_number} bed={e.bed_label ?? undefined} />
                               {e.room_type && (
-                                <Badge variant="outline" className="text-[10px] px-1 h-4 ml-0.5">
+                                <span className="hidden rounded-md border border-[#f3d59b] bg-[#fff6e2] px-1.5 py-px text-[10.5px] font-bold text-[#92600b] xl:inline-flex">
                                   {shortRoomType(e.room_type)}
-                                </Badge>
+                                </span>
                               )}
                             </div>
                           ) : (
                             <span className="text-muted-foreground/40">—</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 font-medium">
-                          {e.tenant_name}
-                          {e.outstanding_paise > 0 && (
-                            <p className="text-[11px] text-destructive">
-                              {formatPaise(e.outstanding_paise)} outstanding
-                            </p>
-                          )}
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <NameAvatar name={e.tenant_name} size={26} />
+                            <div className="min-w-0">
+                              <p className="truncate text-[12.5px] font-bold">{e.tenant_name}</p>
+                              {e.outstanding_paise > 0 && (
+                                <p className="tnum text-[11px] font-semibold text-destructive">
+                                  {formatPaise(e.outstanding_paise)} left
+                                </p>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         {showMoneyTotals && (
                           <>
-                            <td className="hidden px-4 py-3 text-right text-muted-foreground md:table-cell tabular-nums">
+                            <td className="tnum hidden px-3 py-2.5 text-right text-[12.5px] text-muted-foreground md:table-cell">
                               {formatPaise(e.amount_due_paise)}
                             </td>
-                            <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
-                              {formatPaise(e.amount_paid_paise)}
+                            <td className="tnum hidden px-3 py-2.5 text-right text-[12.5px] font-bold lg:table-cell">
+                              {e.amount_paid_paise > 0 ? (
+                                formatPaise(e.amount_paid_paise)
+                              ) : (
+                                <span className="font-normal text-muted-foreground/40">—</span>
+                              )}
                             </td>
-                            <td className="hidden px-4 py-3 text-right lg:table-cell tabular-nums">
+                            <td className="tnum hidden px-3 py-2.5 text-right text-[12.5px] lg:table-cell">
                               {e.discount_paise > 0 ? (
-                                <span className="text-emerald-600 font-medium">
+                                <span className="font-bold text-[#15803d]">
                                   {formatPaise(e.discount_paise)}
                                 </span>
                               ) : (
                                 <span className="text-muted-foreground/40">—</span>
                               )}
                             </td>
-                            <td className="hidden px-4 py-3 lg:table-cell text-xs text-muted-foreground tabular-nums">
+                            <td className="hidden px-3 py-2.5 text-[11px] font-semibold text-[#98a0ad] lg:table-cell">
                               {e.paid_on ? (
-                                new Date(e.paid_on).toLocaleDateString('en-IN', {
-                                  day: '2-digit',
-                                  month: 'short',
-                                })
-                              ) : (
-                                <span className="text-muted-foreground/40">—</span>
-                              )}
-                            </td>
-                            <td className="hidden px-4 py-3 xl:table-cell text-xs">
-                              {e.collected_by && e.collected_by.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {e.collected_by.map((c) => (
-                                    <Badge
-                                      key={c}
-                                      variant="outline"
-                                      className="text-[10px] px-1.5 h-4"
-                                    >
-                                      {c}
-                                    </Badge>
-                                  ))}
-                                </div>
+                                <>
+                                  {new Date(e.paid_on).toLocaleDateString('en-IN', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                  })}
+                                  {e.collected_by && e.collected_by.length > 0 && (
+                                    <> · {e.collected_by.join(', ')}</>
+                                  )}
+                                </>
                               ) : (
                                 <span className="text-muted-foreground/40">—</span>
                               )}
                             </td>
                           </>
                         )}
-                        <td className="px-4 py-3 text-center">
-                          <Badge variant={statusBadgeVariant(e.status)}>{e.status}</Badge>
+                        <td className="px-3 py-2.5">
+                          <Pill
+                            tone={
+                              (
+                                {
+                                  PAID: 'g',
+                                  PARTIAL: 'a',
+                                  UNPAID: 'r',
+                                } as Record<string, PillTone>
+                              )[e.status] ?? 's'
+                            }
+                          >
+                            {e.status === 'UNPAID'
+                              ? 'Overdue'
+                              : e.status.charAt(0) + e.status.slice(1).toLowerCase()}
+                          </Pill>
                         </td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">
                           {e.status !== 'PAID' && (
                             <div className="inline-flex items-center gap-1">
                               {e.phone && (
@@ -1092,7 +1206,7 @@ export default function RentDashboardPage() {
                                   href={buildOverdueWhatsappUrl(e)}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[#c8ecd5] text-[#15803d] hover:bg-[#eafaf0]"
                                   title={`Send WhatsApp reminder to ${e.tenant_name}`}
                                   onClick={(ev) => ev.stopPropagation()}
                                 >
@@ -1102,10 +1216,10 @@ export default function RentDashboardPage() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-7 text-xs"
+                                className="h-7 rounded-lg text-xs font-bold"
                                 onClick={() => setPayingEntry(e)}
                               >
-                                <IndianRupee className="h-3 w-3 mr-1" />
+                                <IndianRupee className="mr-1 h-3 w-3" />
                                 Pay
                               </Button>
                             </div>
@@ -1121,7 +1235,7 @@ export default function RentDashboardPage() {
                               No ledger entries for {monthName(month)} {year}.{' '}
                               <button
                                 type="button"
-                                className="text-accent font-medium hover:underline"
+                                className="font-bold text-accent hover:underline"
                                 onClick={handleGenerate}
                               >
                                 Click Generate
@@ -1141,19 +1255,22 @@ export default function RentDashboardPage() {
               )}
 
               {activeTab === 'payments' && (
-                <div className="overflow-hidden rounded-lg border bg-card">
+                <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b bg-muted/50">
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tenant</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Room</th>
-                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Amount</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Mode</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">For</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Collected by</th>
-                        <th className="px-4 py-3" />
+                      <tr className="border-b bg-[#fbfcfe]">
+                        {['Date', 'Tenant', 'Room', 'Amount', 'Type', 'Mode', 'For', 'Collected by', ''].map(
+                          (h, i) => (
+                            <th
+                              key={i}
+                              className={`px-3 py-2.5 text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] ${
+                                h === 'Amount' ? 'text-right' : 'text-left'
+                              }`}
+                            >
+                              {h}
+                            </th>
+                          ),
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -1262,18 +1379,22 @@ export default function RentDashboardPage() {
               )}
 
               {activeTab === 'refunds' && (
-                <div className="overflow-hidden rounded-lg border bg-card">
+                <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b bg-muted/50">
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tenant</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Room</th>
-                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Amount</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Mode</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Notes</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Paid by</th>
-                        <th className="px-4 py-3" />
+                      <tr className="border-b bg-[#fbfcfe]">
+                        {['Date', 'Tenant', 'Room', 'Amount', 'Mode', 'Notes', 'Paid by', ''].map(
+                          (h, i) => (
+                            <th
+                              key={i}
+                              className={`px-3 py-2.5 text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] ${
+                                h === 'Amount' ? 'text-right' : 'text-left'
+                              }`}
+                            >
+                              {h}
+                            </th>
+                          ),
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y">

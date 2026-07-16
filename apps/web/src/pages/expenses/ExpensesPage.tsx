@@ -19,8 +19,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { NameAvatar, Pill, type PillTone } from '@/components/ui/redesign';
 import {
   Select,
   SelectContent,
@@ -54,7 +54,6 @@ import PaidPersonSelect from '@/components/PaidPersonSelect';
 import {
   formatPaise,
   formatDate,
-  statusBadgeVariant,
   currentMonthYear,
   rupeesToPaise,
 } from '@/lib/utils';
@@ -583,21 +582,20 @@ export default function ExpensesPage() {
 
   return (
     <>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="mx-auto max-w-[1280px] space-y-4">
+        <div className="mb-1 flex flex-wrap items-start justify-between gap-3.5">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Expenses</h1>
-            <p className="text-sm text-muted-foreground">
-              Total for{' '}
-              {MONTHS.find((mm) => mm.value === month)?.label} {year}:{' '}
-              <span className="font-semibold text-foreground">
+            <h1 className="text-[21px] font-extrabold tracking-tight">Expenses</h1>
+            <p className="mt-1 text-[12.5px] text-muted-foreground">
+              {MONTHS.find((mm) => mm.value === month)?.label} {year} · total{' '}
+              <span className="tnum font-extrabold text-foreground">
                 {formatPaise(summary?.total_paise ?? 0)}
               </span>
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
-              <SelectTrigger className="w-32 h-9">
+              <SelectTrigger className="h-9 w-32 rounded-xl font-bold shadow-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -609,7 +607,7 @@ export default function ExpensesPage() {
               </SelectContent>
             </Select>
             <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-              <SelectTrigger className="w-24 h-9">
+              <SelectTrigger className="h-9 w-24 rounded-xl font-bold shadow-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -620,25 +618,25 @@ export default function ExpensesPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button size="sm" className="gap-2" onClick={() => setShowAdd(true)}>
+            <Button size="sm" className="h-9 gap-2 rounded-xl font-bold" onClick={() => setShowAdd(true)}>
               <Plus className="h-4 w-4" /> Add expense
             </Button>
           </div>
         </div>
 
-        {/* Search + filter row */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[220px] max-w-md">
+        {/* Search + filters — kept from the old page (mock dropped them), restyled */}
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-2.5 shadow-sm">
+          <div className="relative min-w-[220px] max-w-md flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search description, vendor, paid by, UTR..."
-              className="h-9 pl-8"
+              className="h-9 rounded-full pl-8 text-xs font-semibold"
             />
           </div>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-40 h-9">
+            <SelectTrigger className="h-9 w-40 rounded-full text-xs font-bold">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent>
@@ -652,7 +650,7 @@ export default function ExpensesPage() {
           </Select>
           {isOwnerOrPartner && (
             <Select value={paidByFilter} onValueChange={setPaidByFilter}>
-              <SelectTrigger className="w-36 h-9">
+              <SelectTrigger className="h-9 w-36 rounded-full text-xs font-bold">
                 <SelectValue placeholder="Paid by" />
               </SelectTrigger>
               <SelectContent>
@@ -671,7 +669,7 @@ export default function ExpensesPage() {
             value={statusFilter}
             onValueChange={(v) => setStatusFilter(v as StatusFilter)}
           >
-            <SelectTrigger className="w-32 h-9">
+            <SelectTrigger className="h-9 w-32 rounded-full text-xs font-bold">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -685,7 +683,7 @@ export default function ExpensesPage() {
             value={modeFilter}
             onValueChange={(v) => setModeFilter(v as ModeFilter)}
           >
-            <SelectTrigger className="w-32 h-9">
+            <SelectTrigger className="h-9 w-32 rounded-full text-xs font-bold">
               <SelectValue placeholder="Mode" />
             </SelectTrigger>
             <SelectContent>
@@ -698,7 +696,7 @@ export default function ExpensesPage() {
             </SelectContent>
           </Select>
           {hasActiveFilters && (
-            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 gap-1">
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 gap-1 rounded-full font-bold">
               <X className="h-3.5 w-3.5" />
               Clear
             </Button>
@@ -852,75 +850,89 @@ export default function ExpensesPage() {
             )}
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border bg-card">
+          <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    Description
-                  </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground sm:table-cell">
-                    Category
-                  </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground md:table-cell">
-                    Date
-                  </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground lg:table-cell">
-                    Paid by
-                  </th>
-                  <th className="px-4 py-3 text-center font-medium text-muted-foreground">
-                    Receipt
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                    Amount
-                  </th>
-                  <th className="px-4 py-3 text-center font-medium text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-4 py-3" />
+                <tr className="border-b bg-[#fbfcfe]">
+                  {[
+                    ['Description', 'text-left', ''],
+                    ['Category', 'text-left', 'hidden sm:table-cell'],
+                    ['Date', 'text-left', 'hidden md:table-cell'],
+                    ['Paid by', 'text-left', 'hidden lg:table-cell'],
+                    ['Receipt', 'text-center', ''],
+                    ['Amount', 'text-right', ''],
+                    ['Status', 'text-center', ''],
+                    ['', 'text-left', ''],
+                  ].map(([h, align, extra], i) => (
+                    <th
+                      key={i}
+                      className={`px-3 py-2.5 text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] ${align} ${extra}`}
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y divide-[#e9edf4]">
                 {items.map((e) => (
-                  <tr key={e.id} className="hover:bg-muted/30">
-                    <td className="px-4 py-3">
-                      <p className="font-medium">{e.description}</p>
+                  <tr
+                    key={e.id}
+                    className={
+                      (e.status ?? e.approval_status) === 'PENDING'
+                        ? 'bg-[#fffdf4] hover:bg-[#fdf8e8]'
+                        : 'hover:bg-muted/30'
+                    }
+                  >
+                    <td className="px-3 py-2.5">
+                      <p className="text-[12.5px] font-bold">{e.description}</p>
                       {e.vendor_name && (
-                        <p className="text-xs text-muted-foreground">{e.vendor_name}</p>
+                        <p className="text-[11px] font-semibold text-[#98a0ad]">{e.vendor_name}</p>
                       )}
                     </td>
-                    <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                    <td className="hidden px-3 py-2.5 text-[11.5px] font-semibold text-muted-foreground sm:table-cell">
                       {e.category_name}
                     </td>
-                    <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
+                    <td className="hidden px-3 py-2.5 text-[11.5px] font-semibold text-muted-foreground md:table-cell">
                       {formatDate(e.purchase_date ?? e.expense_date)}
                     </td>
-                    <td className="hidden px-4 py-3 lg:table-cell">
+                    <td className="hidden px-3 py-2.5 lg:table-cell">
                       {e.paid_by ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          {e.paid_by}
-                        </Badge>
+                        <span className="inline-flex items-center gap-1.5">
+                          <NameAvatar name={e.paid_by} size={22} />
+                          <span className="text-[11.5px] font-bold">{e.paid_by}</span>
+                        </span>
                       ) : (
                         <span className="text-muted-foreground/40">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-3 py-2.5 text-center">
                       {e.receipt_path ? (
                         <ReceiptThumb
                           expenseId={e.id}
                           onOpen={() => setViewingReceipt(e.id)}
                         />
                       ) : (
-                        <span className="text-muted-foreground/40 text-xs">—</span>
+                        <Pill tone="a" dot={false} className="text-[10px]">
+                          add receipt
+                        </Pill>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                    <td className="tnum px-3 py-2.5 text-right text-[12.5px] font-extrabold">
                       {formatPaise(e.amount_paise)}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <Badge variant={statusBadgeVariant(e.status ?? e.approval_status)}>
-                        {e.status ?? e.approval_status}
-                      </Badge>
+                    <td className="px-3 py-2.5 text-center">
+                      <Pill
+                        tone={
+                          ((e.status ?? e.approval_status) === 'APPROVED'
+                            ? 'g'
+                            : (e.status ?? e.approval_status) === 'PENDING'
+                              ? 'a'
+                              : 'r') as PillTone
+                        }
+                      >
+                        {(e.status ?? e.approval_status ?? '').charAt(0) +
+                          (e.status ?? e.approval_status ?? '').slice(1).toLowerCase()}
+                      </Pill>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-1">

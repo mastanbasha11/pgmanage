@@ -4,41 +4,42 @@
 
 @layer base {
   :root {
-    /* Brand: primary = slate-900 (#0F172A), accent = teal-600 (#0D9488) */
-    --background: 210 40% 98%;               /* soft off-white so white cards lift off the page */
-    --foreground: 222.2 47.4% 11.2%;
+    /* Redesign palette (mock: pgmanageredesign.html)
+       canvas #f3f5fa · ink #141a26 · hairline #e0e6ef · teal #0e9384 */
+    --background: 223 41% 97%;               /* #f3f5fa slate canvas */
+    --foreground: 220 30% 11%;               /* #141a26 ink */
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 47.4% 11.2%;
+    --card-foreground: 220 30% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 47.4% 11.2%;
+    --popover-foreground: 220 30% 11%;
 
-    --primary: 222.2 47.4% 11.2%;            /* #0F172A slate-900 */
+    --primary: 221 27% 12%;                  /* #161b26 — dark active states */
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 220 29% 95%;                /* #eef1f6 slate-bg */
+    --secondary-foreground: 220 30% 11%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 220 29% 95%;
+    --muted-foreground: 220 12% 46%;         /* #667085 */
 
-    --accent: 172 82% 33%;                   /* teal, a touch brighter/cleaner than teal-600 */
+    --accent: 173 82% 32%;                   /* #0e9384 redesign teal */
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 72% 51%;                /* #dc2626 */
     --destructive-foreground: 210 40% 98%;
 
-    --success: 142 71% 45%;                  /* green-500 */
+    --success: 145 72% 29%;                  /* #15803d */
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;                   /* amber-500 */
+    --warning: 28 92% 37%;                   /* #b45309 */
     --warning-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 89%;               /* slightly crisper card edges */
-    --input: 214.3 31.8% 89%;
-    --ring: 172 82% 33%;                     /* teal focus ring */
-    --radius: 0.625rem;                      /* softer corners (Linear/Notion feel) */
+    --border: 218 33% 91%;                   /* #e0e6ef hairline */
+    --input: 218 33% 91%;
+    --ring: 173 82% 32%;                     /* teal focus ring */
+    --radius: 0.75rem;                       /* mock uses 11-15px rounded corners */
   }
 
   .dark {
@@ -74,9 +75,21 @@
     -webkit-font-smoothing: antialiased;
   }
   html {
+    /* Density fix: the app previously ran the browser-default 16px root, which
+       reads "zoomed in" at 100% (users preferred 90% zoom ≈ 14.4px). All
+       Tailwind spacing/type is rem-based, so a 14px root re-scales the whole
+       app to standard dashboard density in one place. */
+    font-size: 14px;
     font-family:
       'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
       'Helvetica Neue', Arial, sans-serif;
+  }
+}
+
+@layer utilities {
+  /* tabular numerals for money/counts — mock uses .tnum everywhere */
+  .tnum {
+    font-variant-numeric: tabular-nums;
   }
 }
 

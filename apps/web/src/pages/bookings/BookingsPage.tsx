@@ -9,14 +9,11 @@ import {
   Search,
   X,
   CalendarDays,
-  CalendarRange,
-  Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -492,50 +489,40 @@ export default function BookingsPage() {
           </div>
         </div>
 
-        {/* Summary KPIs */}
+        {/* Summary KPIs — amounts received from each booking kind (no ADR;
+            actual money in is what the owner tracks). */}
         <div className="grid gap-3 sm:grid-cols-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                <Wallet className="h-3.5 w-3.5" />
-                Total this period
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold tabular-nums">
-                {formatPaise(data?.total_paise ?? 0)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {data?.count ?? 0} {(data?.count ?? 0) === 1 ? 'booking' : 'bookings'}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                <CalendarDays className="h-3.5 w-3.5" />
-                Daily stays
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold tabular-nums">
-                {formatPaise(data?.daily_paise ?? 0)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                <CalendarRange className="h-3.5 w-3.5" />
-                Advance bookings
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold tabular-nums">
-                {formatPaise(data?.advance_paise ?? 0)}
-              </p>
-            </CardContent>
-          </Card>
+          <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+            <div className="text-xs font-bold text-muted-foreground">Total this period</div>
+            <p className="tnum mt-1.5 text-[21px] font-extrabold tracking-tight">
+              {formatPaise(data?.total_paise ?? 0)}
+            </p>
+            <p className="mt-1 text-[11px] font-semibold text-[#98a0ad]">
+              {data?.count ?? 0} {(data?.count ?? 0) === 1 ? 'booking' : 'bookings'}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+            <div className="text-xs font-bold text-muted-foreground">
+              Received — daily stays
+            </div>
+            <p className="tnum mt-1.5 text-[21px] font-extrabold tracking-tight">
+              {formatPaise(data?.daily_paise ?? 0)}
+            </p>
+            <p className="mt-1 text-[11px] font-semibold text-[#98a0ad]">
+              guests paying per night
+            </p>
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+            <div className="text-xs font-bold text-muted-foreground">
+              Received — advance bookings
+            </div>
+            <p className="tnum mt-1.5 text-[21px] font-extrabold tracking-tight">
+              {formatPaise(data?.advance_paise ?? 0)}
+            </p>
+            <p className="mt-1 text-[11px] font-semibold text-[#98a0ad]">
+              tokens for upcoming move-ins
+            </p>
+          </div>
         </div>
 
         {/* Filter row */}
@@ -598,32 +585,32 @@ export default function BookingsPage() {
             </Button>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border bg-card">
+          <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                <tr className="border-b bg-[#fbfcfe]">
+                  <th className="px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad]">
                     Guest
                   </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground sm:table-cell">
+                  <th className="hidden px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] sm:table-cell">
                     Room
                   </th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                  <th className="px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad]">
                     Type
                   </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground md:table-cell">
+                  <th className="hidden px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] md:table-cell">
                     Stay
                   </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground lg:table-cell">
+                  <th className="hidden px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] lg:table-cell">
                     Received
                   </th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground lg:table-cell">
+                  <th className="hidden px-3 py-2.5 text-left text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad] lg:table-cell">
                     Paid to
                   </th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                  <th className="px-3 py-2.5 text-right text-[10.5px] font-extrabold uppercase tracking-wider text-[#98a0ad]">
                     Amount
                   </th>
-                  <th className="px-4 py-3" />
+                  <th className="px-3 py-2.5" />
                 </tr>
               </thead>
               <tbody className="divide-y">

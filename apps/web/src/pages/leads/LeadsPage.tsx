@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Phone, Calendar, Globe, MessageCircle, Search, Wallet } from 'lucide-react';
+import { Plus, Phone, Globe, MessageCircle, Search, Wallet } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext,
@@ -19,8 +19,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
+import { FilterChip, NameAvatar, Pill } from '@/components/ui/redesign';
 import {
   Dialog,
   DialogContent,
@@ -64,6 +63,7 @@ interface Lead {
   phone: string;
   source: LeadSource;
   status: LeadStatus;
+  interested_room_type?: string | null;
   budget_min_paise?: number;
   budget_max_paise?: number;
   advance_paise?: number | null;
@@ -72,6 +72,27 @@ interface Lead {
   assigned_to?: string | null;
   assigned_to_name?: string | null;
   created_at: string;
+}
+
+/** Follow-up state pill — Overdue (red) / Due today (amber) / date (slate). */
+function FollowupPill({ iso }: { iso?: string }) {
+  if (!iso) return null;
+  const due = new Date(iso);
+  const today = new Date();
+  const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dueStart = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  if (dueStart < dayStart) {
+    const days = Math.round((dayStart.getTime() - dueStart.getTime()) / 86_400_000);
+    return <Pill tone="r">Overdue {days}d</Pill>;
+  }
+  if (dueStart.getTime() === dayStart.getTime()) {
+    return <Pill tone="a">Due today</Pill>;
+  }
+  return (
+    <Pill tone="s" dot={false}>
+      📅 {formatDate(iso)}
+    </Pill>
+  );
 }
 
 const COLUMNS: { status: LeadStatus; label: string; tone: string }[] = [
@@ -100,41 +121,53 @@ const SOURCE_LABEL: Record<LeadSource, string> = {
 function LeadCardBody({ lead }: { lead: Lead }) {
   return (
     <>
-      <div className="flex items-start justify-between gap-2">
-        <p className="font-medium leading-tight">{lead.name}</p>
-        <Badge variant="outline" className="text-[10px] shrink-0">
+      <div className="flex items-center gap-1.5">
+        <b className="truncate text-[12.5px] font-bold leading-tight">{lead.name}</b>
+        <Pill
+          tone={lead.source === 'INSTAGRAM' || lead.source === 'META_AD' ? 'v' : 'b'}
+          dot={false}
+          className="shrink-0 px-1.5 text-[9.5px]"
+        >
           {SOURCE_LABEL[lead.source]}
-        </Badge>
+        </Pill>
+        {lead.assigned_to_name && (
+          <span className="ml-auto shrink-0" title={`Assigned to ${lead.assigned_to_name}`}>
+            <NameAvatar name={lead.assigned_to_name} size={20} />
+          </span>
+        )}
       </div>
-      <div className="mt-2 flex items-center gap-1 text-muted-foreground text-xs">
+      <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-[#98a0ad]">
         <Phone className="h-3 w-3" />
         {lead.phone}
       </div>
+      {lead.interested_room_type && (
+        <div className="mt-1 text-[11px] text-muted-foreground">
+          wants <b className="text-foreground">{lead.interested_room_type}</b>
+        </div>
+      )}
       {lead.status === 'BOOKED' && typeof lead.advance_paise === 'number' && lead.advance_paise > 0 && (
-        <div className="mt-1 flex items-center gap-1 text-teal-700 text-xs font-medium">
+        <div className="mt-1 flex items-center gap-1 text-xs font-bold text-accent">
           <Wallet className="h-3 w-3" />
           Advance ₹{(lead.advance_paise / 100).toLocaleString('en-IN')}
         </div>
       )}
-      <a
-        href={whatsappLink(
-          lead.phone,
-          `Hi ${lead.name}, thanks for your interest in our PG! How can we help you with your stay?`,
-        )}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-        className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-[#25D366]/10 px-2 py-1 text-xs font-medium text-[#128C7E] hover:bg-[#25D366]/20"
-      >
-        <MessageCircle className="h-3 w-3" /> WhatsApp
-      </a>
-      {lead.next_followup_at && (
-        <div className="mt-1 flex items-center gap-1 text-muted-foreground text-xs">
-          <Calendar className="h-3 w-3" />
-          Follow up: {formatDate(lead.next_followup_at)}
-        </div>
-      )}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <FollowupPill iso={lead.next_followup_at} />
+        <a
+          href={whatsappLink(
+            lead.phone,
+            `Hi ${lead.name}, thanks for your interest in our PG! How can we help you with your stay?`,
+          )}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-lg border border-[#c8ecd5] text-[#128C7E] hover:bg-[#eafaf0]"
+          title="WhatsApp"
+        >
+          <MessageCircle className="h-3 w-3" />
+        </a>
+      </div>
     </>
   );
 }
@@ -624,23 +657,16 @@ export default function LeadsPage() {
         <TabsContent value="pipeline" className="mt-4 space-y-6">
       {/* Quick filter chips — mutually exclusive one-shot narrowers */}
       <div className="flex flex-wrap gap-1.5">
-        {QUICK_FILTERS.map((f) => {
-          const active = quickFilter === f.key;
-          return (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setQuickFilter(f.key)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                active
-                  ? 'border-accent bg-accent text-accent-foreground'
-                  : 'border-input bg-background hover:bg-muted'
-              }`}
-            >
-              {f.label}
-            </button>
-          );
-        })}
+        {QUICK_FILTERS.map((f) => (
+          <FilterChip
+            key={f.key}
+            active={quickFilter === f.key}
+            onClick={() => setQuickFilter(f.key)}
+            warn={f.key === 'DUE_TODAY'}
+          >
+            {f.label}
+          </FilterChip>
+        ))}
         {filteredLeads.length !== leads.length && (
           <span className="ml-2 self-center text-xs text-muted-foreground">
             {filteredLeads.length} of {leads.length}
@@ -674,21 +700,7 @@ export default function LeadsPage() {
         </div>
       </div>
 
-      {/* Pipeline stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        {COLUMNS.map(({ status, label }) => (
-          <Card key={status}>
-            <CardContent className="pt-4 pb-3">
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className="mt-0.5 text-xl font-bold tabular-nums">
-                {byStatus(status).length}
-              </p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Kanban board */}
+      {/* Kanban board — column headers carry the counts (mock layout) */}
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
           {Array.from({ length: 7 }).map((_, i) => (
@@ -709,10 +721,10 @@ export default function LeadsPage() {
         <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
             {COLUMNS.map(({ status, label, tone }) => (
-              <div key={status} className="space-y-2">
-                <div className="flex items-center justify-between text-xs font-medium">
+              <div key={status} className="space-y-1.5">
+                <div className="flex items-center justify-between px-0.5 text-[11.5px] font-extrabold text-muted-foreground">
                   <span>{label}</span>
-                  <span className="text-muted-foreground">{byStatus(status).length}</span>
+                  <span>{byStatus(status).length}</span>
                 </div>
                 <KanbanColumn
                   status={status}
