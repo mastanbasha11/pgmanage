@@ -27,15 +27,24 @@ import { useAppStore } from '../../lib/store';
 import {
   Button,
   Card,
+  ConfirmDialog,
   Empty,
   Field,
   Header,
   IconButton,
   Loading,
-  rupees,
-  Screen,
+  MoneyField,
+  Row,
+  Sheet,
+  Select,
   StatusPill,
+  Screen,
+  Textarea,
+  rupees,
+  formatDateHuman,
+  DateField,
 } from '../../components/ui';
+import { useCheckout, useRecordRefund } from '../../lib/hooks/tenants';
 
 interface ResidentDetail {
   id: string;
@@ -54,8 +63,12 @@ interface ResidentDetail {
   active_rent_plan?: {
     security_deposit_paise?: number;
     advance_paid_paise?: number;
+    non_refundable_advance_paise?: number;
     monthly_rent_paise?: number;
   } | null;
+  security_deposit_paise?: number;
+  advance_paid_paise?: number;
+  non_refundable_advance_paise?: number;
   // Editable profile fields the Edit dialog touches.
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
@@ -89,6 +102,8 @@ export default function ResidentDetailScreen() {
   const { canRecordPayments } = useAppStore();
   const [showNotice, setShowNotice] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showRefund, setShowRefund] = useState(false);
+  const [showCheckout, setShowCheckout] = useState(false);
   const [idUploading, setIdUploading] = useState(false);
 
   const { data: r, isLoading, refetch, isRefetching } = useQuery({
@@ -160,11 +175,12 @@ export default function ResidentDetailScreen() {
           </Text>
           <Text style={styles.metaLine}>Moved in: {r.move_in_date}</Text>
           <Text style={styles.metaLine}>
-            Rent: {rupees(r.active_rent_plan?.monthly_rent_paise ?? r.monthly_rent_paise ?? 0)}
-            /mo · Deposit:{' '}
-            {rupees(r.active_rent_plan?.security_deposit_paise ?? 0)}
+            Rent: {rupees(r.active_rent_plan?.monthly_rent_paise ?? r.monthly_rent_paise ?? 0)}/mo
           </Text>
         </Card>
+
+        {/* Deposits & advance summary — mirrors web's Deposit&Advance card. */}
+        <DepositCard r={r} />
 
         {/* Actions */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
@@ -187,6 +203,22 @@ export default function ResidentDetailScreen() {
               iconName="calendar-outline"
               label={r.notice_given_date ? 'Edit notice' : t('res.give_notice')}
               onPress={() => setShowNotice(true)}
+            />
+          )}
+          {isActive && (
+            <Button
+              variant="secondary"
+              iconName="log-out-outline"
+              label="Check out"
+              onPress={() => setShowCheckout(true)}
+            />
+          )}
+          {!isActive && (
+            <Button
+              variant="secondary"
+              iconName="return-down-back-outline"
+              label="Refund"
+              onPress={() => setShowRefund(true)}
             />
           )}
           <Button
@@ -266,6 +298,19 @@ export default function ResidentDetailScreen() {
           }}
         />
       )}
+
+      <RefundSheet
+        open={showRefund}
+        tenantId={r.id}
+        tenantName={r.name}
+        onClose={() => setShowRefund(false)}
+      />
+      <CheckoutSheet
+        open={showCheckout}
+        tenantId={r.id}
+        tenantName={r.name}
+        onClose={() => setShowCheckout(false)}
+      />
     </Screen>
   );
 
@@ -631,6 +676,198 @@ function EditTenantModal({
     </Modal>
   );
 }
+
+// ── Deposit summary card ────────────────────────────────────────────────────
+
+function DepositCard({ r }: { r: ResidentDetail }) {
+  const security = r.active_rent_plan?.security_deposit_paise ?? r.security_deposit_paise ?? 0;
+  const advance = r.active_rent_plan?.advance_paid_paise ?? r.advance_paid_paise ?? 0;
+  const nonRef =
+    r.active_rent_plan?.non_refundable_advance_paise ?? r.non_refundable_advance_paise ?? 0;
+  const held = security + advance;
+  return (
+    <Card>
+      <Text style={styles.sectionTitle}>Deposit &amp; Advance</Text>
+      <Row justify="space-between" style={depositStyles.line}>
+        <Text style={depositStyles.label}>Security deposit</Text>
+        <Text style={depositStyles.value}>{rupees(security)}</Text>
+      </Row>
+      <Row justify="space-between" style={depositStyles.line}>
+        <Text style={depositStyles.label}>Refundable advance</Text>
+        <Text style={depositStyles.value}>{rupees(advance)}</Text>
+      </Row>
+      <Row justify="space-between" style={depositStyles.line}>
+        <Text style={depositStyles.label}>Non-refundable advance</Text>
+        <Text style={depositStyles.value}>{rupees(nonRef)}</Text>
+      </Row>
+      <Row justify="space-between" style={{ ...depositStyles.line, borderBottomWidth: 0 }}>
+        <Text style={[depositStyles.label, { fontWeight: '700', color: colors.text }]}>
+          Total held (refundable)
+        </Text>
+        <Text style={[depositStyles.value, { fontSize: fontSize.h3, color: colors.accent }]}>
+          {rupees(held)}
+        </Text>
+      </Row>
+    </Card>
+  );
+}
+
+// ── Refund sheet ────────────────────────────────────────────────────────────
+
+function RefundSheet({
+  open,
+  onClose,
+  tenantId,
+  tenantName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantId: string;
+  tenantName: string;
+}) {
+  const refund = useRecordRefund(tenantId);
+  const [amount, setAmount] = useState(0);
+  const [paidBy, setPaidBy] = useState('');
+  const [date, setDate] = useState<string | null>(new Date().toISOString().slice(0, 10));
+  const [notes, setNotes] = useState('');
+  const [mode, setMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE'>('UPI');
+  const [ref, setRef] = useState('');
+
+  const submit = async () => {
+    if (!amount) {
+      require('react-native').Alert.alert('Enter refund amount');
+      return;
+    }
+    if (!date) {
+      require('react-native').Alert.alert('Pick refund date');
+      return;
+    }
+    try {
+      await refund.mutateAsync({
+        refund_amount_paise: amount,
+        refund_paid_by: paidBy || undefined,
+        refund_date: date,
+        notes: notes || undefined,
+        payment_mode: mode,
+        reference_number: ref || undefined,
+      });
+      onClose();
+      setAmount(0);
+      setRef('');
+      setNotes('');
+    } catch (e) {
+      require('react-native').Alert.alert('Refund failed', getApiError(e));
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title={`Refund · ${tenantName}`}>
+      <MoneyField label="Refund amount" required valuePaise={amount} onChangeAmount={setAmount} />
+      <Select<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE'>
+        label="Payment mode"
+        value={mode}
+        onChange={setMode}
+        options={[
+          { value: 'CASH', label: 'Cash' },
+          { value: 'UPI', label: 'UPI' },
+          { value: 'BANK_TRANSFER', label: 'Bank transfer' },
+          { value: 'CARD', label: 'Card' },
+          { value: 'CHEQUE', label: 'Cheque' },
+        ]}
+      />
+      <Field label="Reference # (optional)" value={ref} onChangeText={setRef} placeholder="UPI ref / cheque #" />
+      <DateField label="Refund date" required value={date} onChange={setDate} />
+      <Field label="Paid by (staff name)" value={paidBy} onChangeText={setPaidBy} />
+      <Textarea label="Notes" value={notes} onChangeText={setNotes} rows={3} />
+      <Button label="Record refund" loading={refund.isPending} onPress={submit} block />
+    </Sheet>
+  );
+}
+
+// ── Checkout sheet ─────────────────────────────────────────────────────────
+
+function CheckoutSheet({
+  open,
+  onClose,
+  tenantId,
+  tenantName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantId: string;
+  tenantName: string;
+}) {
+  const checkout = useCheckout(tenantId);
+  const [date, setDate] = useState<string | null>(new Date().toISOString().slice(0, 10));
+  const [finalPaid, setFinalPaid] = useState(0);
+  const [refundAmt, setRefundAmt] = useState(0);
+  const [refundBy, setRefundBy] = useState('');
+  const [notes, setNotes] = useState('');
+  const [confirm, setConfirm] = useState(false);
+
+  const submit = async () => {
+    if (!date) return;
+    try {
+      await checkout.mutateAsync({
+        actual_move_out_date: date,
+        final_payment_amount_paise: finalPaid || undefined,
+        refund_amount_paise: refundAmt || undefined,
+        refund_paid_by: refundBy || undefined,
+        notes: notes || undefined,
+      });
+      setConfirm(false);
+      onClose();
+    } catch (e) {
+      setConfirm(false);
+      require('react-native').Alert.alert('Checkout failed', getApiError(e));
+    }
+  };
+
+  return (
+    <>
+      <Sheet open={open} onClose={onClose} title={`Check out · ${tenantName}`}>
+        <DateField label="Move-out date" required value={date} onChange={setDate} />
+        <MoneyField
+          label="Final payment collected (optional)"
+          valuePaise={finalPaid}
+          onChangeAmount={setFinalPaid}
+        />
+        <MoneyField
+          label="Refund amount (optional)"
+          valuePaise={refundAmt}
+          onChangeAmount={setRefundAmt}
+        />
+        {refundAmt > 0 && (
+          <Field label="Refund paid by" value={refundBy} onChangeText={setRefundBy} />
+        )}
+        <Textarea label="Notes" value={notes} onChangeText={setNotes} rows={3} />
+        <Button
+          label="Check out resident"
+          variant="danger"
+          iconName="log-out-outline"
+          onPress={() => setConfirm(true)}
+          block
+        />
+      </Sheet>
+      <ConfirmDialog
+        open={confirm}
+        onClose={() => setConfirm(false)}
+        onConfirm={submit}
+        title="Confirm checkout?"
+        message={`This moves ${tenantName} to CHECKED_OUT and frees their bed. Cannot be undone easily.`}
+        confirmLabel="Check out"
+        confirmVariant="danger"
+        loading={checkout.isPending}
+      />
+    </>
+  );
+}
+
+const depositStyles = StyleSheet.create({
+  line: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border },
+  label: { fontSize: fontSize.small, color: colors.textMuted, fontWeight: '600' },
+  value: { fontSize: fontSize.body, color: colors.text, fontWeight: '700' },
+});
 
 const editStyles = StyleSheet.create({
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },

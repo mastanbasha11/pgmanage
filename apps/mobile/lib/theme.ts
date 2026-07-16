@@ -14,14 +14,20 @@
 export const colors = {
   // brand
   primary: '#0F172A', // slate-900
+  primarySoft: '#334155', // slate-700 for secondary text on brand surfaces
   accent: '#0D9488', // teal-600
+  accentSoft: '#0F766E', // teal-700 (pressed)
   accentDim: '#5EEAD4', // teal-300
+  accentBg: '#CCFBF1', // teal-100
 
   // surfaces
   bg: '#F8FAFC', // slate-50
   surface: '#FFFFFF',
   surfaceMuted: '#F1F5F9', // slate-100
+  surfaceMuted2: '#E2E8F0', // slate-200 — for chip-hover
   border: '#E2E8F0', // slate-200
+  borderStrong: '#CBD5E1', // slate-300
+  overlay: 'rgba(15, 23, 42, 0.55)', // sheet backdrop
 
   // text
   text: '#0F172A',
@@ -37,6 +43,10 @@ export const colors = {
   dangerBg: '#FEE2E2', // red-100
   info: '#2563EB', // blue-600
   infoBg: '#DBEAFE', // blue-100
+  purple: '#9333EA',
+  purpleBg: '#F3E8FF',
+  pink: '#DB2777',
+  pinkBg: '#FCE7F3',
 
   // bed colours per product spec: green / yellow / red
   bedVacant: '#16A34A',

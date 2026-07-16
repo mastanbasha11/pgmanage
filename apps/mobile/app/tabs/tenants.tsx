@@ -15,7 +15,7 @@ import {
   View,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../../lib/api';
@@ -23,7 +23,7 @@ import { useAppStore } from '../../lib/store';
 import { t } from '../../lib/i18n';
 import { speak } from '../../lib/voice';
 import { colors, radius, space, type as fontSize, TOUCH_TARGET } from '../../lib/theme';
-import { Empty, Header, Loading, StatusPill, rupees, Screen } from '../../components/ui';
+import { Empty, Fab, Header, Loading, StatusPill, rupees, Screen } from '../../components/ui';
 import { buildTenantParams, type StatusFilter } from '../../lib/tenants-filter';
 
 interface Resident {
@@ -42,13 +42,21 @@ interface Resident {
 
 export default function ResidentsTab() {
   const router = useRouter();
-  const { selectedPropertyId, voiceGuidance } = useAppStore();
+  const params = useLocalSearchParams<{ openCheckin?: string }>();
+  const { selectedPropertyId, voiceGuidance, canRecordPayments } = useAppStore();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<StatusFilter>('ACTIVE');
 
   useEffect(() => {
     if (voiceGuidance) speak(t('res.title'));
   }, [voiceGuidance]);
+
+  // Deep-link handler — dashboard sends ?openCheckin=1 for the Check-in quick action.
+  useEffect(() => {
+    if (params.openCheckin === '1') {
+      router.push('/tenants/checkin');
+    }
+  }, [params.openCheckin, router]);
 
   const { data, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['residents-mobile', selectedPropertyId, search, filter],
@@ -144,6 +152,14 @@ export default function ResidentsTab() {
               }
             />
           }
+        />
+      )}
+
+      {canRecordPayments() && (
+        <Fab
+          name="add"
+          accessibilityLabel="Check-in new resident"
+          onPress={() => router.push('/tenants/checkin')}
         />
       )}
     </Screen>

@@ -96,6 +96,11 @@ export default function SettingsTab() {
           <Text style={styles.label}>Manage</Text>
           <View style={{ gap: space.xs, marginTop: space.sm }}>
             <Row
+              iconName="business-outline"
+              label="Properties & Setup"
+              onPress={() => router.push('/properties')}
+            />
+            <Row
               iconName="megaphone-outline"
               label="Leads"
               onPress={() => router.push('/tabs/leads')}

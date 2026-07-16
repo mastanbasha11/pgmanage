@@ -75,6 +75,20 @@ export default function RootLayout() {
               <Stack.Screen name="tenant-portal" />
               <Stack.Screen name="residents/[id]" />
               <Stack.Screen name="payments/new" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="properties/index" />
+              <Stack.Screen name="properties/setup" />
+              <Stack.Screen name="leads/index" />
+              <Stack.Screen name="leads/[id]" />
+              <Stack.Screen name="bookings/index" />
+              <Stack.Screen name="inbox/index" />
+              <Stack.Screen name="roi/index" />
+              <Stack.Screen name="settings/team" />
+              <Stack.Screen name="settings/menu" />
+              <Stack.Screen name="settings/whatsapp" />
+              <Stack.Screen name="settings/website" />
+              <Stack.Screen name="settings/jobs" />
+              <Stack.Screen name="settings/audit" />
+              <Stack.Screen name="messages" />
             </Stack>
           </QueryClientProvider>
         </SafeAreaProvider>

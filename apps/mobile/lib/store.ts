@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { secureStorage } from './storage';
 import { setLocale, type Lang } from './i18n';
 
-export type Role = 'OWNER' | 'PARTNER' | 'PROPERTY_MANAGER' | 'SUPERVISOR';
+export type Role = 'OWNER' | 'PARTNER' | 'PROPERTY_MANAGER' | 'SUPERVISOR' | 'MARKETING';
 
 export interface AuthUser {
   user_id: string;
@@ -51,6 +51,8 @@ interface AppState {
    * PATCH/DELETE /payments and /bookings (OWNER|PARTNER|PROPERTY_MANAGER).
    */
   canRecordPayments: () => boolean;
+  canApproveExpenses: () => boolean;
+  canManageStaff: () => boolean;
 }
 
 export const useAppStore = create<AppState>()(
@@ -89,6 +91,16 @@ export const useAppStore = create<AppState>()(
       canRecordPayments: () => {
         const role = get().user?.role;
         return role === 'OWNER' || role === 'PARTNER' || role === 'PROPERTY_MANAGER';
+      },
+
+      canApproveExpenses: () => {
+        const role = get().user?.role;
+        return role === 'OWNER' || role === 'PARTNER';
+      },
+
+      canManageStaff: () => {
+        const role = get().user?.role;
+        return role === 'OWNER' || role === 'PARTNER';
       },
     }),
     {
