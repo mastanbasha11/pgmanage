@@ -1,7 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Phone, Calendar, Globe, MessageCircle, Search } from 'lucide-react';
+import { Plus, Phone, Calendar, Globe, MessageCircle, Search, Wallet } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  DndContext,
+  type DragEndEvent,
+  type DragStartEvent,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -34,7 +46,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import WebsiteLeadsView from './WebsiteLeadsView';
 import { useNewWebsiteLeadCount } from '@/hooks/useWebsiteLeads';
 
-type LeadStatus = 'NEW' | 'CONTACTED' | 'SITE_VISITED' | 'NEGOTIATING' | 'CONVERTED' | 'LOST';
+type LeadStatus =
+  | 'NEW'
+  | 'CONTACTED'
+  | 'SITE_VISITED'
+  | 'NEGOTIATING'
+  | 'BOOKED'
+  | 'CONVERTED'
+  | 'LOST';
 type LeadSource = 'META_AD' | 'INSTAGRAM' | 'REFERRAL' | 'WALKIN' | 'JUSTDIAL' | 'WEBSITE' | 'OTHER';
 
 interface Lead {
@@ -45,6 +64,7 @@ interface Lead {
   status: LeadStatus;
   budget_min_paise?: number;
   budget_max_paise?: number;
+  advance_paise?: number | null;
   next_followup_at?: string;
   created_at: string;
 }
@@ -54,6 +74,7 @@ const COLUMNS: { status: LeadStatus; label: string; tone: string }[] = [
   { status: 'CONTACTED', label: 'Contacted', tone: 'bg-amber-50 border-amber-200' },
   { status: 'SITE_VISITED', label: 'Site Visited', tone: 'bg-violet-50 border-violet-200' },
   { status: 'NEGOTIATING', label: 'Negotiating', tone: 'bg-orange-50 border-orange-200' },
+  { status: 'BOOKED', label: 'Booked', tone: 'bg-teal-50 border-teal-200' },
   { status: 'CONVERTED', label: 'Converted', tone: 'bg-emerald-50 border-emerald-200' },
   { status: 'LOST', label: 'Lost', tone: 'bg-rose-50 border-rose-200' },
 ];
@@ -68,9 +89,12 @@ const SOURCE_LABEL: Record<LeadSource, string> = {
   OTHER: 'Other',
 };
 
-function LeadCard({ lead }: { lead: Lead }) {
+/** Presentational card body — shared between the draggable card and the
+ *  DragOverlay clone. Kept separate so the overlay renders identically
+ *  without inheriting drag listeners. */
+function LeadCardBody({ lead }: { lead: Lead }) {
   return (
-    <div className="rounded-lg border bg-card p-3 text-sm shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+    <>
       <div className="flex items-start justify-between gap-2">
         <p className="font-medium leading-tight">{lead.name}</p>
         <Badge variant="outline" className="text-[10px] shrink-0">
@@ -81,6 +105,12 @@ function LeadCard({ lead }: { lead: Lead }) {
         <Phone className="h-3 w-3" />
         {lead.phone}
       </div>
+      {lead.status === 'BOOKED' && typeof lead.advance_paise === 'number' && lead.advance_paise > 0 && (
+        <div className="mt-1 flex items-center gap-1 text-teal-700 text-xs font-medium">
+          <Wallet className="h-3 w-3" />
+          Advance ₹{(lead.advance_paise / 100).toLocaleString('en-IN')}
+        </div>
+      )}
       <a
         href={whatsappLink(
           lead.phone,
@@ -89,6 +119,7 @@ function LeadCard({ lead }: { lead: Lead }) {
         target="_blank"
         rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-[#25D366]/10 px-2 py-1 text-xs font-medium text-[#128C7E] hover:bg-[#25D366]/20"
       >
         <MessageCircle className="h-3 w-3" /> WhatsApp
@@ -97,6 +128,59 @@ function LeadCard({ lead }: { lead: Lead }) {
         <div className="mt-1 flex items-center gap-1 text-muted-foreground text-xs">
           <Calendar className="h-3 w-3" />
           Follow up: {formatDate(lead.next_followup_at)}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Draggable Kanban card. The `useDraggable` listeners attach to the outer
+ *  div; nested interactive controls (WhatsApp link) call
+ *  `stopPropagation()` on their own pointer events so they still work. */
+function DraggableLeadCard({ lead }: { lead: Lead }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: lead.id,
+    data: { status: lead.status },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={`rounded-lg border bg-card p-3 text-sm shadow-sm cursor-grab active:cursor-grabbing transition-shadow ${
+        isDragging ? 'opacity-40' : 'hover:shadow-md'
+      }`}
+    >
+      <LeadCardBody lead={lead} />
+    </div>
+  );
+}
+
+/** Droppable column body. Renders the drop-target styling when a card is
+ *  hovering, and the empty-state placeholder when the column has no cards. */
+function KanbanColumn({
+  status,
+  tone,
+  leads,
+}: {
+  status: LeadStatus;
+  tone: string;
+  leads: Lead[];
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `col-${status}`, data: { status } });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`min-h-32 space-y-2 rounded-lg border ${tone} p-2 transition-colors ${
+        isOver ? 'ring-2 ring-accent/50 bg-accent/5' : ''
+      }`}
+    >
+      {leads.map((lead) => (
+        <DraggableLeadCard key={lead.id} lead={lead} />
+      ))}
+      {leads.length === 0 && (
+        <div className="flex h-16 items-center justify-center text-xs text-muted-foreground">
+          {isOver ? 'Drop to move here' : 'None'}
         </div>
       )}
     </div>
@@ -316,6 +400,56 @@ export default function LeadsPage() {
   }, [leads, pipelineSearch, sourceFilter]);
   const byStatus = (s: LeadStatus) => filteredLeads.filter((l) => l.status === s);
 
+  // ── Drag-to-move ────────────────────────────────────────────────────────
+  // Optimistic status update: patch the cache immediately so the card jumps
+  // to the new column with no wait, then fire the PATCH. On error, invalidate
+  // to snap the cache back to the server truth.
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const updateStatus = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: LeadStatus }) =>
+      api.patch(`/leads/${id}`, { status }).then((r) => r.data),
+    onMutate: async ({ id, status }) => {
+      await qc.cancelQueries({ queryKey: ['leads'] });
+      const prev = qc.getQueryData<{ items: Lead[] }>(['leads']);
+      if (prev) {
+        qc.setQueryData<{ items: Lead[] }>(['leads'], {
+          ...prev,
+          items: prev.items.map((l) => (l.id === id ? { ...l, status } : l)),
+        });
+      }
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['leads'], ctx.prev);
+      toast({
+        title: "Couldn't move lead",
+        description: 'Restoring previous column.',
+        variant: 'destructive',
+      });
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['leads'] }),
+  });
+
+  // A tiny activation distance stops accidental drags on plain clicks —
+  // important because the card itself is the drag handle.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor),
+  );
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const activeDraggedLead = activeDragId ? leads.find((l) => l.id === activeDragId) : null;
+
+  const onDragStart = (e: DragStartEvent) => setActiveDragId(String(e.active.id));
+  const onDragEnd = (e: DragEndEvent) => {
+    setActiveDragId(null);
+    const draggedId = String(e.active.id);
+    const fromStatus = e.active.data.current?.status as LeadStatus | undefined;
+    const toStatus = e.over?.data.current?.status as LeadStatus | undefined;
+    if (!toStatus || !fromStatus || fromStatus === toStatus) return;
+    updateStatus.mutate({ id: draggedId, status: toStatus });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -372,7 +506,7 @@ export default function LeadsPage() {
       </div>
 
       {/* Pipeline stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         {COLUMNS.map(({ status, label }) => (
           <Card key={status}>
             <CardContent className="pt-4 pb-3">
@@ -387,8 +521,8 @@ export default function LeadsPage() {
 
       {/* Kanban board */}
       {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+          {Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="h-40 animate-pulse rounded-lg bg-muted" />
           ))}
         </div>
@@ -403,26 +537,28 @@ export default function LeadsPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {COLUMNS.map(({ status, label, tone }) => (
-            <div key={status} className="space-y-2">
-              <div className="flex items-center justify-between text-xs font-medium">
-                <span>{label}</span>
-                <span className="text-muted-foreground">{byStatus(status).length}</span>
+        <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+            {COLUMNS.map(({ status, label, tone }) => (
+              <div key={status} className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-medium">
+                  <span>{label}</span>
+                  <span className="text-muted-foreground">{byStatus(status).length}</span>
+                </div>
+                <KanbanColumn status={status} tone={tone} leads={byStatus(status)} />
               </div>
-              <div className={`min-h-32 space-y-2 rounded-lg border ${tone} p-2`}>
-                {byStatus(status).map((lead) => (
-                  <LeadCard key={lead.id} lead={lead} />
-                ))}
-                {byStatus(status).length === 0 && (
-                  <div className="flex h-16 items-center justify-center text-xs text-muted-foreground">
-                    None
-                  </div>
-                )}
+            ))}
+          </div>
+          {/* The overlay renders the card at the pointer while dragging so
+              it stays visible even as the source card fades to 40% opacity. */}
+          <DragOverlay>
+            {activeDraggedLead ? (
+              <div className="rounded-lg border bg-card p-3 text-sm shadow-lg ring-2 ring-accent w-64">
+                <LeadCardBody lead={activeDraggedLead} />
               </div>
-            </div>
-          ))}
-        </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       )}
         </TabsContent>
 
