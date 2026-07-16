@@ -38,7 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useProperties } from '@/hooks/useProperties';
+import { useProperties, useRoomTypes } from '@/hooks/useProperties';
 import { useAuthStore } from '@/store/auth';
 import { useToast } from '@/hooks/useToast';
 import { formatDate, rupeesToPaise, normaliseIndianPhone, PHONE_HELP, whatsappLink } from '@/lib/utils';
@@ -213,6 +213,93 @@ const leadSchema = z.object({
 
 type LeadFormData = z.infer<typeof leadSchema>;
 
+/**
+ * Room-type picker for the Add Lead dialog. Pulls the actual configured
+ * room types for the selected property so reps pick a real option instead
+ * of typing free text that later has to be reconciled by hand. An "Other…"
+ * option keeps the escape hatch open for one-off leads whose interest
+ * doesn't match any configured type — selecting it reveals a text input.
+ *
+ * Falls back to a plain text input entirely when the property has no
+ * room_types configured yet (a common state during property onboarding),
+ * so this component never blocks the flow.
+ */
+const OTHER_ROOM_TYPE = '__other__';
+
+function RoomTypeField({
+  propertyId,
+  value,
+  onChange,
+}: {
+  propertyId?: string;
+  value?: string;
+  onChange: (v: string) => void;
+}) {
+  const { data, isLoading } = useRoomTypes(propertyId);
+  const items = data?.items ?? [];
+  const configuredNames = items.map((i) => i.name);
+  // A value is "custom" when the rep chose Other… OR when we've hydrated
+  // from an existing lead whose room type is no longer in the configured
+  // list (e.g. the type was renamed / removed since).
+  const isCustom = !!value && !configuredNames.includes(value);
+  const selectValue = isCustom ? OTHER_ROOM_TYPE : value ?? '';
+
+  // Property not chosen yet OR the property has no configured room types.
+  // Degrade to a plain text input so the rep isn't blocked either way.
+  if (!propertyId || (!isLoading && items.length === 0)) {
+    return (
+      <div>
+        <Label>Interested room type</Label>
+        <Input
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Single AC / Double Sharing"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div>
+        <Label>Interested room type</Label>
+        <Select
+          value={selectValue}
+          onValueChange={(v) => {
+            if (v === OTHER_ROOM_TYPE) {
+              // Clear so the "Other" input starts empty; the rep types
+              // the actual value in the text field below.
+              onChange('');
+            } else {
+              onChange(v);
+            }
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder={isLoading ? 'Loading…' : 'Pick a room type'} />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((rt) => (
+              <SelectItem key={rt.id} value={rt.name}>
+                {rt.name}
+              </SelectItem>
+            ))}
+            <SelectItem value={OTHER_ROOM_TYPE}>Other…</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {selectValue === OTHER_ROOM_TYPE && (
+        <Input
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Type the room type"
+          autoFocus
+        />
+      )}
+    </div>
+  );
+}
+
 function CreateLeadDialog({
   open,
   onClose,
@@ -355,13 +442,11 @@ function CreateLeadDialog({
               <Input {...register('budget_max_rupees')} type="number" placeholder="9000" />
             </div>
           </div>
-          <div>
-            <Label>Interested room type</Label>
-            <Input
-              {...register('interested_room_type')}
-              placeholder="Single AC / Double Sharing"
-            />
-          </div>
+          <RoomTypeField
+            propertyId={watch('property_id')}
+            value={watch('interested_room_type')}
+            onChange={(v) => setValue('interested_room_type', v)}
+          />
           <div>
             <Label>Expected move-in</Label>
             <Input {...register('expected_move_in_date')} type="date" />
