@@ -115,6 +115,10 @@ class LeadCreate(BaseModel):
     whatsapp_number: str | None = None
     source: str = "OTHER"
     source_campaign_name: str | None = None
+    # Meta ad attribution — set automatically by the WhatsApp webhook once
+    # that flow lands; safe to pass manually for now.
+    source_ad_id: str | None = None
+    source_adset_name: str | None = None
     interested_room_type: str | None = None
     interested_bed_count: int | None = None
     budget_min_paise: int | None = None
@@ -131,6 +135,26 @@ class LeadUpdate(BaseModel):
     assigned_to: UUID | None = None
     next_followup_at: datetime | None = None
     lost_reason: str | None = None
+    # Editable on the detail drawer too so reps can correct/complete
+    # info without re-entering the whole lead.
+    name: str | None = None
+    phone: str | None = None
+    whatsapp_number: str | None = None
+    email: str | None = None
+    source: str | None = None
+    source_campaign_name: str | None = None
+    source_ad_id: str | None = None
+    source_adset_name: str | None = None
+    interested_room_type: str | None = None
+    interested_bed_count: int | None = None
+    budget_min_paise: int | None = None
+    budget_max_paise: int | None = None
+    expected_move_in_date: date | None = None
+    # BOOKED status carries an advance payment — set both together via the
+    # /leads/{id}/book endpoint, or manually here if a rep is correcting
+    # history.
+    advance_paise: int | None = None
+    advance_paid_at: datetime | None = None
 
 
 class LeadActivityCreate(BaseModel):
@@ -148,24 +172,28 @@ async def create_lead(
     result = await db.execute(
         text("""
             INSERT INTO leads (org_id, property_id, name, phone, whatsapp_number, source,
-                source_campaign_name, interested_room_type, interested_bed_count,
+                source_campaign_name, source_ad_id, source_adset_name,
+                interested_room_type, interested_bed_count,
                 budget_min_paise, budget_max_paise, expected_move_in_date,
-                status, notes, assigned_to, next_followup_at)
+                status, notes, assigned_to, next_followup_at, created_by)
             VALUES (:org_id, :pid, :name, :phone, :wa_num, CAST(:source AS lead_source_enum),
-                :campaign, :room_type, :bed_count,
+                :campaign, :ad_id, :adset,
+                :room_type, :bed_count,
                 :budget_min, :budget_max, :move_in,
-                'NEW'::lead_status_enum, :notes, :assigned_to, :followup)
+                'NEW'::lead_status_enum, :notes, :assigned_to, :followup, :created_by)
             RETURNING id
         """),
         {
             "org_id": str(ctx.org_id), "pid": str(body.property_id),
             "name": body.name, "phone": body.phone, "wa_num": body.whatsapp_number,
             "source": body.source, "campaign": body.source_campaign_name,
+            "ad_id": body.source_ad_id, "adset": body.source_adset_name,
             "room_type": body.interested_room_type, "bed_count": body.interested_bed_count,
             "budget_min": body.budget_min_paise, "budget_max": body.budget_max_paise,
             "move_in": body.expected_move_in_date, "notes": body.notes,
             "assigned_to": str(body.assigned_to) if body.assigned_to else None,
             "followup": body.next_followup_at,
+            "created_by": str(ctx.user_id),
         },
     )
     lead_id = result.scalar_one()
@@ -328,7 +356,12 @@ async def update_lead(
     )).mappings().fetchone()
     changes = diff_changes(dict(old_lead) if old_lead else {}, updates)
 
-    lead_enum_columns = {"status": "lead_status_enum"}
+    # Any lead column typed as a Postgres enum needs an explicit CAST so a
+    # bare string param doesn't blow up as "text = lead_status_enum".
+    lead_enum_columns = {
+        "status": "lead_status_enum",
+        "source": "lead_source_enum",
+    }
     set_clauses = ", ".join(
         f"{k} = CAST(:{k} AS {lead_enum_columns[k]})" if k in lead_enum_columns else f"{k} = :{k}"
         for k in updates

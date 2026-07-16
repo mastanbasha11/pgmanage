@@ -44,7 +44,10 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
         ("rent_status_enum", "'PAID','PARTIAL','UNPAID','WAIVED'"),
         ("expense_approval_enum", "'PENDING','APPROVED','REJECTED'"),
         ("lead_source_enum", "'META_AD','INSTAGRAM','REFERRAL','WALKIN','JUSTDIAL','WEBSITE','OTHER'"),
-        ("lead_status_enum", "'NEW','CONTACTED','SITE_VISITED','NEGOTIATING','CONVERTED','LOST'"),
+        # BOOKED sits between NEGOTIATING and CONVERTED: rep received an
+        # advance payment, tenant hasn't physically moved in yet. Actual
+        # tenant-record creation flips the status to CONVERTED.
+        ("lead_status_enum", "'NEW','CONTACTED','SITE_VISITED','NEGOTIATING','BOOKED','CONVERTED','LOST'"),
         ("lead_activity_type_enum", "'NOTE','CALL','VISIT','WA_MESSAGE'"),
         ("announcement_target_enum", "'ALL_TENANTS','FLOOR','ROOM','INDIVIDUAL'"),
         ("announcement_status_enum", "'DRAFT','SCHEDULED','SENT','FAILED'"),
@@ -71,6 +74,9 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
     # above is a no-op and any new values silently never appear. Backfill
     # them with idempotent ADD VALUE IF NOT EXISTS.
     await db.execute(text("ALTER TYPE payment_type_enum ADD VALUE IF NOT EXISTS 'POWER'"))
+    await db.execute(text(
+        "ALTER TYPE lead_status_enum ADD VALUE IF NOT EXISTS 'BOOKED' AFTER 'NEGOTIATING'"
+    ))
     await db.commit()
 
     # All DDL for org schema tables
@@ -368,6 +374,19 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             converted_tenant_id UUID,
+            -- Rep or owner who first entered this lead (nullable so
+            -- webhook-created leads work without an actor).
+            created_by UUID,
+            -- Advance payment received at BOOKED status. Just a snapshot on
+            -- the lead — the actual payment row will still go into the
+            -- payments table once the tenant record exists.
+            advance_paise BIGINT,
+            advance_paid_at TIMESTAMPTZ,
+            -- Ad-attribution columns for future Meta webhook wiring.
+            -- source_campaign_name already exists above; these fill the
+            -- rest of the ad identity.
+            source_ad_id VARCHAR(200),
+            source_adset_name VARCHAR(200),
             is_deleted BOOLEAN NOT NULL DEFAULT false
         )""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".lead_activities (

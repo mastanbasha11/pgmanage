@@ -440,3 +440,126 @@ async def test_convert_lead_updates_status(
         headers=auth_headers(test_owner["token"]),
     )
     assert detail_resp.json()["status"] == "CONVERTED"
+
+
+# ── CRM v2 (migration 033): BOOKED status + advance tracking + attribution ─────
+#
+# The roundtrip test below is the "one assertion per persisted field" guard
+# per the feedback-endpoint-field-roundtrip memory. Whenever a new field is
+# added to LeadCreate / LeadUpdate, add a matching assertion here in the
+# same commit. Removing the corresponding column from the INSERT / PATCH
+# key path breaks this test immediately instead of silently in prod.
+
+@pytest.mark.asyncio
+async def test_book_lead_full_roundtrip_of_new_fields(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """Every field added by migration 033 must survive create -> patch -> get."""
+    payload = {
+        "property_id": str(test_property["property_id"]),
+        "name": "Anil Kumar",
+        "phone": "+919876543101",
+        "source": "META_AD",
+        "source_campaign_name": "Monsoon Move-in 2026",
+        "source_ad_id": "23855029301230123",
+        "source_adset_name": "Bangalore · Male · 22-32",
+        "budget_min_paise": 800000,
+        "budget_max_paise": 1200000,
+        "interested_room_type": "Single AC",
+        "expected_move_in_date": "2026-08-01",
+        "notes": "Wants to see rooms Sat morning",
+    }
+    create = await client.post(
+        "/api/v1/leads",
+        headers=auth_headers(test_owner["token"]),
+        json=payload,
+    )
+    assert create.status_code == 201, create.text
+    lead_id = create.json()["lead_id"]
+
+    # Everything set on create round-trips on the GET.
+    got = await client.get(
+        f"/api/v1/leads/{lead_id}",
+        headers=auth_headers(test_owner["token"]),
+    )
+    assert got.status_code == 200
+    body = got.json()
+    assert body["name"] == payload["name"]
+    assert body["source"] == payload["source"]
+    assert body["source_campaign_name"] == payload["source_campaign_name"]
+    assert body["source_ad_id"] == payload["source_ad_id"]
+    assert body["source_adset_name"] == payload["source_adset_name"]
+    # created_by is stamped from the token on the server side; the owner
+    # fixture's user_id is authoritative.
+    assert body["created_by"] == str(test_owner["user_id"])
+    # New nullables start unset.
+    assert body["advance_paise"] is None
+    assert body["advance_paid_at"] is None
+    assert body["status"] == "NEW"
+
+    # Mark as BOOKED with an advance — the update path that the Kanban's
+    # "Mark as Booked" button will call.
+    patch = await client.patch(
+        f"/api/v1/leads/{lead_id}",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "status": "BOOKED",
+            "advance_paise": 500000,          # ₹5,000 token advance
+            "advance_paid_at": "2026-07-16T12:30:00+05:30",
+            "notes": "Advance received in UPI, ref ABCD1234",
+        },
+    )
+    assert patch.status_code == 200, patch.text
+
+    got2 = await client.get(
+        f"/api/v1/leads/{lead_id}",
+        headers=auth_headers(test_owner["token"]),
+    )
+    body2 = got2.json()
+    assert body2["status"] == "BOOKED"
+    assert body2["advance_paise"] == 500000
+    # timestamp is stored as UTC in the DB — parse liberally.
+    assert body2["advance_paid_at"] is not None
+    assert body2["notes"] == "Advance received in UPI, ref ABCD1234"
+
+
+@pytest.mark.asyncio
+async def test_patch_lead_can_edit_core_fields(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """Detail-drawer edits — name / phone / budget / source — persist.
+
+    Covers the LeadUpdate extension in the same commit as migration 033.
+    """
+    create = await client.post(
+        "/api/v1/leads",
+        headers=auth_headers(test_owner["token"]),
+        json=_lead_payload(test_property["property_id"], phone="+919876543102"),
+    )
+    lead_id = create.json()["lead_id"]
+
+    patch = await client.patch(
+        f"/api/v1/leads/{lead_id}",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            "name": "Priya Sharma (corrected)",
+            "phone": "+919876543103",
+            "email": "priya@example.com",
+            "source": "INSTAGRAM",
+            "budget_max_paise": 1500000,
+            "interested_bed_count": 2,
+        },
+    )
+    assert patch.status_code == 200, patch.text
+
+    got = await client.get(
+        f"/api/v1/leads/{lead_id}",
+        headers=auth_headers(test_owner["token"]),
+    )
+    body = got.json()
+    assert body["name"] == "Priya Sharma (corrected)"
+    assert body["phone"] == "+919876543103"
+    assert body["email"] == "priya@example.com"
+    assert body["source"] == "INSTAGRAM"
+    assert body["budget_max_paise"] == 1500000
+    assert body["interested_bed_count"] == 2
