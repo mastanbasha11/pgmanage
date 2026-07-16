@@ -45,6 +45,8 @@ import { formatDate, rupeesToPaise, normaliseIndianPhone, PHONE_HELP, whatsappLi
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import WebsiteLeadsView from './WebsiteLeadsView';
 import { useNewWebsiteLeadCount } from '@/hooks/useWebsiteLeads';
+import LeadDetailDrawer from './LeadDetailDrawer';
+import CheckinWizard from '@/pages/tenants/CheckinWizard';
 
 type LeadStatus =
   | 'NEW'
@@ -137,7 +139,7 @@ function LeadCardBody({ lead }: { lead: Lead }) {
 /** Draggable Kanban card. The `useDraggable` listeners attach to the outer
  *  div; nested interactive controls (WhatsApp link) call
  *  `stopPropagation()` on their own pointer events so they still work. */
-function DraggableLeadCard({ lead }: { lead: Lead }) {
+function DraggableLeadCard({ lead, onOpen }: { lead: Lead; onOpen: () => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: lead.id,
     data: { status: lead.status },
@@ -147,6 +149,11 @@ function DraggableLeadCard({ lead }: { lead: Lead }) {
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      // With PointerSensor's 6px activation constraint, a plain click never
+      // starts a drag — normal onClick still fires. On mouse-up after a real
+      // drag, `isDragging` was true, dnd-kit swallows the click, and onOpen
+      // never fires. That's exactly what we want.
+      onClick={onOpen}
       className={`rounded-lg border bg-card p-3 text-sm shadow-sm cursor-grab active:cursor-grabbing transition-shadow ${
         isDragging ? 'opacity-40' : 'hover:shadow-md'
       }`}
@@ -162,10 +169,12 @@ function KanbanColumn({
   status,
   tone,
   leads,
+  onOpenLead,
 }: {
   status: LeadStatus;
   tone: string;
   leads: Lead[];
+  onOpenLead: (leadId: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `col-${status}`, data: { status } });
   return (
@@ -176,7 +185,7 @@ function KanbanColumn({
       }`}
     >
       {leads.map((lead) => (
-        <DraggableLeadCard key={lead.id} lead={lead} />
+        <DraggableLeadCard key={lead.id} lead={lead} onOpen={() => onOpenLead(lead.id)} />
       ))}
       {leads.length === 0 && (
         <div className="flex h-16 items-center justify-center text-xs text-muted-foreground">
@@ -450,6 +459,13 @@ export default function LeadsPage() {
     updateStatus.mutate({ id: draggedId, status: toStatus });
   };
 
+  // ── Drawer + check-in wizard state ──────────────────────────────────────
+  // `openLeadId` = drawer visible for that lead. `checkinPrefill` = open the
+  // tenant check-in wizard, seeded with what we knew about the lead so the
+  // rep can copy the phone/name across at a glance.
+  const [openLeadId, setOpenLeadId] = useState<string | null>(null);
+  const [checkinOpen, setCheckinOpen] = useState(false);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -545,7 +561,12 @@ export default function LeadsPage() {
                   <span>{label}</span>
                   <span className="text-muted-foreground">{byStatus(status).length}</span>
                 </div>
-                <KanbanColumn status={status} tone={tone} leads={byStatus(status)} />
+                <KanbanColumn
+                  status={status}
+                  tone={tone}
+                  leads={byStatus(status)}
+                  onOpenLead={setOpenLeadId}
+                />
               </div>
             ))}
           </div>
@@ -572,6 +593,19 @@ export default function LeadsPage() {
         onClose={() => setShowCreate(false)}
         defaultPropertyId={selectedPropertyId ?? undefined}
       />
+
+      <LeadDetailDrawer
+        leadId={openLeadId}
+        onClose={() => setOpenLeadId(null)}
+        onOpenCheckin={() => {
+          // Close the drawer first so the wizard has the screen; the rep can
+          // reopen the drawer once the wizard is dismissed.
+          setOpenLeadId(null);
+          setCheckinOpen(true);
+        }}
+      />
+
+      <CheckinWizard open={checkinOpen} onClose={() => setCheckinOpen(false)} />
     </div>
   );
 }
