@@ -64,13 +64,13 @@ const NAV_ITEMS: (NavItem | { section: string })[] = [
   { to: '/properties', icon: Building2, label: 'Properties' },
   { to: '/tenants', icon: Users, label: 'Tenants' },
   { to: '/rent', icon: IndianRupee, label: 'Rent & Payments', hideForRoles: ['MARKETING'] },
-  { to: '/bookings', icon: CalendarCheck, label: 'Bookings' },
+  { to: '/bookings', icon: CalendarCheck, label: 'Bookings', hideForRoles: ['MARKETING'] },
   { to: '/expenses', icon: Receipt, label: 'Expenses', hideForRoles: ['MARKETING'] },
   { to: '/leads', icon: UserCircle, label: 'Leads' },
   { to: '/roi', icon: TrendingUp, label: 'ROI & Rooms', ownerOnly: true },
 
   { section: 'Activity' },
-  { to: '/inbox', icon: Inbox, label: 'Inbox' },
+  { to: '/inbox', icon: Inbox, label: 'Inbox', hideForRoles: ['MARKETING'] },
   { to: '/settings/messages', icon: Send, label: 'Message Log', ownerOnly: true },
   { to: '/settings/jobs', icon: Activity, label: 'Job Monitor', ownerOnly: true },
 

@@ -95,23 +95,33 @@ export function truncate(str: string, len = 30): string {
 }
 
 /**
- * Compress a room-type label to ~3-5 chars for use in narrow table cells.
- *  "Single AC"      → "1·AC"
- *  "Double Sharing" → "2-SH"
- *  "Triple Sharing" → "3-SH"
- *  "Suite"          → "SUI"
- *  "Dormitory"      → "DORM"
+ * Human-readable room-type label for pills / dropdowns / cards. Prefers
+ * legible labels ("2-Share", "Suite") over ultra-compressed codes so a rep
+ * scanning the vacancies board doesn't need a decoder key.
+ *
+ *  "Single AC"        → "1-Share AC"
+ *  "Double Sharing"   → "2-Share"
+ *  "Double AC"        → "2-Share AC"
+ *  "Triple Sharing"   → "3-Share"
+ *  "Suite"            → "Suite"
+ *  "Three" (freeform) → "3-Share"
+ *
+ * Unknown/free-form names are returned verbatim (title-cased on first
+ * letter only) so an owner's custom name like "Deluxe" doesn't get mangled.
  */
 export function shortRoomType(label: string | undefined | null): string {
   if (!label) return '';
   const s = label.toUpperCase();
-  if (/^SINGLE/.test(s)) return s.includes('AC') ? '1·AC' : '1B';
-  if (/^DOUBLE/.test(s)) return s.includes('AC') ? '2·AC' : '2-SH';
-  if (/^TRIPLE/.test(s)) return s.includes('AC') ? '3·AC' : '3-SH';
-  if (/^QUAD/.test(s)) return '4-SH';
-  if (/^SUITE/.test(s)) return 'SUI';
-  if (/^DORM/.test(s)) return 'DORM';
-  return label.slice(0, 6).toUpperCase();
+  const hasAC = s.includes('AC');
+  const suffix = hasAC ? ' AC' : '';
+  if (/^SINGLE/.test(s) || /^\b1\b/.test(s) || /^ONE/.test(s)) return `1-Share${suffix}`;
+  if (/^DOUBLE/.test(s) || /^\b2\b/.test(s) || /^TWO/.test(s)) return `2-Share${suffix}`;
+  if (/^TRIPLE/.test(s) || /^\b3\b/.test(s) || /^THREE/.test(s)) return `3-Share${suffix}`;
+  if (/^QUAD/.test(s) || /^\b4\b/.test(s) || /^FOUR/.test(s)) return `4-Share${suffix}`;
+  if (/^SUITE/.test(s) || s === 'SUI') return 'Suite';
+  if (/^DORM/.test(s)) return 'Dormitory';
+  // Unknown owner-defined name: keep as typed (first letter cap).
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 /**
