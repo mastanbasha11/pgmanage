@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { NameAvatar, Pill, RoomBadge } from '@/components/ui/redesign';
 import {
   Select,
   SelectContent,
@@ -525,35 +526,44 @@ export default function BookingsPage() {
           </div>
         </div>
 
-        {/* Filter row */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[220px] max-w-md">
+        {/* Tabs (mock: daily stays / advance bookings as their own flows) + search */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex w-fit gap-1 rounded-xl border border-border bg-card p-1 shadow-sm">
+            {(
+              [
+                ['ALL', 'All'],
+                ['DAILY', 'Daily stays'],
+                ['ADVANCE', 'Advance bookings'],
+              ] as ['ALL' | BookingKind, string][]
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setKindFilter(key)}
+                className={`rounded-lg px-3.5 py-1.5 text-[12.5px] font-bold transition-colors ${
+                  kindFilter === key
+                    ? 'bg-[#161b26] text-white'
+                    : 'text-[#4a5261] hover:bg-secondary'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="relative min-w-[220px] max-w-md flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search guest, phone, room..."
-              className="h-9 pl-8"
+              className="h-9 rounded-full pl-8 text-xs font-semibold"
             />
           </div>
-          <Select
-            value={kindFilter}
-            onValueChange={(v) => setKindFilter(v as 'ALL' | BookingKind)}
-          >
-            <SelectTrigger className="w-44 h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All types</SelectItem>
-              <SelectItem value="DAILY">Daily stays</SelectItem>
-              <SelectItem value="ADVANCE">Advance bookings</SelectItem>
-            </SelectContent>
-          </Select>
           {(searchInput || kindFilter !== 'ALL') && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 gap-1"
+              className="h-9 gap-1 rounded-full font-bold"
               onClick={() => {
                 setSearchInput('');
                 setDebouncedSearch('');
@@ -613,28 +623,39 @@ export default function BookingsPage() {
                   <th className="px-3 py-2.5" />
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y divide-[#e9edf4]">
                 {items.map((b) => (
                   <tr key={b.id} className="hover:bg-muted/30">
-                    <td className="px-4 py-3">
-                      <p className="font-medium">{b.guest_name}</p>
-                      {b.guest_phone && (
-                        <p className="text-xs text-muted-foreground">{b.guest_phone}</p>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <NameAvatar name={b.guest_name} size={26} />
+                        <div className="min-w-0">
+                          <p className="truncate text-[12.5px] font-bold">{b.guest_name}</p>
+                          {b.guest_phone && (
+                            <p className="text-[11px] font-semibold text-[#98a0ad]">
+                              {b.guest_phone}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="hidden px-3 py-2.5 sm:table-cell">
+                      {b.room_label ? (
+                        <RoomBadge room={b.room_label} bed={b.kind === 'DAILY' ? 'guest' : undefined} />
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
                       )}
                     </td>
-                    <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
-                      {b.room_label}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={b.kind === 'ADVANCE' ? 'default' : 'outline'}>
+                    <td className="px-3 py-2.5">
+                      <Pill tone={b.kind === 'ADVANCE' ? 'a' : 'b'}>
                         {b.kind === 'ADVANCE' ? 'Advance' : 'Daily'}
-                      </Badge>
+                      </Pill>
                     </td>
-                    <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
+                    <td className="hidden px-3 py-2.5 text-[11.5px] font-semibold text-muted-foreground md:table-cell">
                       {formatDate(b.check_in_date)}
                       {b.check_out_date ? ` → ${formatDate(b.check_out_date)}` : ''}
                     </td>
-                    <td className="hidden px-4 py-3 text-muted-foreground lg:table-cell">
+                    <td className="hidden px-3 py-2.5 text-[11.5px] font-semibold text-muted-foreground lg:table-cell">
                       {formatDate(b.collected_at)} · {b.payment_mode}
                     </td>
                     <td className="hidden px-4 py-3 lg:table-cell">

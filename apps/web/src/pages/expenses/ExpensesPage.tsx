@@ -9,7 +9,6 @@ import {
   ImagePlus,
   Image as ImageIcon,
   Eye,
-  Users,
   Repeat,
   Search,
 } from 'lucide-react';
@@ -20,7 +19,73 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { NameAvatar, Pill, type PillTone } from '@/components/ui/redesign';
+import {
+  NameAvatar,
+  Pill,
+  RankBars,
+  SectionCard,
+  Track,
+  type PillTone,
+} from '@/components/ui/redesign';
+import { useCashflow } from '@/hooks/useDashboard';
+
+/** Stable category colors — index-matched with ExpenseDonut's palette order. */
+const CAT_COLORS = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#98a0ad'];
+
+/** 12-month expense trend — simple SVG bar chart, no chart-lib dependency. */
+function ExpenseTrend({ points }: { points: { month: string; value: number }[] }) {
+  const W = 560;
+  const H = 170;
+  const pad = { l: 46, r: 8, t: 10, b: 24 };
+  const max = Math.max(...points.map((p) => p.value), 1);
+  const bw = (W - pad.l - pad.r) / points.length;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="xMidYMid meet">
+      {[0, 0.5, 1].map((f) => {
+        const y = pad.t + (1 - f) * (H - pad.t - pad.b);
+        return (
+          <g key={f}>
+            <line x1={pad.l} y1={y} x2={W - pad.r} y2={y} stroke="#e9edf4" />
+            <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize="9" fill="#98a0ad">
+              ₹{((max * f) / 100000).toFixed(1)}L
+            </text>
+          </g>
+        );
+      })}
+      {points.map((p, i) => {
+        const h = (p.value / max) * (H - pad.t - pad.b);
+        const x = pad.l + i * bw + bw * 0.18;
+        const isLast = i === points.length - 1;
+        return (
+          <g key={i}>
+            <rect
+              x={x}
+              y={H - pad.b - h}
+              width={bw * 0.64}
+              height={Math.max(2, h)}
+              rx="3"
+              fill={isLast ? '#dc2626' : '#e34948'}
+              opacity={isLast ? 1 : 0.55}
+            >
+              <title>{`${p.month} · ₹${Math.round(p.value / 100).toLocaleString('en-IN')}`}</title>
+            </rect>
+            {i % 2 === 0 && (
+              <text
+                x={x + bw * 0.32}
+                y={H - 8}
+                textAnchor="middle"
+                fontSize="9"
+                fill="#98a0ad"
+              >
+                {p.month}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
 import {
   Select,
   SelectContent,
@@ -580,6 +645,21 @@ export default function ExpensesPage() {
 
   const items = expenses?.items ?? [];
 
+  // ── KPI + graph inputs (all from real data) ───────────────────────────────
+  const pendingRows = items.filter((e) => (e.status ?? e.approval_status) === 'PENDING');
+  const topCategory = summary?.items?.[0] ?? null;
+  const now = new Date();
+  const isCurrentMonth = month === now.getMonth() + 1 && year === now.getFullYear();
+  const daysElapsed = Math.max(
+    1,
+    isCurrentMonth ? now.getDate() : new Date(year, month, 0).getDate(),
+  );
+  const { data: cashflowData } = useCashflow(selectedPropertyId ?? undefined);
+  const trendPoints = (cashflowData?.items ?? []).map((p) => ({
+    month: p.month,
+    value: p.expenses_paise,
+  }));
+
   return (
     <>
       <div className="mx-auto max-w-[1280px] space-y-4">
@@ -703,77 +783,149 @@ export default function ExpensesPage() {
           )}
         </div>
 
-        {(summary?.items?.length ?? 0) > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Breakdown by category</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Badges compare against the previous month.
+        {/* KPI row — computed from real summary + loaded rows */}
+        {summary && (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="text-xs font-bold text-muted-foreground">Total spent</div>
+              <p className="tnum mt-1.5 text-[21px] font-extrabold tracking-tight">
+                {formatPaise(summary.total_paise ?? 0)}
               </p>
-            </CardHeader>
-            <CardContent className="grid gap-6 md:grid-cols-2">
-              <ExpenseDonut data={summary!.items} />
-              <ul className="space-y-1.5 text-sm">
-                {summary!.items.map((c) => {
-                  const prev =
-                    summary!.previous_items?.find(
-                      (p) => p.category_name === c.category_name,
-                    )?.total_paise ?? 0;
-                  return (
-                    <li
-                      key={c.category_name}
-                      className="flex items-center justify-between border-b border-dashed pb-1.5 last:border-0"
-                    >
-                      <span className="font-medium truncate">{c.category_name}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold tabular-nums">
-                          {formatPaise(c.total_paise)}
-                        </span>
-                        <MoMBadge current={c.total_paise} previous={prev} />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </CardContent>
-          </Card>
+              <div className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold text-[#98a0ad]">
+                <MoMBadge
+                  current={summary.total_paise ?? 0}
+                  previous={(summary.previous_items ?? []).reduce(
+                    (a, c) => a + c.total_paise,
+                    0,
+                  )}
+                />
+                vs previous month
+              </div>
+            </div>
+            <div
+              className={`rounded-2xl border p-4 shadow-sm ${
+                pendingRows.length > 0
+                  ? 'border-[#f3d59b] bg-[#fffdf6]'
+                  : 'border-border bg-card'
+              }`}
+            >
+              <div className="text-xs font-bold text-muted-foreground">Pending approval</div>
+              <p
+                className={`tnum mt-1.5 text-[21px] font-extrabold tracking-tight ${
+                  pendingRows.length > 0 ? 'text-[#b45309]' : ''
+                }`}
+              >
+                {pendingRows.length}
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-[#98a0ad]">
+                {pendingRows.length > 0
+                  ? `${formatPaise(pendingRows.reduce((a, e) => a + e.amount_paise, 0))} waiting on you`
+                  : 'nothing waiting'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="text-xs font-bold text-muted-foreground">Top category</div>
+              <p className="mt-1.5 truncate text-[21px] font-extrabold tracking-tight">
+                {topCategory?.category_name ?? '—'}
+              </p>
+              <p className="tnum mt-1 text-[11px] font-semibold text-[#98a0ad]">
+                {topCategory ? formatPaise(topCategory.total_paise) : 'no spend yet'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="text-xs font-bold text-muted-foreground">Avg spend / day</div>
+              <p className="tnum mt-1.5 text-[21px] font-extrabold tracking-tight">
+                {formatPaise(Math.round((summary.total_paise ?? 0) / daysElapsed))}
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-[#98a0ad]">
+                over {daysElapsed} day{daysElapsed === 1 ? '' : 's'} this month
+              </p>
+            </div>
+          </div>
         )}
 
-        {isOwnerOrPartner && (summary?.by_person?.length ?? 0) > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Users className="h-4 w-4 text-accent" />
-                Spend by person
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {summary!.by_person!.map((p) => {
-                  const pct =
-                    (summary!.total_paise ?? 0) > 0
-                      ? Math.round((p.total_paise / summary!.total_paise) * 100)
-                      : 0;
-                  return (
-                    <div
-                      key={p.person}
-                      className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{p.person}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {p.count} {p.count === 1 ? 'expense' : 'expenses'} · {pct}%
-                        </p>
+        {/* Graphs row — donut + track bars, and the 12-month trend */}
+        <div className="grid gap-3.5 lg:grid-cols-2">
+          {(summary?.items?.length ?? 0) > 0 && (
+            <SectionCard
+              title="🧾 Where the money went"
+              sub="By category · bars are share of this month's total · badges compare vs last month."
+            >
+              <div className="flex items-center gap-5">
+                <ExpenseDonut data={summary!.items} />
+                <div className="min-w-0 flex-1 space-y-2.5">
+                  {summary!.items.slice(0, 7).map((c, i) => {
+                    const prev =
+                      summary!.previous_items?.find(
+                        (p) => p.category_name === c.category_name,
+                      )?.total_paise ?? 0;
+                    const pct =
+                      (summary!.total_paise ?? 0) > 0
+                        ? (c.total_paise / summary!.total_paise) * 100
+                        : 0;
+                    const color = CAT_COLORS[i % CAT_COLORS.length];
+                    return (
+                      <div key={c.category_name}>
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="flex min-w-0 items-center gap-1.5 font-bold">
+                            <span
+                              className="h-2.5 w-2.5 flex-none rounded-[3px]"
+                              style={{ background: color }}
+                            />
+                            <span className="truncate">{c.category_name}</span>
+                          </span>
+                          <span className="flex flex-none items-center gap-1.5">
+                            <span className="tnum font-extrabold">
+                              {formatPaise(c.total_paise)}
+                            </span>
+                            <MoMBadge current={c.total_paise} previous={prev} />
+                          </span>
+                        </div>
+                        <Track pct={pct} color={color} className="mt-1 h-[5px]" />
                       </div>
-                      <p className="font-semibold tabular-nums">
-                        {formatPaise(p.total_paise)}
-                      </p>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </CardContent>
-          </Card>
+            </SectionCard>
+          )}
+
+          <SectionCard
+            title="📉 Spend trend"
+            sub="Total expenses per month · last 12 months."
+          >
+            {trendPoints.length > 1 ? (
+              <ExpenseTrend points={trendPoints} />
+            ) : (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                Not enough history yet.
+              </div>
+            )}
+          </SectionCard>
+        </div>
+
+        {isOwnerOrPartner && (summary?.by_person?.length ?? 0) > 0 && (
+          <SectionCard
+            title="👥 Spend by person"
+            sub="Approved spend logged against each staff member this month."
+          >
+            <RankBars
+              labelWidth={180}
+              rows={summary!.by_person!.map((p, i) => ({
+                label: p.person,
+                sub: `${p.count} expense${p.count === 1 ? '' : 's'} · ${
+                  (summary!.total_paise ?? 0) > 0
+                    ? Math.round((p.total_paise / summary!.total_paise) * 100)
+                    : 0
+                }%`,
+                value: p.total_paise,
+                display: formatPaise(p.total_paise),
+                color: ['#dc2626', '#e34948', '#eb6834', '#eda100', '#e87ba4', '#98a0ad', '#c7ccd6'][
+                  i % 7
+                ],
+              }))}
+            />
+          </SectionCard>
         )}
 
         {(summary?.recurring_items?.length ?? 0) > 0 && (

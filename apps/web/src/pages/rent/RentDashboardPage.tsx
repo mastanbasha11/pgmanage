@@ -5,7 +5,6 @@ import { z } from 'zod';
 import {
   IndianRupee,
   RefreshCw,
-  AlertCircle,
   Plus,
   CalendarDays,
   Pencil,
@@ -505,14 +504,6 @@ function StatCard({
   );
 }
 
-/** Receivables-aging buckets — month-based, chase window tops out ~45 days. */
-const AGING_BUCKETS = [
-  { label: '0–15 days', max: 15, color: '#eda100' },
-  { label: '16–30 days', max: 30, color: '#eb6834' },
-  { label: '31–45 days', max: 45, color: '#e34948' },
-  { label: '45+ days', max: Infinity, color: '#b3261e' },
-] as const;
-
 interface OverdueItem {
   id: string;
   name: string;
@@ -522,19 +513,6 @@ interface OverdueItem {
   oldest_due_date?: string | null;
   bed_label?: string | null;
   room_number?: string | null;
-}
-
-function buildAging(items: OverdueItem[]) {
-  const today = Date.now();
-  const buckets = AGING_BUCKETS.map((b) => ({ ...b, amount: 0, count: 0 }));
-  for (const it of items) {
-    const due = it.oldest_due_date ? Date.parse(it.oldest_due_date) : today;
-    const days = Math.max(0, Math.floor((today - due) / 86_400_000));
-    const bucket = buckets.find((b) => days <= b.max) ?? buckets[buckets.length - 1];
-    bucket.amount += it.total_outstanding_paise;
-    bucket.count += 1;
-  }
-  return buckets.filter((b) => b.count > 0 || b.max !== Infinity);
 }
 
 export default function RentDashboardPage() {
@@ -707,8 +685,6 @@ export default function RentDashboardPage() {
       : null;
 
   const overdueItems: OverdueItem[] = overdue?.items ?? [];
-  const aging = buildAging(overdueItems);
-  const agingMax = Math.max(...aging.map((b) => b.amount), 1);
   const billedTenants = entries.length;
 
   return (
@@ -825,7 +801,7 @@ export default function RentDashboardPage() {
                 valueClass={stats.outstanding_paise > 0 ? 'text-destructive' : ''}
                 foot={
                   overdueItems.length > 0
-                    ? `${overdueItems.length} tenants · see aging →`
+                    ? `${overdueItems.length} tenants overdue`
                     : 'all clear'
                 }
               />
@@ -901,58 +877,31 @@ export default function RentDashboardPage() {
               </div>
             </SectionCard>
 
-            {/* Aging + collected-by */}
-            <div className="grid gap-3.5 lg:grid-cols-2">
+            {/* Collected-by — full width; wide label column so
+                "83 payments · adv ₹1,08,000" never wraps mid-word */}
+            {collectors.length > 0 && (
               <SectionCard
-                title="⏳ Receivables aging"
-                sub="Overdue rent by how long it's been pending — chase window runs to ~45 days."
+                title={`💵 Collected by — ${monthName(month)} ${year}`}
+                sub="Who received the money this period."
               >
-                {aging.every((b) => b.count === 0) ? (
-                  <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-                    <Pill tone="g">All clear</Pill> no overdue rent right now.
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2.5">
-                    {aging.map((b) => (
-                      <div
-                        key={b.label}
-                        className="grid grid-cols-[86px_1fr_120px] items-center gap-2.5 text-xs"
-                      >
-                        <b className="text-[#3a4150]">{b.label}</b>
-                        <Track pct={(b.amount / agingMax) * 100} color={b.color} className="h-[9px]" />
-                        <span className="tnum text-right font-extrabold">
-                          {formatPaise(b.amount)}
-                          <span className="font-semibold text-[#98a0ad]"> · {b.count}</span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <RankBars
+                  labelWidth={230}
+                  rows={collectors.map((c, i) => ({
+                    label: c.collector,
+                    sub: `${c.payments} payment${c.payments === 1 ? '' : 's'}${
+                      (c.advance_paise ?? 0) > 0
+                        ? ` · adv ${formatPaise(c.advance_paise ?? 0)}`
+                        : ''
+                    }`,
+                    value: c.amount_paise,
+                    display: formatPaise(c.amount_paise),
+                    color: ['#2a78d6', '#1baf7a', '#e87ba4', '#eda100', '#eb6834', '#98a0ad'][
+                      i % 6
+                    ],
+                  }))}
+                />
               </SectionCard>
-
-              {collectors.length > 0 && (
-                <SectionCard
-                  title={`💵 Collected by — ${monthName(month)} ${year}`}
-                  sub="Who received the money this period."
-                >
-                  <RankBars
-                    rows={collectors.map((c, i) => ({
-                      label: c.collector,
-                      sub: `${c.payments} payment${c.payments === 1 ? '' : 's'}${
-                        (c.advance_paise ?? 0) > 0
-                          ? ` · adv ${formatPaise(c.advance_paise ?? 0)}`
-                          : ''
-                      }`,
-                      value: c.amount_paise,
-                      display: formatPaise(c.amount_paise),
-                      color: ['#2a78d6', '#1baf7a', '#e87ba4', '#eda100', '#eb6834', '#98a0ad'][
-                        i % 6
-                      ],
-                    }))}
-                  />
-                </SectionCard>
-              )}
-            </div>
+            )}
           </>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
@@ -966,16 +915,6 @@ export default function RentDashboardPage() {
           </div>
         )}
 
-        {/* Overdue banner */}
-        {overdueItems.length > 0 && (
-          <div className="flex items-center gap-2.5 rounded-2xl border border-[#f3d59b] bg-[#fff6e2] px-3.5 py-2.5 text-[12.5px] text-[#7c4a12]">
-            <AlertCircle className="h-4 w-4 flex-shrink-0 text-[#b45309]" />
-            <span>
-              <b className="text-[#5f380d]">{overdueItems.length} tenants</b> have overdue rent
-              from previous months.
-            </span>
-          </div>
-        )}
 
         {!selectedPropertyId && (
           <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">

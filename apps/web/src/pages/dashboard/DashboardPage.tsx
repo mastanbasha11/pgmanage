@@ -14,7 +14,7 @@
  */
 import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Building2, Plus } from 'lucide-react';
+import { Building2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -26,7 +26,6 @@ import {
 import {
   KpiTile,
   PageHeader,
-  Pill,
   RankBars,
   SectionCard,
 } from '@/components/ui/redesign';
@@ -595,26 +594,8 @@ export default function DashboardPage() {
 
       {/* CRM worklist */}
       <FollowupsDueToday propertyId={selectedPropertyId ?? undefined} />
-
-      {/* 7 · Overdue alert */}
-      {summary.overdue_tenants > 0 && (
-        <div className="flex items-center gap-3 rounded-2xl border border-[#f3d59b] bg-[#fff6e5] px-4 py-3.5 text-[13.5px] text-[#7c4a12]">
-          <div className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-[#fff0d6] text-[#b45309]">
-            <AlertTriangle className="h-4 w-4" />
-          </div>
-          <p>
-            <b className="text-[#5f380d]">{summary.overdue_tenants} tenants</b> have overdue rent
-            totalling <b className="text-[#5f380d]">{formatPaise(summary.outstanding_paise)}</b>.{' '}
-            <Link to="/rent" className="font-extrabold text-[#b45309] underline">
-              Open rent &amp; payments
-            </Link>{' '}
-            to follow up.
-          </p>
-          <Pill tone="a" className="ml-auto hidden sm:inline-flex">
-            {collectionPct}% collected
-          </Pill>
-        </div>
-      )}
+      {/* Rent follow-up chasing intentionally lives ONLY in Rent & Payments —
+          no overdue banner on the dashboard (owner request, 2026-07-17). */}
     </div>
   );
 }

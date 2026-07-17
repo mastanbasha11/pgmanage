@@ -223,16 +223,31 @@ export interface RankRow {
   color: string;
 }
 
-export function RankBars({ rows, className }: { rows: RankRow[]; className?: string }) {
+export function RankBars({
+  rows,
+  className,
+  labelWidth = 120,
+}: {
+  rows: RankRow[];
+  className?: string;
+  /** px width of the name column — widen when subs are long (e.g. "83 payments · adv ₹1,08,000"). */
+  labelWidth?: number;
+}) {
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       {rows.map((r) => (
-        <div key={r.label} className="grid grid-cols-[120px_1fr_auto] items-center gap-3">
-          <span className="text-[13px] font-bold leading-tight">
-            {r.label}
+        <div
+          key={r.label}
+          className="grid items-center gap-3"
+          style={{ gridTemplateColumns: `${labelWidth}px 1fr auto` }}
+        >
+          <span className="min-w-0 text-[13px] font-bold leading-tight">
+            <span className="block truncate">{r.label}</span>
             {r.sub && (
-              <span className="block text-[11px] font-semibold text-[#98a0ad]">{r.sub}</span>
+              <span className="block truncate whitespace-nowrap text-[11px] font-semibold text-[#98a0ad]">
+                {r.sub}
+              </span>
             )}
           </span>
           <Track pct={Math.max(4, (r.value / max) * 100)} color={r.color} className="h-[9px]" />
