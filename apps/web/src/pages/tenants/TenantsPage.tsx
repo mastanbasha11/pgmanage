@@ -61,17 +61,23 @@ export default function TenantsPage() {
   });
 
   // Counts for the segmented control + header sub, independent of the
-  // filter currently applied (limit 1 keeps them cheap).
+  // filter currently applied. The backend's `total` is len(items) for the
+  // returned page — NOT a true table count — so these must use the same
+  // limit as the main list (a limit:1 probe would always report 1). Params
+  // mirror the main query exactly so react-query shares the cache when the
+  // matching filter is active.
   const { data: activeCount } = useTenants({
     property_id: selectedPropertyId ?? undefined,
     status: 'ACTIVE',
-    limit: 1,
+    sort_by: 'room',
+    limit: 200,
   });
   const { data: noticeCount } = useTenants({
     property_id: selectedPropertyId ?? undefined,
     status: 'ACTIVE',
     has_notice: true,
-    limit: 1,
+    sort_by: 'room',
+    limit: 200,
   });
   const { data: propertiesData } = useProperties();
   const vacantBeds =

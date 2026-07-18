@@ -29,9 +29,6 @@ import {
 } from '@/components/ui/redesign';
 import { useCashflow } from '@/hooks/useDashboard';
 
-/** Stable category colors — index-matched with ExpenseDonut's palette order. */
-const CAT_COLORS = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#98a0ad'];
-
 /** 12-month expense trend — simple SVG bar chart, no chart-lib dependency. */
 function ExpenseTrend({ points }: { points: { month: string; value: number }[] }) {
   const W = 560;
@@ -101,7 +98,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { ExpenseDonut } from '@/components/charts/ExpenseDonut';
+import { ExpenseDonut, EXPENSE_COLORS } from '@/components/charts/ExpenseDonut';
 import {
   useExpenses,
   useExpenseSummary,
@@ -851,9 +848,12 @@ export default function ExpensesPage() {
               title="🧾 Where the money went"
               sub="By category · bars are share of this month's total · badges compare vs last month."
             >
-              <div className="flex items-center gap-5">
-                <ExpenseDonut data={summary!.items} />
-                <div className="min-w-0 flex-1 space-y-2.5">
+              <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
+                {/* Fixed-width donut so it can't squeeze the breakdown list */}
+                <div className="w-[200px] flex-none">
+                  <ExpenseDonut data={summary!.items} showLegend={false} height={200} />
+                </div>
+                <div className="min-w-0 flex-1 space-y-2.5 self-stretch">
                   {summary!.items.slice(0, 7).map((c, i) => {
                     const prev =
                       summary!.previous_items?.find(
@@ -863,7 +863,7 @@ export default function ExpensesPage() {
                       (summary!.total_paise ?? 0) > 0
                         ? (c.total_paise / summary!.total_paise) * 100
                         : 0;
-                    const color = CAT_COLORS[i % CAT_COLORS.length];
+                    const color = EXPENSE_COLORS[i % EXPENSE_COLORS.length];
                     return (
                       <div key={c.category_name}>
                         <div className="flex items-center justify-between gap-2 text-xs">
@@ -873,8 +873,11 @@ export default function ExpensesPage() {
                               style={{ background: color }}
                             />
                             <span className="truncate">{c.category_name}</span>
+                            <span className="flex-none font-semibold text-[#98a0ad]">
+                              {pct.toFixed(1)}%
+                            </span>
                           </span>
-                          <span className="flex flex-none items-center gap-1.5">
+                          <span className="flex flex-none items-center gap-1.5 whitespace-nowrap">
                             <span className="tnum font-extrabold">
                               {formatPaise(c.total_paise)}
                             </span>
@@ -885,6 +888,11 @@ export default function ExpensesPage() {
                       </div>
                     );
                   })}
+                  {summary!.items.length > 7 && (
+                    <p className="text-[11px] font-semibold text-[#98a0ad]">
+                      + {summary!.items.length - 7} smaller categories in the donut
+                    </p>
+                  )}
                 </div>
               </div>
             </SectionCard>
