@@ -223,7 +223,9 @@ async def list_leads(
     status: str | None = Query(None),
     source: str | None = Query(None),
     assigned_to: UUID | None = Query(None),
-    limit: int = Query(50, le=200),
+    # Kanban board loads every status in one call — a 50-row default page
+    # starved the non-NEW columns the moment 50 due-today leads existed.
+    limit: int = Query(500, le=1000),
 ):
     conditions = ["l.org_id = :org_id", "l.is_deleted = false"]
     params: dict[str, Any] = {"org_id": str(ctx.org_id)}

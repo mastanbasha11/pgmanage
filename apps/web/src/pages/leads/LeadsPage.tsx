@@ -201,6 +201,10 @@ function DraggableLeadCard({ lead, onOpen }: { lead: Lead; onOpen: () => void })
 
 /** Droppable column body. Renders the drop-target styling when a card is
  *  hovering, and the empty-state placeholder when the column has no cards. */
+/** Cards rendered per column before collapsing into a "+N more" note —
+ *  keeps a 300-card Lost column from bloating the DOM. */
+const COLUMN_RENDER_CAP = 40;
+
 function KanbanColumn({
   status,
   tone,
@@ -213,6 +217,8 @@ function KanbanColumn({
   onOpenLead: (leadId: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `col-${status}`, data: { status } });
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? leads : leads.slice(0, COLUMN_RENDER_CAP);
   return (
     <div
       ref={setNodeRef}
@@ -220,9 +226,18 @@ function KanbanColumn({
         isOver ? 'ring-2 ring-accent/50 bg-accent/5' : ''
       }`}
     >
-      {leads.map((lead) => (
+      {shown.map((lead) => (
         <DraggableLeadCard key={lead.id} lead={lead} onOpen={() => onOpenLead(lead.id)} />
       ))}
+      {leads.length > COLUMN_RENDER_CAP && !showAll && (
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          className="w-full rounded-lg border border-dashed border-border py-1.5 text-center text-[11.5px] font-bold text-muted-foreground hover:bg-card"
+        >
+          Show all {leads.length} →
+        </button>
+      )}
       {leads.length === 0 && (
         <div className="flex h-16 items-center justify-center text-xs text-muted-foreground">
           {isOver ? 'Drop to move here' : 'None'}
@@ -505,7 +520,7 @@ function CreateLeadDialog({
 export default function LeadsPage() {
   const { data, isLoading } = useQuery<{ items: Lead[] }>({
     queryKey: ['leads'],
-    queryFn: () => api.get('/leads').then((r) => r.data),
+    queryFn: () => api.get('/leads', { params: { limit: 500 } }).then((r) => r.data),
   });
   const [showCreate, setShowCreate] = useState(false);
   const { selectedPropertyId } = useAuthStore();
