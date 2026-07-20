@@ -741,8 +741,10 @@ async def roi_by_room(
             LEFT JOIN payments p ON p.tenant_id = t.id
               AND p.is_deleted = false
               AND p.payment_type IN ('RENT', 'ADVANCE', 'DEPOSIT')
-              AND p.collected_at >= NOW() - (:months || ' months')::interval
-            WHERE r.property_id = :pid AND r.is_active = true
+              -- make_interval keeps :months an int; the `(:months || ' months')`
+              -- form made asyncpg bind it as text and raise DataError.
+              AND p.collected_at >= NOW() - make_interval(months => :months)
+            WHERE r.property_id = :pid AND r.status <> 'INACTIVE'
             GROUP BY r.id, r.room_number, rt.name, rt.capacity, rt.monthly_base_rent_paise
             ORDER BY r.room_number
         """),
@@ -760,7 +762,7 @@ async def roi_by_room(
                    COUNT(b.id) AS total_beds
             FROM rooms r
             LEFT JOIN beds b ON b.room_id = r.id
-            WHERE r.property_id = :pid AND r.is_active = true
+            WHERE r.property_id = :pid AND r.status <> 'INACTIVE'
             GROUP BY r.id
         """),
         {"pid": str(property_id)},

@@ -99,7 +99,12 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: str = "localhost,127.0.0.1"
 
     # ── Rate Limiting ─────────────────────────────────────────────────────────
-    RATE_LIMIT_PER_MINUTE: int = 60
+    # Per authenticated user (falls back to per-IP when unauthenticated).
+    # A single dashboard/rent page load fans out to 10-15 endpoints, and
+    # TanStack Query refetches on window focus, so an active owner clicking
+    # between tabs bursts well past 60/min on their own. 300 leaves headroom
+    # for normal multi-tab use while still capping runaway clients.
+    RATE_LIMIT_PER_MINUTE: int = 300
 
     # ── Subscription ─────────────────────────────────────────────────────────
     TRIAL_DAYS: int = 30

@@ -6,6 +6,7 @@ from typing import Callable
 
 import redis.asyncio as aioredis
 from fastapi import Request, Response
+from jose import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -75,6 +76,26 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def _is_strict(self, path: str) -> bool:
         return any(path.startswith(p) for p in self.STRICT_PATHS)
 
+    @staticmethod
+    def _subject(request: Request) -> str | None:
+        """
+        Identify the caller by JWT subject so colleagues sharing one office
+        NAT IP get independent buckets. Claims are read *unverified* — this
+        is only a bucket label, never an authz decision, and the real auth
+        dependency still runs downstream. A forged/garbage token simply
+        fails to decode and falls back to the IP bucket, so this can't be
+        used to escape the limit.
+        """
+        auth = request.headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            return None
+        try:
+            claims = jwt.get_unverified_claims(auth[7:].strip())
+        except Exception:
+            return None
+        sub = claims.get("sub")
+        return str(sub) if sub else None
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Behind Caddy: request.client.host is the proxy container's IP, so
         # without this every user shares one rate-limit bucket. Caddy sets
@@ -85,8 +106,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             or (request.client.host if request.client else "unknown")
         )
         path = request.url.path
-        limit = self.STRICT_LIMIT if self._is_strict(path) else settings.RATE_LIMIT_PER_MINUTE
-        key = f"rate:{client_ip}:{path if self._is_strict(path) else 'global'}"
+
+        if self._is_strict(path):
+            # Login/OTP are pre-auth, so they must stay IP-keyed — that IS
+            # the brute-force boundary.
+            limit = self.STRICT_LIMIT
+            key = f"rate:{client_ip}:{path}"
+        else:
+            limit = settings.RATE_LIMIT_PER_MINUTE
+            sub = self._subject(request)
+            key = f"rate:user:{sub}:global" if sub else f"rate:{client_ip}:global"
 
         try:
             r = await self._get_redis()

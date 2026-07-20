@@ -345,3 +345,77 @@ async def test_recent_activity_limit_exceeds_max_returns_422(
         params={"limit": 100},
     )
     assert response.status_code == 422
+
+
+# ── ROI by room ────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_roi_by_room_requires_auth(client: AsyncClient):
+    response = await client.get("/api/v1/dashboard/roi-by-room")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_roi_by_room_owner_succeeds(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """
+    Smoke test that the raw SQL actually executes. This endpoint shipped
+    referencing a non-existent `rooms.is_active` column and 500'd on every
+    call for weeks because nothing exercised it.
+    """
+    response = await client.get(
+        "/api/v1/dashboard/roi-by-room",
+        headers=auth_headers(test_owner["token"]),
+        params={"property_id": str(test_property["property_id"])},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["months"] == 6
+    assert isinstance(data["rooms"], list)
+    assert isinstance(data["room_types"], list)
+
+
+@pytest.mark.asyncio
+async def test_roi_by_room_requires_property_id(
+    client: AsyncClient, test_owner: dict
+):
+    response = await client.get(
+        "/api/v1/dashboard/roi-by-room",
+        headers=auth_headers(test_owner["token"]),
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_roi_by_room_supervisor_forbidden(
+    client: AsyncClient, test_supervisor: dict, test_property: dict
+):
+    response = await client.get(
+        "/api/v1/dashboard/roi-by-room",
+        headers=auth_headers(test_supervisor["token"]),
+        params={"property_id": str(test_property["property_id"])},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_roi_by_room_row_shape(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """Each room row carries the bed/occupancy fields the ROI page renders."""
+    response = await client.get(
+        "/api/v1/dashboard/roi-by-room",
+        headers=auth_headers(test_owner["token"]),
+        params={"property_id": str(test_property["property_id"]), "months": 3},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["months"] == 3
+    for row in data["rooms"]:
+        for field in (
+            "room_id", "room_number", "revenue_paise", "occupied_beds",
+            "vacant_beds", "reserved_beds", "total_beds",
+            "revenue_per_bed_paise", "expected_monthly_paise",
+        ):
+            assert field in row, f"missing {field}"
