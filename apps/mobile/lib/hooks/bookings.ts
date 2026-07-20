@@ -24,14 +24,24 @@ export interface Booking {
   created_at: string;
 }
 
+/** Mirrors the backend response in app/api/v1/bookings.py — there is no
+ *  `total` or `totals` key; the aggregates are top-level and already in paise. */
+export interface BookingsResponse {
+  items: Booking[];
+  total_paise: number;
+  daily_paise: number;
+  advance_paise: number;
+  count: number;
+}
+
 export function useBookings(params: {
   property_id?: string;
   month?: number;
   year?: number;
-  kind?: BookingKind | 'ALL';
-  search?: string;
+  kind?: BookingKind;
+  q?: string;
 }) {
-  return useQuery<{ items: Booking[]; total: number; totals?: Record<string, number> }>({
+  return useQuery<BookingsResponse>({
     queryKey: ['bookings', params],
     queryFn: () => api.get('/bookings', { params }).then((r) => r.data),
     enabled: !!params.property_id,

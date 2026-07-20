@@ -71,16 +71,27 @@ export function useNotifications(params?: { channel?: string; limit?: number }) 
 
 // ── Audit logs ───────────────────────────────────────────────────────────────
 
+/**
+ * Params must match `GET /audit-logs` exactly (app/api/v1/audit_logs.py).
+ * The old names (`entity`, `user_id`, `action`, `limit`) are not declared
+ * there, so FastAPI dropped all four — every filter was a no-op and the page
+ * size silently stayed at the default 50.
+ */
 export function useAuditLogs(params?: {
-  entity?: string;
-  user_id?: string;
-  action?: string;
-  limit?: number;
+  event_category?: string;
+  actor_user_id?: string;
+  tenant_id?: string;
+  property_id?: string;
+  date_from?: string;
+  date_to?: string;
+  search?: string;
+  page?: number;
+  page_size?: number;
 }) {
   return useQuery({
     queryKey: ['audit-logs', params],
     queryFn: () =>
-      api.get('/audit-logs', { params: { limit: 200, ...params } }).then((r) => r.data),
+      api.get('/audit-logs', { params: { page_size: 200, ...params } }).then((r) => r.data),
   });
 }
 

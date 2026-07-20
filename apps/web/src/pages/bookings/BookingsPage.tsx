@@ -403,6 +403,17 @@ export default function BookingsPage() {
     q: debouncedSearch || undefined,
   });
 
+  // KPI totals deliberately ignore the kind chip and the search box. The
+  // backend applies both to its aggregate query too, so reusing `data` here
+  // made "Received — advance bookings" read ₹0 the moment you clicked the
+  // "Daily stays" tab. The headline is "what came in this period", which does
+  // not change based on which list you happen to be looking at.
+  const { data: totals } = useBookings({
+    property_id: selectedPropertyId ?? undefined,
+    month,
+    year,
+  });
+
   // Fetch the property's fiscal period (settlement_day-based) so the period
   // shown above the KPIs matches the window the backend uses to filter
   // bookings — see project-period-attribution-rule.
@@ -496,10 +507,10 @@ export default function BookingsPage() {
           <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
             <div className="text-xs font-bold text-muted-foreground">Total this period</div>
             <p className="tnum mt-1.5 text-[21px] font-extrabold tracking-tight">
-              {formatPaise(data?.total_paise ?? 0)}
+              {formatPaise(totals?.total_paise ?? 0)}
             </p>
             <p className="mt-1 text-[11px] font-semibold text-[#98a0ad]">
-              {data?.count ?? 0} {(data?.count ?? 0) === 1 ? 'booking' : 'bookings'}
+              {totals?.count ?? 0} {(totals?.count ?? 0) === 1 ? 'booking' : 'bookings'}
             </p>
           </div>
           <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
@@ -507,7 +518,7 @@ export default function BookingsPage() {
               Received — daily stays
             </div>
             <p className="tnum mt-1.5 text-[21px] font-extrabold tracking-tight">
-              {formatPaise(data?.daily_paise ?? 0)}
+              {formatPaise(totals?.daily_paise ?? 0)}
             </p>
             <p className="mt-1 text-[11px] font-semibold text-[#98a0ad]">
               guests paying per night
@@ -518,7 +529,7 @@ export default function BookingsPage() {
               Received — advance bookings
             </div>
             <p className="tnum mt-1.5 text-[21px] font-extrabold tracking-tight">
-              {formatPaise(data?.advance_paise ?? 0)}
+              {formatPaise(totals?.advance_paise ?? 0)}
             </p>
             <p className="mt-1 text-[11px] font-semibold text-[#98a0ad]">
               tokens for upcoming move-ins

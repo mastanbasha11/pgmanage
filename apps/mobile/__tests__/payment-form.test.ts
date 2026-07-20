@@ -12,6 +12,7 @@ import {
   showDays,
   showMonthYear,
   showReference,
+  mapPaymentModeForApi,
 } from '../lib/payment-form';
 
 describe('showMonthYear / showDays / showReference', () => {
@@ -194,5 +195,46 @@ describe('buildBookingBody (tenant-less guest revenue)', () => {
       collectedOn: '2026-06-11',
     });
     expect(body).not.toHaveProperty('reference_number');
+  });
+});
+
+describe('mapPaymentModeForApi', () => {
+  test("translates the UI's 'BANK' to the BANK_TRANSFER enum member", () => {
+    // 'BANK' is not a member of payment_mode_enum — sending it raw made the
+    // CAST in /payments and /bookings fail, so every Bank entry 500'd.
+    expect(mapPaymentModeForApi('BANK')).toBe('BANK_TRANSFER');
+  });
+
+  test('passes through modes that already match the enum', () => {
+    expect(mapPaymentModeForApi('CASH')).toBe('CASH');
+    expect(mapPaymentModeForApi('UPI')).toBe('UPI');
+  });
+});
+
+describe('body builders emit only valid payment_mode_enum members', () => {
+  const VALID = ['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE'];
+
+  test.each(['CASH', 'UPI', 'BANK'] as const)('buildPaymentBody with %s', (mode) => {
+    const body = buildPaymentBody({
+      tenantId: 't1',
+      amountRupees: 9000,
+      type: 'RENT',
+      mode,
+    });
+    expect(VALID).toContain(body.payment_mode);
+  });
+
+  test.each(['CASH', 'UPI', 'BANK'] as const)('buildBookingBody with %s', (mode) => {
+    const body = buildBookingBody({
+      propertyId: 'p1',
+      guestName: 'Guest',
+      roomLabel: '101-A',
+      kind: 'DAILY',
+      amountRupees: 1500,
+      mode,
+      checkInDate: '2026-07-20',
+      collectedOn: '2026-07-20',
+    });
+    expect(VALID).toContain(body.payment_mode);
   });
 });

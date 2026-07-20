@@ -4,41 +4,91 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, withIdempotency } from '../api';
 
+/**
+ * Field names mirror the SELECT in `/rent/ledger` (app/api/v1/payments.py).
+ * The amount columns are `amount_due_paise` / `amount_paid_paise` — there is
+ * no `expected_paise`, `paid_paise`, `monthly_rent_paise` or `entry_id`.
+ */
 export interface RentLedgerRow {
+  id: string;
   tenant_id: string;
   tenant_name: string;
-  bed_label?: string;
-  room_number?: string;
-  room_name?: string;
-  floor_number?: number;
-  monthly_rent_paise: number;
-  expected_paise: number;
-  paid_paise: number;
-  discount_paise?: number;
-  outstanding_paise: number;
-  status: 'PAID' | 'PARTIAL' | 'UNPAID' | 'ADVANCE';
+  phone?: string | null;
   month: number;
   year: number;
-  entry_id?: string;
-  billing_period_days?: number;
+  amount_due_paise: number;
+  amount_paid_paise: number;
+  discount_paise: number;
+  outstanding_paise: number;
+  status: 'PAID' | 'PARTIAL' | 'UNPAID';
+  due_date?: string | null;
+  bed_label?: string | null;
+  room_number?: string | null;
+  floor_number?: number | null;
+  floor_name?: string | null;
+  room_type?: string | null;
+  /** Names of everyone who collected against this row this period. */
+  collected_by?: string[] | null;
+  /** Most-recent payment timestamp — drives "Avg days to collect". */
+  paid_on?: string | null;
+  actual_move_out_date?: string | null;
 }
 
+export interface RentLedgerStats {
+  expected_paise: number;
+  collected_paise: number;
+  collected_in_period_paise: number;
+  ledger_paid_paise: number;
+  discount_paise: number;
+  settled_paise: number;
+  outstanding_paise: number;
+  advance_received_paise: number;
+  refunds_given_paise: number;
+  power_received_paise: number;
+  daily_stays_paise: number;
+  opening_balance_paise: number;
+  /** Already a 0..100 percentage here (unlike /dashboard/summary's fraction). */
+  collection_rate: number;
+}
+
+export interface RentLedgerCollector {
+  collector: string;
+  rent_paise: number;
+  advance_paise: number;
+  total_paise: number;
+  payments: number;
+}
+
+export interface RentLedgerTransaction {
+  id: string;
+  tenant_id?: string | null;
+  tenant_name?: string | null;
+  amount_paise: number;
+  payment_type: string;
+  payment_mode: string;
+  paid_to?: string | null;
+  reference_number?: string | null;
+  notes?: string | null;
+  collected_at: string;
+}
+
+/** The response key is `stats`, not `totals`, and `collectors`, not `collected_by`. */
 export interface RentLedger {
-  items: RentLedgerRow[];
-  totals: {
-    expected_paise: number;
-    collected_paise: number;
-    outstanding_paise: number;
-    discount_paise: number;
-    advance_paise: number;
-    daily_stays_paise: number;
-    power_paise: number;
-    refunds_paise: number;
-    opening_balance_paise: number;
-  };
-  collected_by?: Record<string, number>;
+  property_id: string;
   month: number;
   year: number;
+  items: RentLedgerRow[];
+  total: number;
+  stats: RentLedgerStats;
+  collectors: RentLedgerCollector[];
+  transactions: RentLedgerTransaction[];
+  period: {
+    start: string;
+    end: string;
+    settlement_day: number;
+    overridden: boolean;
+    prev_overridden: boolean;
+  };
 }
 
 export function useRentLedger(params: {

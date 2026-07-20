@@ -1,22 +1,28 @@
 /**
- * Dashboard — landing tab. Matches web Admin/Partner dashboard shape:
+ * Dashboard — landing tab. Mirrors the web Admin/Partner dashboard:
  *
- *   Header:            greeting + month/year picker
- *   Occupancy row:     % (includes RESERVED) + vacant + reserved-beds hint
- *   Followups tile:    /leads/due-today count, deep-links into the drawer
- *   Section switcher:  Occupancy · Rent · Profit & Loss
- *   KPIs by section:   money-received / money-spent / net / attribution
- *   Overdue banner:    tap → /tabs/rent
- *   Quick actions:     Take payment · Add booking · Check-in · Add lead
+ *   Header:            greeting + property switcher + month picker
+ *   Hero:              net profit for the period, with received/spent/margin
+ *   Occupancy/Collect: two headline KPI tiles
+ *   Today's tasks:     actionable items only, each deep-linking somewhere
+ *   Operating metrics: the six web tiles, each with the formula spelled out
+ *   Money in vs out:   6-month sparkline + attribution
+ *   Quick actions:     Take payment · Booking · Check-in · Leads · Inbox
  *
- * Money endpoints are owner-only on the backend — skip the query when the
- * user can't access financials to avoid a 403 spinner. Non-financial roles
- * see just occupancy + quick actions.
+ * Deliberately ABSENT: the "N tenants have overdue rent from previous months"
+ * banner. Rent chasing lives only in Rent & Payments — the web app removed the
+ * same banner, and duplicating it here just splits the workflow. Overdue is
+ * still surfaced, as a metric tile that deep-links into Rent.
+ *
+ * Money endpoints are owner-only on the backend — skip the query when the user
+ * can't access financials to avoid a 403 spinner. Non-financial roles see just
+ * occupancy + quick actions.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAppStore } from '../../lib/store';
@@ -30,20 +36,22 @@ import {
   ChipStrip,
   Empty,
   Header,
-  KpiCard,
   Loading,
   Row,
   Section,
-  Segmented,
   Sheet,
-  StatusPill,
   rupees,
 } from '../../components/ui';
-import { useDashboardSummary, useOverdueBanner } from '../../lib/hooks/dashboard';
+import { KpiTile, Pill, RankBars, Sparkline, Track } from '../../components/redesign';
+import {
+  occupiedBeds,
+  useCashflow,
+  useDashboardSummary,
+  useOverdueBanner,
+  type DashboardSummary,
+} from '../../lib/hooks/dashboard';
 import { useDueTodayLeads } from '../../lib/hooks/leads';
 import { useProperties } from '../../lib/hooks/properties';
-
-type SectionKey = 'occupancy' | 'rent' | 'pnl';
 
 const MONTHS = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -53,6 +61,14 @@ const MONTHS = [
 function todayMY() {
   const d = new Date();
   return { m: d.getMonth() + 1, y: d.getFullYear() };
+}
+
+/** Compact rupee display for the hero line — "₹4.47L" reads better than the
+ *  full figure at 32px on a 5-inch screen. */
+function lakh(paise: number): string {
+  const rupeeVal = paise / 100;
+  if (Math.abs(rupeeVal) >= 100000) return `₹${(rupeeVal / 100000).toFixed(2)}L`;
+  return rupees(paise);
 }
 
 export default function DashboardTab() {
@@ -68,7 +84,6 @@ export default function DashboardTab() {
   const insets = useSafeAreaInsets();
   const hasFinancials = canAccessFinancials();
   const canRecord = canRecordPayments();
-  const [section, setSection] = useState<SectionKey>('occupancy');
   const [{ m: month, y: year }, setMY] = useState(todayMY);
   const [propPickerOpen, setPropPickerOpen] = useState(false);
 
@@ -80,6 +95,10 @@ export default function DashboardTab() {
     month,
     year,
   });
+  const cashflow = useCashflow({
+    property_id: hasFinancials ? selectedPropertyId ?? undefined : undefined,
+    months: 6,
+  });
   const overdue = useOverdueBanner(hasFinancials ? selectedPropertyId ?? undefined : undefined);
   const followups = useDueTodayLeads();
 
@@ -88,10 +107,51 @@ export default function DashboardTab() {
   }, [voiceGuidance]);
 
   const data = summary.data;
-  const occupiedInclReserved = (data?.occupied_beds ?? 0);
+  const occupied = data ? occupiedBeds(data) : 0;
   const reservedCount = data?.reserved_beds ?? 0;
   const totalBeds = data?.total_beds ?? 0;
-  const occPct = totalBeds > 0 ? Math.round((occupiedInclReserved / totalBeds) * 100) : 0;
+  const occPct = totalBeds > 0 ? Math.round((occupied / totalBeds) * 100) : 0;
+  const collectionPct = Math.round((data?.collection_rate ?? 0) * 100);
+
+  const received = data?.total_received_paise ?? 0;
+  const spent = data?.total_given_paise ?? 0;
+  const net = data?.net_income_paise ?? 0;
+  const marginPct = received > 0 ? Math.round((net / received) * 100) : 0;
+
+  const trend = useMemo(
+    () => (cashflow.data?.items ?? []).map((p) => p.income_paise / 100),
+    [cashflow.data],
+  );
+
+  /** Only actionable rows appear — an empty task card is noise. */
+  const tasks = useMemo(() => {
+    const out: { text: string; action: string; tone: 'r' | 'a' | 'b'; go: () => void }[] = [];
+    if (hasFinancials && overdue.data?.count) {
+      out.push({
+        text: `${overdue.data.count} tenants overdue · ${rupees(overdue.data.amount_paise)}`,
+        action: 'Chase',
+        tone: 'r',
+        go: () => router.push('/tabs/rent'),
+      });
+    }
+    if (followups.data?.count) {
+      out.push({
+        text: `${followups.data.count} leads due for follow-up`,
+        action: 'Open',
+        tone: 'b',
+        go: () => router.push('/tabs/leads'),
+      });
+    }
+    if (data?.vacant_beds) {
+      out.push({
+        text: `${data.vacant_beds} beds free to fill`,
+        action: 'Fill',
+        tone: 'a',
+        go: () => router.push('/tabs/rooms'),
+      });
+    }
+    return out;
+  }, [hasFinancials, overdue.data, followups.data, data?.vacant_beds, router]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -106,6 +166,7 @@ export default function DashboardTab() {
             refreshing={summary.isRefetching || properties.isRefetching}
             onRefresh={() => {
               summary.refetch();
+              cashflow.refetch();
               overdue.refetch();
               followups.refetch();
             }}
@@ -120,8 +181,8 @@ export default function DashboardTab() {
             selectedProp
               ? selectedProp.name
               : properties.isLoading
-              ? 'Loading properties…'
-              : 'No property selected'
+                ? 'Loading properties…'
+                : 'No property selected'
           }
           right={
             properties.data?.items && properties.data.items.length > 1 ? (
@@ -134,7 +195,6 @@ export default function DashboardTab() {
           }
         />
 
-        {/* Month/year picker */}
         <ChipStrip>
           {MONTHS.map((m, i) => (
             <Chip
@@ -153,93 +213,115 @@ export default function DashboardTab() {
 
         <View style={{ height: space.md }} />
 
-        {/* Followups + Overdue banners always at top when actionable */}
-        {followups.data?.count ? (
-          <Card
-            style={styles.banner}
-            onPress={() => router.push({ pathname: '/tabs/leads' })}
+        {/* Hero — the one number an owner opens the app for. */}
+        {hasFinancials && data && (
+          <LinearGradient
+            colors={['#0e9384', '#0b6f64']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.hero}
           >
-            <View style={styles.bannerIcon}>
-              <Ionicons name="alarm-outline" size={20} color={colors.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bannerTitle}>
-                {followups.data.count} follow-up{followups.data.count > 1 ? 's' : ''} due today
+            <View style={styles.heroTop}>
+              <Text style={styles.heroLabel}>
+                NET PROFIT · {MONTHS[month - 1].toUpperCase()}
               </Text>
-              <Text style={styles.bannerHint}>Tap to open Leads</Text>
+              <View style={styles.heroChip}>
+                <Text style={styles.heroChipText}>
+                  {marginPct >= 0 ? '▲' : '▼'} {Math.abs(marginPct)}%
+                </Text>
+              </View>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textDim} />
-          </Card>
-        ) : null}
-
-        {hasFinancials && overdue.data?.count ? (
-          <Card
-            style={{ ...styles.banner, borderColor: colors.danger }}
-            onPress={() => router.push('/tabs/rent')}
-          >
-            <View style={[styles.bannerIcon, { backgroundColor: colors.dangerBg }]}>
-              <Ionicons name="warning" size={20} color={colors.danger} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.bannerTitle, { color: colors.danger }]}>
-                {overdue.data.count} overdue · {rupees(overdue.data.amount_paise)}
+            <Text style={styles.heroValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+              {rupees(net)}
+            </Text>
+            <View style={styles.heroFoot}>
+              <Text style={styles.heroFootText}>
+                Received <Text style={styles.heroFootBold}>{lakh(received)}</Text>
               </Text>
-              <Text style={styles.bannerHint}>Tap to chase in Rent</Text>
+              <Text style={styles.heroFootDot}>·</Text>
+              <Text style={styles.heroFootText}>
+                Spent <Text style={styles.heroFootBold}>{lakh(spent)}</Text>
+              </Text>
+              <Text style={styles.heroFootDot}>·</Text>
+              <Text style={styles.heroFootText}>
+                Margin <Text style={styles.heroFootBold}>{marginPct}%</Text>
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textDim} />
-          </Card>
-        ) : null}
+          </LinearGradient>
+        )}
 
-        {/* Occupancy at the top — same for every role */}
-        <Section title="Occupancy">
-          {summary.isLoading ? (
-            <Loading />
-          ) : (
-            <>
-              <Row gap={space.md} style={{ marginBottom: space.md }}>
-                <KpiCard
-                  label="Occupied"
-                  value={`${occPct}%`}
-                  hint={`${occupiedInclReserved}/${totalBeds}${
-                    reservedCount ? ` · Reserved ${reservedCount}` : ''
-                  }`}
-                  tone="info"
-                  iconName="pie-chart-outline"
-                />
-                <KpiCard
-                  label="Vacant beds"
-                  value={data?.vacant_beds ?? 0}
-                  tone={data?.vacant_beds ? 'success' : 'neutral'}
-                  iconName="bed-outline"
-                  onPress={() => selectedPropertyId && router.push('/tabs/rooms')}
-                />
-              </Row>
-            </>
-          )}
-        </Section>
-
-        {hasFinancials && (
-          <Section title="Money">
-            <Segmented<SectionKey>
-              value={section}
-              onChange={setSection}
-              options={[
-                { value: 'occupancy', label: 'Overview' },
-                { value: 'rent', label: 'Rent' },
-                { value: 'pnl', label: 'P&L' },
-              ]}
-            />
-            <View style={{ height: space.md }} />
-            {summary.isLoading || !data ? (
-              <Loading />
-            ) : section === 'occupancy' ? (
-              <OverviewKpis data={data} />
-            ) : section === 'rent' ? (
-              <RentKpis data={data} />
+        {/* Headline KPIs — shown to every role. */}
+        {summary.isLoading ? (
+          <Loading />
+        ) : (
+          <Row gap={space.sm} style={{ marginBottom: space.md }}>
+            <KpiTile
+              label="Occupancy"
+              value={`${occPct}%`}
+              foot={`${occupied}/${totalBeds} beds${
+                reservedCount ? ` · ${reservedCount} reserved` : ''
+              } · ${data?.vacant_beds ?? 0} free`}
+            >
+              <View style={{ marginTop: 6 }}>
+                <Track pct={occPct} color={colors.accent} />
+              </View>
+            </KpiTile>
+            {hasFinancials ? (
+              <KpiTile
+                label="Collection"
+                value={`${collectionPct}%`}
+                foot={`${rupees(data?.collected_rent_paise ?? 0)} of ${rupees(
+                  data?.expected_rent_paise ?? 0,
+                )} billed`}
+              >
+                <View style={{ marginTop: 6 }}>
+                  <Track
+                    pct={collectionPct}
+                    color={collectionPct >= 90 ? colors.success : colors.warn}
+                  />
+                </View>
+              </KpiTile>
             ) : (
-              <PnlKpis data={data} />
+              <KpiTile
+                label="Vacant beds"
+                value={data?.vacant_beds ?? 0}
+                foot="tap Rooms to fill"
+              />
             )}
-          </Section>
+          </Row>
+        )}
+
+        {/* Today's tasks */}
+        {tasks.length > 0 && (
+          <Card style={styles.taskCard}>
+            <View style={styles.taskHead}>
+              <Text style={styles.taskTitle}>⚡ Today's tasks</Text>
+              <Pill label={String(tasks.length)} tone="a" dot />
+            </View>
+            {tasks.map((task, i) => (
+              <View
+                key={task.text}
+                style={{
+                  ...styles.taskRow,
+                  borderBottomWidth: i === tasks.length - 1 ? 0 : 1,
+                }}
+              >
+                <View
+                  style={{
+                    ...styles.taskDot,
+                    backgroundColor:
+                      task.tone === 'r'
+                        ? colors.danger
+                        : task.tone === 'a'
+                          ? colors.warn
+                          : colors.info,
+                  }}
+                />
+                <Text style={styles.taskText}>{task.text}</Text>
+                <Button variant="secondary" size="sm" label={task.action} onPress={task.go} />
+              </View>
+            ))}
+          </Card>
         )}
 
         {!hasFinancials && (
@@ -252,10 +334,35 @@ export default function DashboardTab() {
         )}
 
         {hasFinancials && data && (
-          <AttributionCards data={data} />
+          <>
+            <OperatingMetrics
+              data={data}
+              received={received}
+              spent={spent}
+              totalBeds={totalBeds}
+              collectionPct={collectionPct}
+              marginPct={marginPct}
+              onOverdue={() => router.push('/tabs/rent')}
+            />
+
+            {trend.length > 1 && (
+              <Section title="Money in · 6 months">
+                <Card>
+                  <Row justify="space-between" style={{ alignItems: 'flex-end' }}>
+                    <Sparkline data={trend} color={colors.accent} width={140} height={44} />
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={styles.trendLabel}>this period</Text>
+                      <Text style={styles.trendValue}>{rupees(received)}</Text>
+                    </View>
+                  </Row>
+                </Card>
+              </Section>
+            )}
+
+            <Attribution data={data} />
+          </>
         )}
 
-        {/* Quick actions */}
         <Section title="Quick actions">
           <View style={{ gap: space.sm }}>
             {canRecord && (
@@ -313,7 +420,6 @@ export default function DashboardTab() {
         </Section>
       </ScrollView>
 
-      {/* Property picker */}
       <Sheet
         open={propPickerOpen}
         onClose={() => setPropPickerOpen(false)}
@@ -358,187 +464,146 @@ export default function DashboardTab() {
   );
 }
 
-// ── KPI groups ──────────────────────────────────────────────────────────────
+// ── Operating metrics ───────────────────────────────────────────────────────
 
-function OverviewKpis({ data }: { data: import('../../lib/hooks/dashboard').DashboardSummary }) {
-  return (
-    <>
-      <Row gap={space.md} style={{ marginBottom: space.md }}>
-        <KpiCard
-          label="Collected"
-          value={rupees(data.rent_collected_paise ?? 0)}
-          hint={`of ${rupees(data.expected_paise ?? 0)} expected`}
-          tone="success"
-          iconName="checkmark-done-outline"
-        />
-        <KpiCard
-          label="Outstanding"
-          value={rupees(data.outstanding_paise ?? 0)}
-          tone={data.outstanding_paise > 0 ? 'danger' : 'neutral'}
-          iconName="warning-outline"
-        />
-      </Row>
-      <Row gap={space.md} style={{ marginBottom: space.md }}>
-        <KpiCard
-          label="Cash-in this month"
-          value={rupees(cashIn(data))}
-          hint="Rent + advance + daily + power"
-          tone="info"
-          iconName="trending-up-outline"
-        />
-        <KpiCard
-          label="Cash-out"
-          value={rupees(cashOut(data))}
-          hint="Expenses + refunds"
-          tone="warn"
-          iconName="trending-down-outline"
-        />
-      </Row>
-    </>
-  );
-}
-
-function RentKpis({ data }: { data: import('../../lib/hooks/dashboard').DashboardSummary }) {
-  const rate = data.expected_paise > 0
-    ? Math.round((data.rent_collected_paise / data.expected_paise) * 100)
-    : 0;
-  return (
-    <>
-      <Row gap={space.md} style={{ marginBottom: space.md }}>
-        <KpiCard
-          label="Expected"
-          value={rupees(data.expected_paise ?? 0)}
-          tone="neutral"
-          iconName="document-text-outline"
-        />
-        <KpiCard
-          label="Collected"
-          value={rupees(data.rent_collected_paise ?? 0)}
-          hint={`${rate}%`}
-          tone="success"
-          iconName="cash-outline"
-        />
-      </Row>
-      <Row gap={space.md} style={{ marginBottom: space.md }}>
-        <KpiCard
-          label="Discount given"
-          value={rupees(data.discount_paise ?? 0)}
-          tone="warn"
-          iconName="pricetag-outline"
-        />
-        <KpiCard
-          label="Advance"
-          value={rupees(data.advance_received_paise ?? 0)}
-          tone="info"
-          iconName="wallet-outline"
-        />
-      </Row>
-      <Row gap={space.md} style={{ marginBottom: space.md }}>
-        <KpiCard
-          label="Daily stays"
-          value={rupees(data.daily_stays_paise ?? 0)}
-          tone="neutral"
-          iconName="calendar-outline"
-        />
-        <KpiCard
-          label="Power meters"
-          value={rupees(data.power_paise ?? 0)}
-          tone="neutral"
-          iconName="flash-outline"
-        />
-      </Row>
-    </>
-  );
-}
-
-function PnlKpis({ data }: { data: import('../../lib/hooks/dashboard').DashboardSummary }) {
-  const inSum = cashIn(data);
-  const outSum = cashOut(data);
-  const net = inSum - outSum;
-  return (
-    <>
-      <Row gap={space.md} style={{ marginBottom: space.md }}>
-        <KpiCard
-          label="Cash In"
-          value={rupees(inSum)}
-          hint="Rent + advance + daily + power"
-          tone="success"
-          iconName="trending-up-outline"
-        />
-        <KpiCard
-          label="Cash Out"
-          value={rupees(outSum)}
-          hint="Expenses + refunds"
-          tone="danger"
-          iconName="trending-down-outline"
-        />
-      </Row>
-      <Row gap={space.md} style={{ marginBottom: space.md }}>
-        <KpiCard
-          label="Net"
-          value={rupees(net)}
-          tone={net >= 0 ? 'success' : 'danger'}
-          iconName={net >= 0 ? 'arrow-up-outline' : 'arrow-down-outline'}
-        />
-        <KpiCard
-          label="Expenses"
-          value={rupees(data.expenses_paise ?? 0)}
-          tone="neutral"
-          iconName="receipt-outline"
-        />
-      </Row>
-    </>
-  );
-}
-
-function AttributionCards({
+/**
+ * The same six metrics as the web dashboard, in the same order. Each carries
+ * its formula in the foot line — these are the numbers owners asked to have
+ * spelled out rather than left as jargon.
+ */
+function OperatingMetrics({
   data,
+  received,
+  spent,
+  totalBeds,
+  collectionPct,
+  marginPct,
+  onOverdue,
 }: {
-  data: import('../../lib/hooks/dashboard').DashboardSummary;
+  data: DashboardSummary;
+  received: number;
+  spent: number;
+  totalBeds: number;
+  collectionPct: number;
+  marginPct: number;
+  onOverdue: () => void;
 }) {
+  const tenants = data.total_tenants ?? 0;
+  const avgRent = tenants > 0 ? Math.round((data.expected_rent_paise ?? 0) / tenants) : 0;
+  const revPerBed = totalBeds > 0 ? Math.round(received / totalBeds) : 0;
+  const expenseRatio = received > 0 ? Math.round((spent / received) * 100) : 0;
+
+  const tiles: { label: string; value: string; foot: string; tone?: 'danger' }[] = [
+    {
+      label: 'Avg rent / tenant',
+      value: tenants > 0 ? rupees(avgRent) : '—',
+      foot: `billed ÷ ${tenants} tenants`,
+    },
+    {
+      label: 'Revenue / bed',
+      value: totalBeds > 0 ? rupees(revPerBed) : '—',
+      foot: `all money in ÷ ${totalBeds} beds`,
+    },
+    {
+      label: 'Collection rate',
+      value: `${collectionPct}%`,
+      foot: 'collected ÷ billed rent',
+    },
+    {
+      label: 'Profit margin',
+      value: `${marginPct}%`,
+      foot: 'profit ÷ received',
+    },
+    {
+      label: 'Expense ratio',
+      value: received > 0 ? `${expenseRatio}%` : '—',
+      foot: 'spent ÷ received · lower is better',
+    },
+    {
+      label: 'Overdue tenants',
+      value: String(data.overdue_tenants ?? 0),
+      foot: data.overdue_tenants > 0 ? 'tap to follow up →' : 'all clear',
+      tone: data.overdue_tenants > 0 ? 'danger' : undefined,
+    },
+  ];
+
+  return (
+    <Section title="Operating metrics">
+      <View style={{ gap: space.sm }}>
+        {[0, 2, 4].map((start) => (
+          <Row key={start} gap={space.sm}>
+            {tiles.slice(start, start + 2).map((tile) => (
+              <KpiTile
+                key={tile.label}
+                label={tile.label}
+                value={tile.value}
+                foot={tile.foot}
+                tone={tile.tone}
+              />
+            ))}
+          </Row>
+        ))}
+      </View>
+      {data.overdue_tenants > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          label="Open Rent & Payments"
+          iconName="arrow-forward"
+          onPress={onOverdue}
+          style={{ marginTop: space.sm }}
+        />
+      )}
+    </Section>
+  );
+}
+
+// ── Attribution ─────────────────────────────────────────────────────────────
+
+function Attribution({ data }: { data: DashboardSummary }) {
   const cashInBy = Object.entries(data.cash_in_by_person ?? {}).sort(([, a], [, b]) => b - a);
   const spentBy = Object.entries(data.expenses_by_person ?? {}).sort(([, a], [, b]) => b - a);
-  if (!cashInBy.length && !spentBy.length && !data.owner_split?.length) return null;
+  const owners = data.owner_profits ?? [];
+  if (!cashInBy.length && !spentBy.length && !owners.length) return null;
+
+  const toRows = (entries: [string, number][], color: string) => {
+    const max = Math.max(...entries.map(([, v]) => v), 1);
+    return entries.map(([name, amt]) => ({
+      label: name,
+      value: rupees(amt),
+      pct: (amt / max) * 100,
+      color,
+    }));
+  };
+
   return (
     <>
       {cashInBy.length > 0 && (
         <Section title="Cash-in by person">
           <Card>
-            {cashInBy.map(([name, amt]) => (
-              <Row key={name} justify="space-between" style={styles.rowLine}>
-                <Text style={styles.rowName}>{name}</Text>
-                <StatusPill label={rupees(amt)} tone="success" />
-              </Row>
-            ))}
+            <RankBars rows={toRows(cashInBy, colors.success)} />
           </Card>
         </Section>
       )}
       {spentBy.length > 0 && (
-        <Section title="Expenses by person">
+        <Section title="Spend by person">
           <Card>
-            {spentBy.map(([name, amt]) => (
-              <Row key={name} justify="space-between" style={styles.rowLine}>
-                <Text style={styles.rowName}>{name}</Text>
-                <StatusPill label={rupees(amt)} tone="warn" />
-              </Row>
-            ))}
+            <RankBars rows={toRows(spentBy, colors.warn)} />
           </Card>
         </Section>
       )}
-      {!!data.owner_split?.length && (
+      {owners.length > 0 && (
         <Section title="Owner profit split">
           <Card>
-            {data.owner_split.map((o) => (
-              <Row key={o.name} justify="space-between" style={styles.rowLine}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rowName}>{o.name}</Text>
-                  <Text style={{ color: colors.textMuted, fontSize: fontSize.caption }}>
-                    {o.share_pct}%
-                  </Text>
-                </View>
-                <StatusPill label={rupees(o.amount_paise)} tone="info" />
-              </Row>
-            ))}
+            <RankBars
+              rows={owners.map((o) => ({
+                label: o.name,
+                sub: `${o.share_pct}%`,
+                value: rupees(o.amount_paise),
+                pct: o.share_pct,
+                color: colors.info,
+              }))}
+            />
           </Card>
         </Section>
       )}
@@ -546,46 +611,57 @@ function AttributionCards({
   );
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function cashIn(d: import('../../lib/hooks/dashboard').DashboardSummary): number {
-  return (
-    (d.rent_collected_paise ?? 0) +
-    (d.advance_received_paise ?? 0) +
-    (d.daily_stays_paise ?? 0) +
-    (d.power_paise ?? 0)
-  );
-}
-
-function cashOut(d: import('../../lib/hooks/dashboard').DashboardSummary): number {
-  return (d.expenses_paise ?? 0) + (d.refunds_paise ?? 0);
-}
-
 const styles = StyleSheet.create({
-  banner: {
+  hero: {
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: space.md,
+  },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroLabel: { color: '#ffffff', opacity: 0.9, fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  heroChip: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+  },
+  heroChipText: { color: '#ffffff', fontSize: 10.5, fontWeight: '800' },
+  heroValue: {
+    color: '#ffffff',
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+    marginTop: 4,
+  },
+  heroFoot: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 9, flexWrap: 'wrap' },
+  heroFootText: { color: '#ffffff', opacity: 0.95, fontSize: 11 },
+  heroFootBold: { fontWeight: '800' },
+  heroFootDot: { color: '#ffffff', opacity: 0.55, fontSize: 11 },
+
+  taskCard: {
+    marginBottom: space.md,
+    borderColor: colors.warnLine,
+    backgroundColor: '#fffdf6',
+  },
+  taskHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.md,
-    marginBottom: space.md,
-    padding: space.md,
+    justifyContent: 'space-between',
+    marginBottom: space.sm,
   },
-  bannerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    backgroundColor: colors.accentBg,
+  taskTitle: { fontSize: 13, fontWeight: '800', color: colors.text },
+  taskRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: space.sm,
+    paddingVertical: 9,
+    borderBottomColor: colors.borderSoft,
   },
-  bannerTitle: { fontSize: fontSize.body, fontWeight: '700', color: colors.text },
-  bannerHint: { fontSize: fontSize.caption, color: colors.textMuted, marginTop: 2 },
+  taskDot: { width: 6, height: 6, borderRadius: 3 },
+  taskText: { flex: 1, fontSize: 12, fontWeight: '600', color: colors.text },
 
-  rowLine: {
-    paddingVertical: space.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  rowName: { fontSize: fontSize.body, color: colors.text, fontWeight: '600' },
+  trendLabel: { fontSize: 11, color: colors.textDim, fontWeight: '600' },
+  trendValue: { fontSize: 15, fontWeight: '800', color: colors.text },
 
   note: { fontSize: fontSize.small, color: colors.textMuted, lineHeight: 20 },
 });

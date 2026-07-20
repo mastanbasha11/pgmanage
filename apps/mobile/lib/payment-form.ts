@@ -42,6 +42,19 @@ export function mapPaymentTypeForApi(uiType: PaymentType): Exclude<PaymentType, 
   return uiType === 'DAILY' ? 'RENT' : uiType;
 }
 
+/** The exact members of `payment_mode_enum` (see schemas_migration.py). */
+export type ApiPaymentMode = 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE';
+
+/**
+ * The UI says "Bank"; the enum member is BANK_TRANSFER. Sending the UI label
+ * straight through made `CAST(:mode AS payment_mode_enum)` fail in Postgres —
+ * every Bank payment and Bank booking 500'd. Same rewrite pattern as
+ * mapPaymentTypeForApi, so both live in one place.
+ */
+export function mapPaymentModeForApi(uiMode: PaymentMode): ApiPaymentMode {
+  return uiMode === 'BANK' ? 'BANK_TRANSFER' : uiMode;
+}
+
 /**
  * Tenant-less revenue capture. The web app has a separate /bookings UI for
  * this; on mobile we expose it on the same Add Payment screen via a
@@ -82,7 +95,7 @@ export function buildBookingBody(input: BuildBookingBodyInput): Record<string, u
     room_label: input.roomLabel,
     kind: input.kind,
     amount_paise: Math.round(input.amountRupees * 100),
-    payment_mode: input.mode,
+    payment_mode: mapPaymentModeForApi(input.mode),
     check_in_date: input.checkInDate,
     collected_at: input.collectedOn,
   };
@@ -122,7 +135,7 @@ export function buildPaymentBody(input: BuildPaymentBodyInput): Record<string, u
     tenant_id: input.tenantId,
     amount_paise: Math.round(input.amountRupees * 100),
     payment_type: mapPaymentTypeForApi(input.type),
-    payment_mode: input.mode,
+    payment_mode: mapPaymentModeForApi(input.mode),
   };
   if (input.paidTo) body.paid_to = input.paidTo;
   if (showReference(input.mode) && input.referenceNumber) {

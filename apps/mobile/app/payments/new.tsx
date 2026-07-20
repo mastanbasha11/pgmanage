@@ -2,7 +2,7 @@
  * Add Payment / Add Booking. One screen, two modes:
  *
  *   - Tenant payment  → POST /payments. Used for an existing resident:
- *       Rent / Advance / Deposit / Refund / Food / Other.
+ *       Rent / Advance / Daily / Deposit / Refund / Other.
  *
  *   - New guest      → POST /bookings. Used for someone who isn't (yet)
  *       a tenant: Daily stay (walk-in) or Advance booking (future move-in).
@@ -13,17 +13,20 @@
  * Mirrors the split between web's AddPaymentDialog (/payments) and
  * BookingsPage (/bookings) but in one screen.
  *
+ * Visual language: collector-first. Teal band → find the resident → one big
+ * amount → mode → confirm. Everything optional is pushed below the fold.
+ *
  * OWNER / PARTNER / PROPERTY_MANAGER only (canRecordPayments gate).
  */
 import { useEffect, useState } from 'react';
 import {
   Alert,
-  FlatList,
   Linking,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -35,14 +38,14 @@ import { useAppStore } from '../../lib/store';
 import { t } from '../../lib/i18n';
 import { colors, radius, space, type as fontSize, TOUCH_TARGET } from '../../lib/theme';
 import {
+  Avatar,
   Button,
   Card,
   Field,
-  Header,
-  IconButton,
   rupees,
   Screen,
 } from '../../components/ui';
+import { Pill } from '../../components/redesign';
 import {
   buildBookingBody,
   buildPaymentBody,
@@ -72,12 +75,23 @@ const BOOKING_KIND_LABEL: Record<BookingKind, string> = {
   ADVANCE: 'Advance booking',
 };
 
+/** 'Bank' here is the UI label; `mapPaymentModeForApi` in lib/payment-form.ts
+ *  translates it to the BANK_TRANSFER enum member before the request goes out. */
+const MODE_META: Array<{ value: Mode; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  { value: 'UPI', label: 'UPI', icon: 'phone-portrait-outline' },
+  { value: 'CASH', label: 'Cash', icon: 'cash-outline' },
+  { value: 'BANK', label: 'Bank', icon: 'business-outline' },
+];
+
 interface TenantHit {
   id: string;
   name: string;
   phone: string;
-  room_number?: string;
-  bed_label?: string;
+  room_number?: string | null;
+  bed_label?: string | null;
+  outstanding_paise?: number | null;
+  monthly_rent_paise?: number | null;
+  rent_status?: string | null;
 }
 
 export default function AddPaymentScreen() {
@@ -91,7 +105,7 @@ export default function AddPaymentScreen() {
   }>();
   const router = useRouter();
   const qc = useQueryClient();
-  const { selectedPropertyId, canRecordPayments } = useAppStore();
+  const { selectedPropertyId, canRecordPayments, user } = useAppStore();
 
   // Owner / Partner / Property manager only.
   useEffect(() => {
@@ -116,6 +130,9 @@ export default function AddPaymentScreen() {
   const [tenantId, setTenantId] = useState(params.tenant_id ?? '');
   const [tenantName, setTenantName] = useState(params.name ?? '');
   const [tenantQuery, setTenantQuery] = useState('');
+  /** Full row for the picked resident — drives the summary card + quick chips.
+   *  Stays null on a deep link (?tenant_id=…), which only carries id + name. */
+  const [picked, setPicked] = useState<TenantHit | null>(null);
 
   // ── GUEST/booking mode state ─────────────────────────────────────────────
   const [bookingKind, setBookingKind] = useState<BookingKind>('DAILY');
@@ -135,6 +152,7 @@ export default function AddPaymentScreen() {
   const [forDays, setForDays] = useState('30');
   const [collectedOn, setCollectedOn] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
+  const [showMore, setShowMore] = useState(false);
 
   // Inline tenant search (TENANT mode only).
   const { data: tenantHits } = useQuery({
@@ -159,6 +177,10 @@ export default function AddPaymentScreen() {
   const bookingMutation = useCreateBooking();
   const isPending = payMutation.isPending || bookingMutation.isPending;
 
+  const amountPaise = Math.round((Number(amount) || 0) * 100);
+  const outstandingPaise = picked?.outstanding_paise ?? 0;
+  const monthlyRentPaise = picked?.monthly_rent_paise ?? 0;
+
   async function submit() {
     const rupeesValue = Number(amount);
     if (!Number.isFinite(rupeesValue) || rupeesValue <= 0) {
@@ -173,17 +195,17 @@ export default function AddPaymentScreen() {
           return;
         }
         const body = buildPaymentBody({
-          tenantId,
-          amountRupees: rupeesValue,
-          type,
-          mode,
-          paidTo: paidTo || undefined,
-          referenceNumber: referenceNumber || undefined,
-          forMonth: Number(forMonth) || undefined,
-          forYear: Number(forYear) || undefined,
-          forDays: Number(forDays) || undefined,
-          collectedOn,
-          notes: notes || undefined,
+            tenantId,
+            amountRupees: rupeesValue,
+            type,
+            mode,
+            paidTo: paidTo || undefined,
+            referenceNumber: referenceNumber || undefined,
+            forMonth: Number(forMonth) || undefined,
+            forYear: Number(forYear) || undefined,
+            forDays: Number(forDays) || undefined,
+            collectedOn,
+            notes: notes || undefined,
         });
         await payMutation.mutateAsync(body);
       } else {
@@ -200,19 +222,19 @@ export default function AddPaymentScreen() {
           return;
         }
         const body = buildBookingBody({
-          propertyId: selectedPropertyId,
-          guestName: guestName.trim(),
-          guestPhone: guestPhone.trim() || undefined,
-          roomLabel: roomLabel.trim(),
-          kind: bookingKind,
-          amountRupees: rupeesValue,
-          mode,
-          paidTo: paidTo || undefined,
-          referenceNumber: referenceNumber || undefined,
-          checkInDate,
-          checkOutDate: checkOutDate || undefined,
-          collectedOn,
-          notes: notes || undefined,
+            propertyId: selectedPropertyId,
+            guestName: guestName.trim(),
+            guestPhone: guestPhone.trim() || undefined,
+            roomLabel: roomLabel.trim(),
+            kind: bookingKind,
+            amountRupees: rupeesValue,
+            mode,
+            paidTo: paidTo || undefined,
+            referenceNumber: referenceNumber || undefined,
+            checkInDate,
+            checkOutDate: checkOutDate || undefined,
+            collectedOn,
+            notes: notes || undefined,
         });
         await bookingMutation.mutateAsync(body);
       }
@@ -245,293 +267,406 @@ export default function AddPaymentScreen() {
     router.back();
   }
 
+  const confirmLabel = `✓ Confirm${amountPaise > 0 ? ` ${rupees(amountPaise)}` : ''} · ${
+    MODE_META.find((m) => m.value === mode)?.label ?? mode
+  }`;
+
   return (
     <Screen padded={false}>
-      <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.md }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-          <IconButton name="arrow-back" accessibilityLabel="Back" onPress={() => router.back()} />
-          <Header
-            title={entryMode === 'TENANT' ? t('res.record_payment') : 'Add booking'}
-            subtitle={
-              entryMode === 'TENANT' ? tenantName || 'For an existing resident' : 'For a new guest'
-            }
-          />
+      {/* Teal band — identity of the screen, and the mode switch lives in it
+          so the very first decision is made before anything else renders. */}
+      <View style={styles.band}>
+        <View style={styles.bandTop}>
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={10}
+            style={styles.bandBack}
+          >
+            <Ionicons name="arrow-back" size={22} color={colors.white} />
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bandTitle} numberOfLines={1}>
+              {entryMode === 'TENANT' ? t('res.record_payment') : 'Add booking'}
+            </Text>
+            <Text style={styles.bandSub} numberOfLines={1}>
+              {entryMode === 'TENANT'
+                ? tenantName || 'For an existing resident'
+                : 'For a new guest'}
+            </Text>
+          </View>
         </View>
 
-        {/* Mode picker — TENANT vs GUEST. The single biggest UX choice on
-            this screen; everything else flows from this. */}
-        <Card>
-          <Text style={styles.sectionLabel}>This payment is for…</Text>
-          <View style={{ flexDirection: 'row', gap: space.sm }}>
-            <ModePill
-              label="Existing resident"
-              icon="person-outline"
-              active={entryMode === 'TENANT'}
-              onPress={() => setEntryMode('TENANT')}
-            />
-            <ModePill
-              label="New guest"
-              icon="bed-outline"
-              active={entryMode === 'GUEST'}
-              onPress={() => setEntryMode('GUEST')}
-            />
-          </View>
-        </Card>
+        <View style={styles.bandSwitch}>
+          <BandTab
+            label="Existing resident"
+            icon="person-outline"
+            active={entryMode === 'TENANT'}
+            onPress={() => setEntryMode('TENANT')}
+          />
+          <BandTab
+            label="New guest"
+            icon="bed-outline"
+            active={entryMode === 'GUEST'}
+            onPress={() => setEntryMode('GUEST')}
+          />
+        </View>
+      </View>
 
+      <ScrollView
+        contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl, gap: space.md }}
+        keyboardShouldPersistTaps="handled"
+      >
         {entryMode === 'TENANT' ? (
+          tenantId ? (
+            <>
+              {/* Picked resident — tinted so the eye lands here first. */}
+              <View style={styles.tenantCard}>
+                <Avatar name={tenantName || 'Resident'} size={44} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.tenantName} numberOfLines={1}>
+                    {tenantName || tenantId}
+                  </Text>
+                  <View style={styles.tenantMetaRow}>
+                    {!!picked?.room_number && (
+                      <Text style={styles.tenantMeta} numberOfLines={1}>
+                        {picked.room_number}
+                        {picked.bed_label ? `·${picked.bed_label}` : ''}
+                      </Text>
+                    )}
+                    {outstandingPaise > 0 ? (
+                      <Pill label={`${rupees(outstandingPaise)} due`} tone="r" dot />
+                    ) : picked ? (
+                      <Pill label="No dues" tone="g" dot />
+                    ) : null}
+                  </View>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    setTenantId('');
+                    setTenantName('');
+                    setPicked(null);
+                  }}
+                  accessibilityRole="button"
+                  hitSlop={8}
+                >
+                  <Text style={styles.changeLink}>Change</Text>
+                </Pressable>
+              </View>
+
+              {/* The amount. Deliberately the largest thing on the screen. */}
+              <View style={styles.amountBlock}>
+                <Text style={styles.amountCurrency}>₹</Text>
+                <TextInput
+                  value={amount}
+                  onChangeText={setAmount}
+                  keyboardType="numeric"
+                  placeholder="0"
+                  placeholderTextColor={colors.textDim}
+                  style={styles.amountInput}
+                  accessibilityLabel="Amount in rupees"
+                />
+              </View>
+
+              <View style={styles.quickRow}>
+                {outstandingPaise > 0 && (
+                  <QuickChip
+                    label={`Full ${rupees(outstandingPaise)}`}
+                    onPress={() => setAmount(String(Math.round(outstandingPaise / 100)))}
+                  />
+                )}
+                {monthlyRentPaise > 0 && (
+                  <QuickChip
+                    label={`Rent ${rupees(monthlyRentPaise)}`}
+                    onPress={() => setAmount(String(Math.round(monthlyRentPaise / 100)))}
+                  />
+                )}
+                {!!amount && <QuickChip label="Clear" onPress={() => setAmount('')} />}
+              </View>
+
+              <Card>
+                <Text style={styles.sectionLabel}>Payment type</Text>
+                <View style={styles.chipRow}>
+                  {(['RENT', 'ADVANCE', 'DAILY', 'DEPOSIT', 'REFUND', 'OTHER_CHARGE'] as const).map(
+                    (opt) => {
+                      const active = type === opt;
+                      return (
+                        <Pressable
+                          key={opt}
+                          onPress={() => setType(opt)}
+                          style={[styles.typeChip, active && styles.typeChipActive]}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                        >
+                          <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
+                            {PAYMENT_TYPE_LABEL[opt]}
+                          </Text>
+                        </Pressable>
+                      );
+                    },
+                  )}
+                </View>
+
+                {(showDays || showMonthYear) && (
+                  <View style={{ marginTop: space.md }}>
+                    {showDays && (
+                      <Field
+                        label="Days"
+                        value={forDays}
+                        onChangeText={setForDays}
+                        keyboardType="numeric"
+                      />
+                    )}
+                    {showMonthYear && (
+                      <View style={{ flexDirection: 'row', gap: space.sm }}>
+                        <View style={{ flex: 1 }}>
+                          <Field
+                            label="Month"
+                            value={forMonth}
+                            onChangeText={setForMonth}
+                            keyboardType="numeric"
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Field
+                            label="Year"
+                            value={forYear}
+                            onChangeText={setForYear}
+                            keyboardType="numeric"
+                          />
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </Card>
+            </>
+          ) : (
+            /* Nothing matters until a resident is chosen — so this is the
+               only thing on screen when none is. */
+            <Card>
+              <Text style={styles.sectionLabel}>Who is paying?</Text>
+              <Field
+                label=""
+                value={tenantQuery}
+                onChangeText={setTenantQuery}
+                placeholder="Search by name / phone / room…"
+                autoFocus
+                style={{ marginBottom: space.sm }}
+              />
+              {(tenantHits?.items ?? []).map((item) => (
+                <Pressable
+                  key={item.id}
+                  onPress={() => {
+                    setTenantId(item.id);
+                    setTenantName(item.name);
+                    setPicked(item);
+                  }}
+                  style={styles.hitRow}
+                  android_ripple={{ color: 'rgba(0,0,0,0.06)' }}
+                >
+                  <Avatar name={item.name} size={34} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.hitName} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <Text style={styles.hitMeta} numberOfLines={1}>
+                      {item.phone}
+                      {item.room_number ? ` · ${item.room_number}` : ''}
+                      {item.bed_label ? `·${item.bed_label}` : ''}
+                    </Text>
+                  </View>
+                  {(item.outstanding_paise ?? 0) > 0 && (
+                    <Pill label={rupees(item.outstanding_paise ?? 0)} tone="r" dot />
+                  )}
+                  <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+                </Pressable>
+              ))}
+              {!!tenantQuery && (tenantHits?.items ?? []).length === 0 && (
+                <Text style={styles.hitEmpty}>No matches</Text>
+              )}
+            </Card>
+          )
+        ) : (
           <>
             <Card>
-              <Text style={styles.sectionLabel}>Payment type</Text>
+              <Text style={styles.sectionLabel}>Booking type</Text>
               <View style={styles.chipRow}>
-                {(['RENT', 'ADVANCE', 'DAILY', 'DEPOSIT', 'REFUND', 'OTHER_CHARGE'] as const).map(
-                  (opt) => {
-                    const active = type === opt;
-                    return (
-                      <Pressable
-                        key={opt}
-                        onPress={() => setType(opt)}
-                        style={[styles.typeChip, active && styles.typeChipActive]}
-                      >
-                        <Text
-                          style={[styles.typeChipText, active && styles.typeChipTextActive]}
-                        >
-                          {PAYMENT_TYPE_LABEL[opt]}
-                        </Text>
-                      </Pressable>
-                    );
-                  },
-                )}
+                {(['DAILY', 'ADVANCE'] as const).map((opt) => {
+                  const active = bookingKind === opt;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setBookingKind(opt)}
+                      style={[styles.typeChip, active && styles.typeChipActive]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                    >
+                      <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
+                        {BOOKING_KIND_LABEL[opt]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={{ marginTop: space.md }}>
+                <Field label="Guest name" value={guestName} onChangeText={setGuestName} required />
+                <Field
+                  label="Guest phone (optional)"
+                  value={guestPhone}
+                  onChangeText={setGuestPhone}
+                  keyboardType="phone-pad"
+                />
+                <Field
+                  label="Room (e.g. 101-A)"
+                  value={roomLabel}
+                  onChangeText={setRoomLabel}
+                  required
+                />
+                <View style={{ flexDirection: 'row', gap: space.sm }}>
+                  <View style={{ flex: 1 }}>
+                    <Field
+                      label={bookingKind === 'ADVANCE' ? 'Planned move-in' : 'Check-in'}
+                      value={checkInDate}
+                      onChangeText={setCheckInDate}
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Field
+                      label={bookingKind === 'ADVANCE' ? 'Planned move-out' : 'Check-out'}
+                      value={checkOutDate}
+                      onChangeText={setCheckOutDate}
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </View>
+                </View>
               </View>
             </Card>
 
-            <Card>
-              <Text style={styles.sectionLabel}>Resident</Text>
-              {tenantId ? (
-                <View style={styles.tenantPickedRow}>
-                  <Ionicons name="person-circle-outline" size={28} color={colors.accent} />
-                  <Text style={styles.tenantPickedName} numberOfLines={1}>
-                    {tenantName || tenantId}
-                  </Text>
-                  <Pressable
-                    onPress={() => {
-                      setTenantId('');
-                      setTenantName('');
-                    }}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.changeLink}>Change</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <>
-                  <Field
-                    label=""
-                    value={tenantQuery}
-                    onChangeText={setTenantQuery}
-                    placeholder="Search by name / phone / room…"
-                    autoFocus
-                    style={{ marginBottom: space.sm }}
-                  />
-                  <FlatList
-                    data={tenantHits?.items ?? []}
-                    keyExtractor={(tn) => tn.id}
-                    scrollEnabled={false}
-                    renderItem={({ item }) => (
-                      <Pressable
-                        onPress={() => {
-                          setTenantId(item.id);
-                          setTenantName(item.name);
-                        }}
-                        style={styles.hitRow}
-                        android_ripple={{ color: 'rgba(0,0,0,0.06)' }}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.hitName}>{item.name}</Text>
-                          <Text style={styles.hitMeta}>
-                            {item.phone}
-                            {item.room_number ? ` · ${item.room_number}` : ''}
-                            {item.bed_label ? `·${item.bed_label}` : ''}
-                          </Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-                      </Pressable>
-                    )}
-                    ListEmptyComponent={
-                      tenantQuery ? (
-                        <Text style={styles.hitEmpty}>No matches</Text>
-                      ) : null
-                    }
-                  />
-                </>
-              )}
-            </Card>
+            <View style={styles.amountBlock}>
+              <Text style={styles.amountCurrency}>₹</Text>
+              <TextInput
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="numeric"
+                placeholder="0"
+                placeholderTextColor={colors.textDim}
+                style={styles.amountInput}
+                accessibilityLabel="Amount in rupees"
+              />
+            </View>
           </>
-        ) : (
-          <Card>
-            <Text style={styles.sectionLabel}>Booking type</Text>
-            <View style={styles.chipRow}>
-              {(['DAILY', 'ADVANCE'] as const).map((opt) => {
-                const active = bookingKind === opt;
+        )}
+
+        {/* Mode — three across, the only thing between amount and confirm. */}
+        {(entryMode === 'GUEST' || !!tenantId) && (
+          <>
+            <View style={styles.modeRow}>
+              {MODE_META.map((m) => {
+                const active = mode === m.value;
                 return (
                   <Pressable
-                    key={opt}
-                    onPress={() => setBookingKind(opt)}
-                    style={[styles.typeChip, active && styles.typeChipActive]}
+                    key={m.value}
+                    onPress={() => setMode(m.value)}
+                    style={[styles.modeChip, active && styles.modeChipActive]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
                   >
-                    <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
-                      {BOOKING_KIND_LABEL[opt]}
+                    <Ionicons
+                      name={m.icon}
+                      size={18}
+                      color={active ? colors.white : colors.textMuted}
+                    />
+                    <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>
+                      {m.label}
                     </Text>
                   </Pressable>
                 );
               })}
             </View>
 
-            <View style={{ marginTop: space.md }}>
-              <Field label="Guest name" value={guestName} onChangeText={setGuestName} required />
-              <Field
-                label="Guest phone (optional)"
-                value={guestPhone}
-                onChangeText={setGuestPhone}
-                keyboardType="phone-pad"
-              />
-              <Field
-                label="Room (e.g. 101-A)"
-                value={roomLabel}
-                onChangeText={setRoomLabel}
-                required
-              />
-              <View style={{ flexDirection: 'row', gap: space.sm }}>
-                <View style={{ flex: 1 }}>
-                  <Field
-                    label={bookingKind === 'ADVANCE' ? 'Planned move-in' : 'Check-in'}
-                    value={checkInDate}
-                    onChangeText={setCheckInDate}
-                    placeholder="YYYY-MM-DD"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Field
-                    label={bookingKind === 'ADVANCE' ? 'Planned move-out' : 'Check-out'}
-                    value={checkOutDate}
-                    onChangeText={setCheckOutDate}
-                    placeholder="YYYY-MM-DD"
-                  />
-                </View>
-              </View>
-            </View>
-          </Card>
-        )}
-
-        {/* Amount + period/days (TENANT only). */}
-        <Card>
-          <View style={{ flexDirection: 'row', gap: space.sm }}>
-            <View style={{ flex: 2 }}>
-              <Field
-                label="Amount (₹)"
-                value={amount}
-                onChangeText={setAmount}
-                keyboardType="numeric"
-                placeholder="0"
-                required
-              />
-            </View>
-            {entryMode === 'TENANT' && showDays && (
+            {/* Who is taking the money. Display-only — `paid_to` below is the
+                field that actually rides along on the request. */}
+            <View style={styles.collectedBy}>
+              <Ionicons name="person-circle-outline" size={22} color={colors.accent} />
               <View style={{ flex: 1 }}>
-                <Field
-                  label="Days"
-                  value={forDays}
-                  onChangeText={setForDays}
-                  keyboardType="numeric"
-                />
+                <Text style={styles.collectedByLabel}>Collected by</Text>
+                <Text style={styles.collectedByName} numberOfLines={1}>
+                  {user?.name ?? 'You'}
+                </Text>
               </View>
+              <Text style={styles.collectedByDate}>{collectedOn}</Text>
+            </View>
+
+            <Pressable
+              onPress={() => setShowMore((v) => !v)}
+              style={styles.moreToggle}
+              accessibilityRole="button"
+            >
+              <Text style={styles.moreToggleText}>
+                {showMore ? 'Hide details' : 'Reference, notes, date…'}
+              </Text>
+              <Ionicons
+                name={showMore ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color={colors.accent}
+              />
+            </Pressable>
+
+            {showMore && (
+              <Card>
+                <Field
+                  label="Collected on"
+                  value={collectedOn}
+                  onChangeText={setCollectedOn}
+                  placeholder="YYYY-MM-DD"
+                />
+                <Field
+                  label="Paid to / by"
+                  value={paidTo}
+                  onChangeText={setPaidTo}
+                  placeholder="Suresh, Owner, Manager…"
+                />
+                {showReference && (
+                  <Field
+                    label="Reference / UPI ref #"
+                    value={referenceNumber}
+                    onChangeText={setReferenceNumber}
+                    placeholder="UPI ref id / txn id"
+                  />
+                )}
+                <Field
+                  label="Notes (optional)"
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="e.g. Daily stay 5 days"
+                />
+              </Card>
             )}
-          </View>
 
-          {entryMode === 'TENANT' && showMonthYear && (
-            <View style={{ flexDirection: 'row', gap: space.sm }}>
-              <View style={{ flex: 1 }}>
-                <Field
-                  label="Month"
-                  value={forMonth}
-                  onChangeText={setForMonth}
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Field
-                  label="Year"
-                  value={forYear}
-                  onChangeText={setForYear}
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
-          )}
-
-          <Field
-            label="Collected on"
-            value={collectedOn}
-            onChangeText={setCollectedOn}
-            placeholder="YYYY-MM-DD"
-          />
-        </Card>
-
-        {/* Mode + paid-to/by + reference */}
-        <Card>
-          <Text style={styles.sectionLabel}>Mode</Text>
-          <View style={[styles.chipRow, { marginBottom: space.md }]}>
-            {(['CASH', 'UPI', 'BANK'] as const).map((m) => {
-              const active = mode === m;
-              return (
-                <Pressable
-                  key={m}
-                  onPress={() => setMode(m)}
-                  style={[styles.modeChip, active && styles.modeChipActive]}
-                >
-                  <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>
-                    {m}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Field
-            label="Paid to / by"
-            value={paidTo}
-            onChangeText={setPaidTo}
-            placeholder="Suresh, Owner, Manager…"
-          />
-          {showReference && (
-            <Field
-              label="Reference / UPI ref #"
-              value={referenceNumber}
-              onChangeText={setReferenceNumber}
-              placeholder="UPI ref id / txn id"
+            <Button
+              variant="primary"
+              label={confirmLabel}
+              onPress={submit}
+              loading={isPending}
+              block
             />
-          )}
-          <Field
-            label="Notes (optional)"
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="e.g. Daily stay 5 days"
-          />
-        </Card>
 
-        <Button
-          variant="primary"
-          iconName="checkmark-circle-outline"
-          label={`Record${amount ? ` · ${rupees(Number(amount) * 100)}` : ''}`}
-          onPress={submit}
-          loading={isPending}
-          block
-        />
+            <Text style={styles.footnote}>
+              Recorded against this property and written to the Audit log. You&apos;ll be offered a
+              WhatsApp receipt to share once it saves.
+            </Text>
+          </>
+        )}
       </ScrollView>
     </Screen>
   );
 }
 
-function ModePill({
+function BandTab({
   label,
   icon,
   active,
@@ -545,17 +680,117 @@ function ModePill({
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.modePill, active && styles.modePillActive]}
+      style={[styles.bandTab, active && styles.bandTabActive]}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
     >
-      <Ionicons name={icon} size={18} color={active ? colors.white : colors.textMuted} />
-      <Text style={[styles.modePillText, active && styles.modePillTextActive]}>{label}</Text>
+      <Ionicons name={icon} size={16} color={active ? colors.accent : 'rgba(255,255,255,0.85)'} />
+      <Text style={[styles.bandTabText, active && styles.bandTabTextActive]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function QuickChip({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={styles.quickChip} accessibilityRole="button">
+      <Text style={styles.quickChipText}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  band: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    paddingBottom: space.md,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  bandTop: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  bandBack: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -space.xs,
+  },
+  bandTitle: { fontSize: fontSize.h2, fontWeight: '800', color: colors.white },
+  bandSub: { fontSize: fontSize.small, color: 'rgba(255,255,255,0.82)', marginTop: 1 },
+
+  bandSwitch: {
+    flexDirection: 'row',
+    gap: space.xs,
+    marginTop: space.md,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderRadius: radius.md,
+    padding: 3,
+  },
+  bandTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 38,
+    borderRadius: radius.sm,
+    paddingHorizontal: space.sm,
+  },
+  bandTabActive: { backgroundColor: colors.white },
+  bandTabText: { fontSize: fontSize.small, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
+  bandTabTextActive: { color: colors.accent },
+
+  tenantCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: colors.accentBg,
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: radius.lg,
+    padding: space.md,
+  },
+  tenantName: { fontSize: fontSize.bodyLg, fontWeight: '800', color: colors.text },
+  tenantMetaRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: 3 },
+  tenantMeta: { fontSize: fontSize.small, color: colors.textMuted, fontWeight: '600' },
+  changeLink: { color: colors.accentSoft, fontWeight: '800', fontSize: fontSize.small },
+
+  amountBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingVertical: space.sm,
+  },
+  amountCurrency: { fontSize: 26, fontWeight: '800', color: colors.textMuted },
+  amountInput: {
+    fontSize: 34,
+    fontWeight: '800',
+    color: colors.text,
+    minWidth: 120,
+    maxWidth: '75%',
+    textAlign: 'center',
+    paddingVertical: 0,
+  },
+
+  quickRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.sm,
+    justifyContent: 'center',
+  },
+  quickChip: {
+    paddingHorizontal: space.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  quickChipText: { fontSize: fontSize.small, fontWeight: '700', color: colors.text },
+
   sectionLabel: {
     fontSize: fontSize.small,
     fontWeight: '700',
@@ -577,64 +812,62 @@ const styles = StyleSheet.create({
   typeChipText: { fontSize: fontSize.small, fontWeight: '700', color: colors.textMuted },
   typeChipTextActive: { color: colors.white },
 
-  modePill: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.sm,
-    minHeight: TOUCH_TARGET,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  modePillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
-  modePillText: { fontSize: fontSize.body, fontWeight: '700', color: colors.textMuted },
-  modePillTextActive: { color: colors.white },
-
+  modeRow: { flexDirection: 'row', gap: space.sm },
   modeChip: {
     flex: 1,
     minHeight: TOUCH_TARGET,
     borderRadius: radius.md,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
   },
   modeChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   modeChipText: { fontSize: fontSize.body, fontWeight: '700', color: colors.textMuted },
   modeChipTextActive: { color: colors.white },
 
-  tenantPickedRow: {
+  collectedBy: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    padding: space.sm,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
   },
-  tenantPickedName: {
-    flex: 1,
-    fontSize: fontSize.bodyLg,
-    fontWeight: '700',
-    color: colors.text,
+  collectedByLabel: { fontSize: fontSize.caption, color: colors.textMuted, fontWeight: '600' },
+  collectedByName: { fontSize: fontSize.body, color: colors.text, fontWeight: '700' },
+  collectedByDate: { fontSize: fontSize.caption, color: colors.textDim, fontWeight: '600' },
+
+  moreToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: space.sm,
   },
-  changeLink: {
-    color: colors.accent,
-    fontWeight: '700',
-    fontSize: fontSize.small,
-    padding: space.xs,
+  moreToggleText: { fontSize: fontSize.small, fontWeight: '700', color: colors.accent },
+
+  footnote: {
+    fontSize: fontSize.caption,
+    color: colors.textDim,
+    textAlign: 'center',
+    lineHeight: 16,
   },
 
   hitRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: space.sm,
     paddingVertical: space.sm,
     paddingHorizontal: space.xs,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.borderSoft,
   },
   hitName: { fontSize: fontSize.body, fontWeight: '700', color: colors.text },
   hitMeta: { fontSize: fontSize.caption, color: colors.textMuted, marginTop: 2 },

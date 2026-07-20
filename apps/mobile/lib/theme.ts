@@ -12,55 +12,75 @@
  */
 
 export const colors = {
-  // brand
-  primary: '#0F172A', // slate-900
-  primarySoft: '#334155', // slate-700 for secondary text on brand surfaces
-  accent: '#0D9488', // teal-600
-  accentSoft: '#0F766E', // teal-700 (pressed)
-  accentDim: '#5EEAD4', // teal-300
-  accentBg: '#CCFBF1', // teal-100
+  // brand — kept in lockstep with the web redesign tokens in
+  // apps/web/src/index.css so the two apps can't drift apart.
+  primary: '#161b26', // near-black, used for dark chips/buttons
+  primarySoft: '#42495a',
+  accent: '#0e9384', // teal
+  accentSoft: '#0b7a6e', // pressed
+  accentDim: '#7fe3cf',
+  accentBg: '#e6f6f3',
 
   // surfaces
-  bg: '#F8FAFC', // slate-50
+  bg: '#f5f7fb', // app background
   surface: '#FFFFFF',
-  surfaceMuted: '#F1F5F9', // slate-100
-  surfaceMuted2: '#E2E8F0', // slate-200 — for chip-hover
-  border: '#E2E8F0', // slate-200
-  borderStrong: '#CBD5E1', // slate-300
-  overlay: 'rgba(15, 23, 42, 0.55)', // sheet backdrop
+  surfaceMuted: '#eef1f6', // slate wash — chips, tracks
+  surfaceMuted2: '#e3e8f0',
+  border: '#e3e8f0',
+  borderSoft: '#eef1f6', // hairline dividers inside cards
+  borderStrong: '#d5dbe6',
+  overlay: 'rgba(10, 15, 26, 0.42)', // sheet backdrop
 
   // text
-  text: '#0F172A',
-  textMuted: '#475569', // slate-600
-  textDim: '#94A3B8', // slate-400
+  text: '#141a26',
+  textMuted: '#6b7280',
+  textDim: '#98a0ad',
 
-  // semantic
-  success: '#16A34A', // green-600
-  successBg: '#DCFCE7', // green-100
-  warn: '#D97706', // amber-600
-  warnBg: '#FEF3C7', // amber-100
-  danger: '#DC2626', // red-600
-  dangerBg: '#FEE2E2', // red-100
-  info: '#2563EB', // blue-600
-  infoBg: '#DBEAFE', // blue-100
-  purple: '#9333EA',
-  purpleBg: '#F3E8FF',
-  pink: '#DB2777',
-  pinkBg: '#FCE7F3',
+  // semantic — each has a fill + a matching border so pills read crisply
+  success: '#15803d',
+  successBg: '#eafaf0',
+  successLine: '#c8ecd5',
+  warn: '#b45309',
+  warnBg: '#fff6e2',
+  warnLine: '#f3d59b',
+  danger: '#dc2626',
+  dangerBg: '#fdecec',
+  dangerLine: '#f5caca',
+  info: '#2a78d6',
+  infoBg: '#e8f1fd',
+  infoLine: '#c4dbf7',
+  purple: '#5b3ec9',
+  purpleBg: '#efeaff',
+  purpleLine: '#d8ccff',
+  pink: '#e87ba4',
+  pinkBg: '#fdeef4',
+  neutralBg: '#eef1f6',
+  neutralLine: '#e0e5ee',
+  neutralFg: '#5c6472',
 
-  // bed colours per product spec: green / yellow / red
-  bedVacant: '#16A34A',
-  bedVacantBg: '#DCFCE7',
-  bedReserved: '#D97706',
-  bedReservedBg: '#FEF3C7',
-  bedOccupied: '#0D9488',
-  bedOccupiedBg: '#CCFBF1',
-  bedMaintenance: '#DC2626',
-  bedMaintenanceBg: '#FEE2E2',
+  // bed colours per product spec: green / amber / teal / red
+  bedVacant: '#15803d',
+  bedVacantBg: '#eafaf0',
+  bedReserved: '#b45309',
+  bedReservedBg: '#fff6e2',
+  bedOccupied: '#0e9384',
+  bedOccupiedBg: '#e6f6f3',
+  bedMaintenance: '#dc2626',
+  bedMaintenanceBg: '#fdecec',
 
   white: '#FFFFFF',
   black: '#000000',
 };
+
+/**
+ * Categorical palette for donuts / category bars. Mirrors the web's
+ * EXPENSE_COLORS so the same category is the same colour on both apps.
+ */
+export const chartColors = [
+  '#2a78d6', '#008300', '#e87ba4', '#eda100',
+  '#1baf7a', '#98a0ad', '#8b5cf6', '#eb6834',
+  '#0891b2', '#e11d48',
+];
 
 export const space = {
   /** 4dp grid; matches the web app's tailwind scale. */

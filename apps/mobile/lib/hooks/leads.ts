@@ -43,6 +43,14 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   LOST: 'Lost',
 };
 
+/**
+ * Field names mirror the SELECT in `GET /leads` (app/api/v1/leads.py).
+ *
+ * This used to declare `room_type`, `budget_paise`, `move_in_date` and
+ * `updated_at` — none of which the list endpoint returns, so cards rendered
+ * blanks and the "idle" filter silently fell back to `created_at`. The real
+ * names are below; anything the list doesn't return is marked as detail-only.
+ */
 export interface Lead {
   id: string;
   name: string;
@@ -50,24 +58,30 @@ export interface Lead {
   email?: string;
   status: LeadStatus;
   source: LeadSource;
+  notes?: string;
+  budget_min_paise?: number | null;
+  budget_max_paise?: number | null;
+  interested_room_type?: string | null;
+  expected_move_in_date?: string | null;
+  next_followup_at?: string | null;
+  last_contacted_at?: string | null;
+  /** Whole days since last contact; computed server-side. */
+  days_since_contact?: number | null;
+  created_at: string;
+  assigned_to?: string | null;
+  assigned_to_name?: string | null;
+
+  // Present on the single-lead detail response only — do not expect these on
+  // rows coming from the list endpoint.
   property_id?: string;
   property_name?: string;
-  room_type?: string;
-  budget_paise?: number;
-  move_in_date?: string;
-  assigned_to?: string;
-  assigned_to_name?: string;
-  next_followup_at?: string | null;
-  notes?: string;
-  created_at: string;
-  updated_at?: string;
-  created_by?: string;
-  created_by_name?: string;
   advance_paise?: number;
   advance_paid_at?: string | null;
+  lost_reason?: string;
   source_ad_id?: string;
   source_adset_name?: string;
-  lost_reason?: string;
+  created_by?: string;
+  created_by_name?: string;
 }
 
 export interface LeadActivity {
@@ -89,7 +103,10 @@ export function useLeads(params?: {
 }) {
   return useQuery<{ items: Lead[]; total: number }>({
     queryKey: ['leads', params],
-    queryFn: () => api.get('/leads', { params: { limit: 200, ...params } }).then((r) => r.data),
+    // 500 matches the web LeadsPage. The pipeline view loads every status in
+    // one call, so a low default starves the non-NEW columns as soon as there
+    // are enough due-today NEW leads to fill the page.
+    queryFn: () => api.get('/leads', { params: { limit: 500, ...params } }).then((r) => r.data),
   });
 }
 
@@ -196,10 +213,13 @@ export function useWebsiteLeads(propertyId?: string) {
 export function useNewWebsiteLeadCount() {
   return useQuery<{ count: number }>({
     queryKey: ['website-leads', 'new-count'],
+    // The endpoint returns `total = len(items)` for the page it just built —
+    // NOT a table count. A `limit: 1` probe therefore always answered "1".
+    // Ask for the full page and count client-side.
     queryFn: () =>
       api
-        .get('/leads', { params: { source: 'WEBSITE', status: 'NEW', limit: 1 } })
-        .then((r) => ({ count: r.data?.total ?? 0 })),
+        .get('/leads', { params: { source: 'WEBSITE', status: 'NEW', limit: 500 } })
+        .then((r) => ({ count: (r.data?.items ?? []).length })),
     refetchInterval: 5 * 60 * 1000,
   });
 }

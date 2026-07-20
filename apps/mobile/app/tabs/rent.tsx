@@ -1,10 +1,16 @@
 /**
- * Rent tab. Monthly ledger for the selected property; tap a row to record
- * a payment for that tenant/month/year.
+ * Rent & Payments. Monthly ledger for the selected property; tap a row to
+ * record a payment for that tenant/month/year.
  *
- * Status pills mirror web colours: green PAID, amber PARTIAL, red UNPAID.
+ * Deliberately ABSENT: the receivables-aging card. The web app removed it —
+ * on a fiscal month that closes on the settlement day, buckets past ~45 days
+ * are almost always empty, so the card was mostly whitespace. Overdue is
+ * surfaced as a count on the Outstanding KPI instead.
+ *
+ * "Avg days to collect" replaces the old "DSO / on-time" label — same maths,
+ * a name a PG owner can actually read.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Linking,
@@ -15,11 +21,9 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import { api } from '../../lib/api';
 import { useAppStore } from '../../lib/store';
 import { t } from '../../lib/i18n';
 import { speak } from '../../lib/voice';
@@ -30,44 +34,40 @@ import {
   Fab,
   Header,
   Loading,
-  rupees,
   Screen,
-  StatusPill,
+  Segmented,
+  rupees,
+  formatDateHuman,
 } from '../../components/ui';
+import { KpiTile, Pill, RankBars, RoomBadge, Track } from '../../components/redesign';
 import {
+  useRentLedger,
+  type RentLedgerRow,
+  type RentLedgerTransaction,
+} from '../../lib/hooks/rent';
+import {
+  avgDaysToCollect,
   countByStatus,
   filterByStatus,
-  sumOutstanding,
   type LedgerFilter,
 } from '../../lib/ledger-filter';
 
-interface LedgerEntry {
-  id: string;
-  tenant_id: string;
-  tenant_name: string;
-  phone?: string | null;
-  month: number;
-  year: number;
-  amount_due_paise: number;
-  amount_paid_paise: number;
-  outstanding_paise: number;
-  status: 'PAID' | 'PARTIAL' | 'UNPAID';
-}
-
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+type StatusFilter = LedgerFilter;
+type TabKey = 'LEDGER' | 'PAYMENTS' | 'REFUNDS';
 
 /**
  * Compose a wa.me deep-link with the overdue-reminder message pre-filled.
- * Same shape as the web WhatsApp icon — client-side text, not a Meta
- * template call, so the collector reviews before tapping Send.
+ * Client-side text, not a Meta template call, so the collector reviews it
+ * before tapping Send.
  */
-function buildOverdueWhatsappUrl(e: LedgerEntry, monthLabel: string): string {
+function buildOverdueWhatsappUrl(e: RentLedgerRow, monthLabel: string): string {
   const phone = (e.phone ?? '').replace(/\D/g, '');
   const rupeesFmt = Math.round(e.outstanding_paise / 100).toLocaleString('en-IN');
-  const name = e.tenant_name.trim();
   const msg =
-    `Hi ${name}, a friendly reminder that your rent for ${monthLabel} is still ` +
-    `outstanding — ₹${rupeesFmt}. Please clear it at the earliest. Thanks!`;
+    `Hi ${e.tenant_name.trim()}, a friendly reminder that your rent for ${monthLabel} is ` +
+    `still outstanding — ₹${rupeesFmt}. Please clear it at the earliest. Thanks!`;
   return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
 }
 
@@ -77,42 +77,51 @@ export default function RentTab() {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year] = useState(now.getFullYear());
-  const [filter, setFilter] = useState<LedgerFilter>('ALL');
+  const [filter, setFilter] = useState<StatusFilter>('ALL');
+  const [tab, setTab] = useState<TabKey>('LEDGER');
 
   useEffect(() => {
     if (voiceGuidance) speak(t('tab.rent'));
   }, [voiceGuidance]);
 
-  const { data, isLoading, refetch, isRefetching } = useQuery({
-    queryKey: ['rent-ledger-mobile', selectedPropertyId, month, year],
-    queryFn: () =>
-      api
-        .get<{ items: LedgerEntry[] }>('/rent/ledger', {
-          params: { property_id: selectedPropertyId, month, year },
-        })
-        .then((r) => r.data),
-    enabled: !!selectedPropertyId,
+  const ledger = useRentLedger({
+    property_id: selectedPropertyId ?? undefined,
+    month,
+    year,
   });
 
-  const allEntries: LedgerEntry[] = data?.items ?? [];
-  const entries = filterByStatus<LedgerEntry>(allEntries, filter);
-  // Outstanding always sums over ALL entries — filter is a view, not a scope.
-  const outstanding = sumOutstanding(allEntries);
-  const statusCounts = countByStatus(allEntries);
+  const rows = ledger.data?.items ?? [];
+  const stats = ledger.data?.stats;
+  const period = ledger.data?.period;
+  const collectors = ledger.data?.collectors ?? [];
+  const transactions = ledger.data?.transactions ?? [];
 
-  function statusTone(s: LedgerEntry['status']): 'success' | 'warn' | 'danger' {
-    return s === 'PAID' ? 'success' : s === 'PARTIAL' ? 'warn' : 'danger';
-  }
+  const counts = useMemo(() => countByStatus(rows), [rows]);
+
+  const visible = filterByStatus<RentLedgerRow>(rows, filter);
+
+  const { avgDays, paidCount } = useMemo(
+    () => avgDaysToCollect(rows, period?.start),
+    [rows, period?.start],
+  );
+
+  const overdueCount = counts.UNPAID + counts.PARTIAL;
+  const collectionPct = Math.round(stats?.collection_rate ?? 0);
+
+  const payments = transactions.filter((x) => x.payment_type !== 'REFUND');
+  const refunds = transactions.filter((x) => x.payment_type === 'REFUND');
 
   return (
     <Screen padded={false}>
       <View style={{ padding: space.lg, paddingBottom: 0 }}>
         <Header
-          title={t('tab.rent')}
+          title="Rent & Payments"
           subtitle={
-            outstanding > 0
-              ? t('rent.outstanding', { amount: rupees(outstanding) })
-              : t('rent.this_month')
+            period
+              ? `${MONTHS[month - 1]} ${year} · ${formatDateHuman(period.start)} – ${formatDateHuman(
+                  period.end,
+                )}`
+              : `${MONTHS[month - 1]} ${year}`
           }
         />
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -120,59 +129,206 @@ export default function RentTab() {
             {MONTHS.map((m, i) => (
               <Pressable
                 key={m}
-                style={[styles.chip, month === i + 1 && styles.chipActive]}
+                style={{ ...styles.chip, ...(month === i + 1 ? styles.chipActive : null) }}
                 onPress={() => setMonth(i + 1)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: month === i + 1 }}
               >
-                <Text style={[styles.chipText, month === i + 1 && styles.chipTextActive]}>
+                <Text
+                  style={{
+                    ...styles.chipText,
+                    ...(month === i + 1 ? styles.chipTextActive : null),
+                  }}
+                >
                   {m}
                 </Text>
               </Pressable>
             ))}
           </View>
         </ScrollView>
-
-        {/* Status filter chips. ALL is default; PARTIAL + UNPAID are the
-            two an owner usually wants to filter to when chasing collections. */}
-        <View style={{ flexDirection: 'row', gap: space.xs, paddingBottom: space.sm }}>
-          {(['ALL', 'UNPAID', 'PARTIAL', 'PAID'] as const).map((f) => {
-            const active = filter === f;
-            return (
-              <Pressable
-                key={f}
-                onPress={() => setFilter(f)}
-                style={[styles.statusChip, active && styles.statusChipActive]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-              >
-                <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
-                  {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()} ({statusCounts[f] ?? 0})
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
       </View>
 
-      {isLoading ? (
+      {ledger.isLoading ? (
         <Loading />
       ) : (
         <FlatList
-          data={entries}
+          data={tab === 'LEDGER' ? visible : []}
           keyExtractor={(e) => e.id}
           contentContainerStyle={{ padding: space.lg, paddingTop: 0 }}
           refreshControl={
             <RefreshControl
-              refreshing={isRefetching}
-              onRefresh={refetch}
+              refreshing={ledger.isRefetching}
+              onRefresh={ledger.refetch}
               tintColor={colors.accent}
               colors={[colors.accent]}
             />
           }
+          ListHeaderComponent={
+            <View>
+              {/* Four headline KPIs — no aging card, by design. */}
+              <View style={{ gap: space.sm, marginBottom: space.md }}>
+                <View style={{ flexDirection: 'row', gap: space.sm }}>
+                  <KpiTile
+                    label="Expected"
+                    value={rupees(stats?.expected_paise ?? 0)}
+                    foot={`${rows.length} tenants billed`}
+                  />
+                  <KpiTile
+                    label="Collected"
+                    value={rupees(stats?.collected_in_period_paise ?? 0)}
+                    foot={`${collectionPct}% of billed`}
+                  >
+                    <View style={{ marginTop: 6 }}>
+                      <Track
+                        pct={collectionPct}
+                        color={collectionPct >= 90 ? colors.success : colors.warn}
+                      />
+                    </View>
+                  </KpiTile>
+                </View>
+                <View style={{ flexDirection: 'row', gap: space.sm }}>
+                  <KpiTile
+                    label="Outstanding"
+                    value={rupees(stats?.outstanding_paise ?? 0)}
+                    foot={overdueCount > 0 ? `${overdueCount} tenants pending` : 'all clear'}
+                    tone={(stats?.outstanding_paise ?? 0) > 0 ? 'danger' : undefined}
+                  />
+                  <KpiTile
+                    label="Avg days to collect"
+                    value={avgDays != null ? `${avgDays.toFixed(1)} days` : '—'}
+                    foot={
+                      paidCount > 0
+                        ? `across ${paidCount} payments`
+                        : 'no payments yet this period'
+                    }
+                  />
+                </View>
+              </View>
+
+              {/* Also received this period */}
+              <Text style={styles.sectionTitle}>Also received this period</Text>
+              <Text style={styles.sectionSub}>
+                Everything besides this month's rent that moved through the till.
+              </Text>
+              <View style={styles.alsoGrid}>
+                {[
+                  { label: 'Advances', value: stats?.advance_received_paise ?? 0, c: '#1baf7a' },
+                  { label: 'Daily stays', value: stats?.daily_stays_paise ?? 0, c: '#eda100' },
+                  { label: 'Power meters', value: stats?.power_received_paise ?? 0, c: '#eb6834' },
+                  { label: 'Opening balance', value: stats?.opening_balance_paise ?? 0, c: '#98a0ad' },
+                  {
+                    label: 'Refunds given',
+                    value: -(stats?.refunds_given_paise ?? 0),
+                    c: '#dc2626',
+                    neg: (stats?.refunds_given_paise ?? 0) > 0,
+                  },
+                  {
+                    label: 'Discounts',
+                    value: -(stats?.discount_paise ?? 0),
+                    c: '#b45309',
+                    neg: (stats?.discount_paise ?? 0) > 0,
+                  },
+                ].map((m) => (
+                  <View key={m.label} style={styles.alsoTile}>
+                    <View style={styles.alsoTop}>
+                      <Text style={styles.alsoLabel} numberOfLines={1}>
+                        {m.label}
+                      </Text>
+                      <View style={{ ...styles.alsoDot, backgroundColor: m.c }} />
+                    </View>
+                    <Text
+                      style={{
+                        ...styles.alsoValue,
+                        ...(m.neg ? { color: colors.danger } : null),
+                      }}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.7}
+                    >
+                      {rupees(m.value)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Collected by — full width so the "N payments · adv ₹X" line fits */}
+              {collectors.length > 0 && (
+                <>
+                  <Text style={styles.sectionTitle}>
+                    💵 Collected by · {MONTHS[month - 1]} {year}
+                  </Text>
+                  <Card style={{ marginBottom: space.md }}>
+                    <RankBars
+                      labelWidth={104}
+                      rows={collectors.map((c) => {
+                        const max = Math.max(...collectors.map((x) => x.total_paise), 1);
+                        return {
+                          label: c.collector,
+                          sub: `${c.payments} payments${
+                            c.advance_paise > 0 ? ` · adv ${rupees(c.advance_paise)}` : ''
+                          }`,
+                          value: rupees(c.total_paise),
+                          pct: (c.total_paise / max) * 100,
+                          color: colors.accent,
+                        };
+                      })}
+                    />
+                  </Card>
+                </>
+              )}
+
+              <Segmented<TabKey>
+                value={tab}
+                onChange={setTab}
+                options={[
+                  { value: 'LEDGER', label: `Ledger (${rows.length})` },
+                  { value: 'PAYMENTS', label: `Payments (${payments.length})` },
+                  { value: 'REFUNDS', label: `Refunds (${refunds.length})` },
+                ]}
+              />
+              <View style={{ height: space.md }} />
+
+              {tab === 'LEDGER' && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={{ flexDirection: 'row', gap: space.xs, paddingBottom: space.sm }}>
+                    {(['ALL', 'UNPAID', 'PARTIAL', 'PAID'] as const).map((f) => {
+                      const active = filter === f;
+                      return (
+                        <Pressable
+                          key={f}
+                          onPress={() => setFilter(f)}
+                          style={{
+                            ...styles.statusChip,
+                            ...(active ? styles.statusChipActive : null),
+                          }}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                        >
+                          <Text
+                            style={{
+                              ...styles.statusChipText,
+                              ...(active ? styles.statusChipTextActive : null),
+                            }}
+                          >
+                            {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()} (
+                            {counts[f]})
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+              )}
+
+              {tab !== 'LEDGER' && (
+                <TransactionList items={tab === 'PAYMENTS' ? payments : refunds} />
+              )}
+            </View>
+          }
           renderItem={({ item }) => {
             const canWhatsapp = item.status !== 'PAID' && !!item.phone;
             const monthLabel = `${MONTHS[item.month - 1]} ${item.year}`;
+            const tone = item.status === 'PAID' ? 'g' : item.status === 'PARTIAL' ? 'a' : 'r';
             return (
               <Card
                 style={styles.entry}
@@ -183,11 +339,24 @@ export default function RentTab() {
                   })
                 }
               >
+                <RoomBadge
+                  room={item.room_number || '—'}
+                  sub={item.bed_label ? `·${item.bed_label}` : undefined}
+                  tone={tone}
+                />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.tenantName} numberOfLines={1}>
                     {item.tenant_name}
                   </Text>
-                  <Text style={styles.due}>Due {rupees(item.amount_due_paise)}</Text>
+                  <Text style={styles.due} numberOfLines={1}>
+                    Due {rupees(item.amount_due_paise)}
+                    {item.paid_on ? ` · paid ${formatDateHuman(item.paid_on)}` : ''}
+                  </Text>
+                  {!!item.collected_by?.length && (
+                    <Text style={styles.collectedBy} numberOfLines={1}>
+                      via {item.collected_by.join(', ')}
+                    </Text>
+                  )}
                 </View>
                 {canWhatsapp && (
                   <Pressable
@@ -195,17 +364,15 @@ export default function RentTab() {
                     hitSlop={8}
                     style={styles.waButton}
                     onPress={(ev) => {
-                      // Stop the card's onPress from firing behind us.
                       ev.stopPropagation();
-                      const url = buildOverdueWhatsappUrl(item, monthLabel);
-                      Linking.openURL(url).catch(() => {});
+                      Linking.openURL(buildOverdueWhatsappUrl(item, monthLabel)).catch(() => {});
                     }}
                   >
                     <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
                   </Pressable>
                 )}
                 <View style={{ alignItems: 'flex-end', gap: space.xs }}>
-                  <StatusPill label={t(`rent.status.${item.status}` as 'rent.status.PAID')} tone={statusTone(item.status)} />
+                  <Pill label={item.status} tone={tone} dot />
                   {item.status !== 'PAID' && (
                     <Text style={styles.outstanding}>{rupees(item.outstanding_paise)}</Text>
                   )}
@@ -214,16 +381,62 @@ export default function RentTab() {
             );
           }}
           ListEmptyComponent={
-            <Empty
-              iconName="cash-outline"
-              title={t('common.empty')}
-              hint="Generate ledger from the web app for this month."
-            />
+            tab === 'LEDGER' ? (
+              <Empty
+                iconName="cash-outline"
+                title={t('common.empty')}
+                hint="Generate the ledger from the web app for this month."
+              />
+            ) : null
           }
         />
       )}
-      <Fab name="add" accessibilityLabel="Record payment" onPress={() => router.push('/payments/new')} />
+      <Fab
+        name="add"
+        accessibilityLabel="Record payment"
+        onPress={() => router.push('/payments/new')}
+      />
     </Screen>
+  );
+}
+
+// ── Payments / Refunds tabs ─────────────────────────────────────────────────
+
+function TransactionList({ items }: { items: RentLedgerTransaction[] }) {
+  if (!items.length) {
+    return <Empty iconName="receipt-outline" title="Nothing here yet" hint="No transactions in this period." />;
+  }
+  return (
+    <View style={{ gap: space.sm }}>
+      {items.map((x) => {
+        const isRefund = x.payment_type === 'REFUND';
+        return (
+          <Card key={x.id} style={styles.txn}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.tenantName} numberOfLines={1}>
+                {x.tenant_name || 'Unattributed'}
+              </Text>
+              <Text style={styles.due} numberOfLines={1}>
+                {formatDateHuman(x.collected_at)} · {x.payment_mode}
+                {x.paid_to ? ` · to ${x.paid_to}` : ''}
+              </Text>
+            </View>
+            <View style={{ alignItems: 'flex-end', gap: space.xs }}>
+              <Text
+                style={{
+                  ...styles.txnAmount,
+                  ...(isRefund ? { color: colors.danger } : null),
+                }}
+              >
+                {isRefund ? '−' : ''}
+                {rupees(x.amount_paise)}
+              </Text>
+              <Pill label={x.payment_type} tone={isRefund ? 'r' : 'b'} />
+            </View>
+          </Card>
+        );
+      })}
+    </View>
   );
 }
 
@@ -233,12 +446,13 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
     borderRadius: radius.pill,
     backgroundColor: colors.surfaceMuted,
-    minWidth: 56,
+    minWidth: 52,
     alignItems: 'center',
   },
-  chipActive: { backgroundColor: colors.accent },
+  chipActive: { backgroundColor: colors.primary },
   chipText: { fontSize: fontSize.small, fontWeight: '700', color: colors.textMuted },
   chipTextActive: { color: colors.white },
+
   statusChip: {
     paddingHorizontal: space.md,
     paddingVertical: 6,
@@ -250,21 +464,59 @@ const styles = StyleSheet.create({
   statusChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   statusChipText: { fontSize: fontSize.caption, fontWeight: '700', color: colors.textMuted },
   statusChipTextActive: { color: colors.white },
+
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  sectionSub: {
+    fontSize: 11,
+    color: colors.textDim,
+    marginBottom: space.sm,
+  },
+
+  alsoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.sm,
+    marginBottom: space.md,
+  },
+  alsoTile: {
+    // Two per row with an 8px gutter.
+    width: '48%',
+    flexGrow: 1,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 10,
+  },
+  alsoTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  alsoLabel: { fontSize: 11, fontWeight: '700', color: colors.textMuted, flex: 1 },
+  alsoDot: { width: 10, height: 10, borderRadius: 3 },
+  alsoValue: { fontSize: 17, fontWeight: '800', color: colors.text, marginTop: 3 },
+
   entry: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
     marginBottom: space.sm,
   },
+  txn: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  txnAmount: { fontSize: fontSize.body, fontWeight: '800', color: colors.text },
+
   waButton: {
     height: 36,
     width: 36,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#DCFCE7',
+    backgroundColor: colors.successBg,
   },
-  tenantName: { fontSize: fontSize.bodyLg, fontWeight: '700', color: colors.text },
+  tenantName: { fontSize: fontSize.body, fontWeight: '800', color: colors.text },
   due: { fontSize: fontSize.caption, color: colors.textMuted, marginTop: 2 },
-  outstanding: { fontSize: fontSize.body, fontWeight: '700', color: colors.danger },
+  collectedBy: { fontSize: 10.5, color: colors.textDim, marginTop: 1 },
+  outstanding: { fontSize: fontSize.body, fontWeight: '800', color: colors.danger },
 });

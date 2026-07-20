@@ -1,37 +1,42 @@
 /**
- * Vacancies view — mirrors the web PropertyDetailPage/VacancySections layout:
+ * Vacancies view — restyled to the redesign mock.
  *
- *   - StatTiles at top: beds / rooms / whole-rooms
- *   - Filter chips:     All · Whole rooms · 1-Share · 2-Share · 3-Share · Suite · AC · Non-AC
- *   - Vacant section:   grouped by floor, one card per room (green), nested bed rows
- *   - Upcoming section: same layout, amber tone, per-bed "leaving on <date>" pill
+ *   - Two KpiTiles at top: "Free now" · "Whole rooms" (green-tinted)
+ *   - Horizontal chip strip: All · Whole rooms · one chip per room-type
+ *     (+ AC / Non-AC, kept from the previous version)
+ *   - Vertical list of room cards. A room where every bed is free is tinted
+ *     green and reads "Whole room free"; otherwise "N of M free".
+ *   - Bed letters render as small rounded squares — green when the whole room
+ *     is free, amber otherwise. Upcoming cards name the freeing tenants.
+ *   - Two actions per card: "Match leads" · "Assign booking".
  *
  * Beds from the same room are visually clustered in a single card so a fully-
  * vacant 2-share room reads as "sell as single occupancy" at a glance.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 import { useAppStore } from '../../lib/store';
 import { t } from '../../lib/i18n';
 import { speak } from '../../lib/voice';
-import { colors, radius, space, type as fontSize } from '../../lib/theme';
+import { colors, space } from '../../lib/theme';
 import {
+  Button,
   Chip,
   ChipStrip,
   Empty,
   Header,
   Loading,
   Row,
-  StatusPill,
-  StatTile,
   rupees,
   formatDateHuman,
 } from '../../components/ui';
+import { KpiTile, Pill, Tag, tagKindFor } from '../../components/redesign';
 import { useVacantBeds, VacantBed } from '../../lib/hooks/properties';
 
-type FilterKey = 'all' | 'whole' | '1' | '2' | '3' | 'suite' | 'ac' | 'nonac';
+/** 'all' · 'whole' · 'ac' · 'nonac' · 'type:<room type>' */
+type FilterKey = string;
 
 // Room-type name → normalised short label. Web app uses shortRoomType; keep in
 // sync so both apps show the same pill text.
@@ -43,11 +48,6 @@ function shortType(type?: string): string {
   const m = /(\d)/.exec(s);
   if (m) return `${m[1]}-Share`;
   return type;
-}
-
-function shareCount(type?: string): number | null {
-  const m = /(\d)/.exec(type ?? '');
-  return m ? Number(m[1]) : null;
 }
 
 // Group beds into rooms so we can render a single card per room with bed
@@ -95,7 +95,16 @@ function groupByRoom(items: VacantBed[]): RoomGroup[] {
   }));
 }
 
+function sortRooms(rooms: RoomGroup[]): RoomGroup[] {
+  return [...rooms].sort(
+    (a, b) =>
+      a.floor_number - b.floor_number ||
+      a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
+  );
+}
+
 export default function VacanciesTab() {
+  const router = useRouter();
   const { selectedPropertyId, voiceGuidance } = useAppStore();
   const [filter, setFilter] = useState<FilterKey>('all');
   const q = useVacantBeds(selectedPropertyId ?? undefined, { includeUpcoming: true });
@@ -105,8 +114,21 @@ export default function VacanciesTab() {
   }, [voiceGuidance]);
 
   const items = q.data?.items ?? [];
-  const vacantRooms = useMemo(() => groupByRoom(items.filter((b) => b.status !== 'UPCOMING')), [items]);
-  const upcomingRooms = useMemo(() => groupByRoom(items.filter((b) => b.status === 'UPCOMING')), [items]);
+  const vacantRooms = useMemo(
+    () => groupByRoom(items.filter((b) => b.status !== 'UPCOMING')),
+    [items],
+  );
+  const upcomingRooms = useMemo(
+    () => groupByRoom(items.filter((b) => b.status === 'UPCOMING')),
+    [items],
+  );
+
+  // One chip per distinct room-type present in the vacancy list.
+  const roomTypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of [...vacantRooms, ...upcomingRooms]) if (r.room_type) set.add(r.room_type);
+    return Array.from(set).sort();
+  }, [vacantRooms, upcomingRooms]);
 
   const applyFilter = (rooms: RoomGroup[]): RoomGroup[] =>
     rooms.filter((r) => {
@@ -114,20 +136,19 @@ export default function VacanciesTab() {
       if (filter === 'whole') return r.wholeRoom;
       if (filter === 'ac') return !!r.has_ac;
       if (filter === 'nonac') return !r.has_ac;
-      const s = shareCount(r.room_type);
-      if (filter === '1') return s === 1;
-      if (filter === '2') return s === 2;
-      if (filter === '3') return s === 3;
-      if (filter === 'suite') return /suite/i.test(r.room_type ?? '');
+      if (filter.startsWith('type:')) return r.room_type === filter.slice(5);
       return true;
     });
 
-  const vacantShown = applyFilter(vacantRooms);
-  const upcomingShown = applyFilter(upcomingRooms);
+  const vacantShown = sortRooms(applyFilter(vacantRooms));
+  const upcomingShown = sortRooms(applyFilter(upcomingRooms));
 
   const vacantBedCount = vacantShown.reduce((a, r) => a + r.beds.length, 0);
   const upcomingBedCount = upcomingShown.reduce((a, r) => a + r.beds.length, 0);
   const wholeRoomCount = vacantShown.filter((r) => r.wholeRoom).length;
+
+  const goLeads = () => router.push('/tabs/leads');
+  const goBookings = () => router.push('/bookings');
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -147,28 +168,52 @@ export default function VacanciesTab() {
             <RefreshControl refreshing={q.isRefetching} onRefresh={q.refetch} tintColor={colors.accent} />
           }
         >
-          {/* Stat tiles */}
-          <Row gap={space.sm} style={{ marginBottom: space.md }}>
-            <StatTile label="Vacant beds" value={vacantBedCount} tone="success" />
-            <StatTile label="Whole rooms" value={wholeRoomCount} tone="success" />
-            <StatTile label="Upcoming" value={upcomingBedCount} tone="warn" />
+          {/* KPI tiles */}
+          <Row gap={space.sm} align="stretch" style={{ marginBottom: space.md }}>
+            <KpiTile
+              label="Free now"
+              value={vacantBedCount}
+              foot={`${upcomingBedCount} freeing up soon`}
+            />
+            <KpiTile
+              label="Whole rooms"
+              value={wholeRoomCount}
+              foot="every bed free — sell as one"
+              tone="accent"
+            />
           </Row>
 
           {/* Filter chips */}
           <ChipStrip>
-            <Chip label="All" active={filter === 'all'} onPress={() => setFilter('all')} count={vacantRooms.length} />
             <Chip
-              label="Whole"
+              label="All"
+              active={filter === 'all'}
+              onPress={() => setFilter('all')}
+              count={vacantRooms.length}
+            />
+            <Chip
+              label="Whole rooms"
               iconName="cube-outline"
               active={filter === 'whole'}
               onPress={() => setFilter('whole')}
               count={vacantRooms.filter((r) => r.wholeRoom).length}
             />
-            <Chip label="1-Share" active={filter === '1'} onPress={() => setFilter('1')} />
-            <Chip label="2-Share" active={filter === '2'} onPress={() => setFilter('2')} />
-            <Chip label="3-Share" active={filter === '3'} onPress={() => setFilter('3')} />
-            <Chip label="Suite" active={filter === 'suite'} onPress={() => setFilter('suite')} />
-            <Chip label="AC" iconName="snow-outline" active={filter === 'ac'} onPress={() => setFilter('ac')} tone="info" />
+            {roomTypes.map((rt) => (
+              <Chip
+                key={rt}
+                label={shortType(rt)}
+                active={filter === `type:${rt}`}
+                onPress={() => setFilter(`type:${rt}`)}
+                count={vacantRooms.filter((r) => r.room_type === rt).length}
+              />
+            ))}
+            <Chip
+              label="AC"
+              iconName="snow-outline"
+              active={filter === 'ac'}
+              onPress={() => setFilter('ac')}
+              tone="info"
+            />
             <Chip label="Non-AC" active={filter === 'nonac'} onPress={() => setFilter('nonac')} />
           </ChipStrip>
 
@@ -183,13 +228,33 @@ export default function VacanciesTab() {
           )}
 
           {vacantShown.length > 0 && (
-            <FloorSections title="Vacant now" rooms={vacantShown} tone="vacant" />
+            <>
+              <SectionHead title="Vacant now" count={vacantShown.length} tone="vacant" />
+              {vacantShown.map((r) => (
+                <RoomCard
+                  key={r.room_id}
+                  room={r}
+                  tone="vacant"
+                  onMatchLeads={goLeads}
+                  onAssign={goBookings}
+                />
+              ))}
+            </>
           )}
 
           {upcomingShown.length > 0 && (
             <>
               <View style={{ height: space.md }} />
-              <FloorSections title="Upcoming vacancies" rooms={upcomingShown} tone="upcoming" />
+              <SectionHead title="Upcoming vacancies" count={upcomingShown.length} tone="upcoming" />
+              {upcomingShown.map((r) => (
+                <RoomCard
+                  key={r.room_id}
+                  room={r}
+                  tone="upcoming"
+                  onMatchLeads={goLeads}
+                  onAssign={goBookings}
+                />
+              ))}
             </>
           )}
         </ScrollView>
@@ -198,168 +263,162 @@ export default function VacanciesTab() {
   );
 }
 
-// Group room cards by floor with a floor tag on the left column.
-function FloorSections({
+function SectionHead({
   title,
-  rooms,
+  count,
   tone,
 }: {
   title: string;
-  rooms: RoomGroup[];
+  count: number;
   tone: 'vacant' | 'upcoming';
 }) {
-  const byFloor = new Map<string, { floor_number: number; floor_name: string; rooms: RoomGroup[] }>();
-  for (const r of rooms) {
-    const g = byFloor.get(r.floor_id) ?? { floor_number: r.floor_number, floor_name: r.floor_name, rooms: [] };
-    g.rooms.push(r);
-    byFloor.set(r.floor_id, g);
-  }
-  const groups = Array.from(byFloor.values()).sort((a, b) => a.floor_number - b.floor_number);
   const accent = tone === 'vacant' ? colors.success : colors.warn;
   return (
-    <View>
-      <Row gap={space.sm} style={{ marginBottom: space.sm }}>
-        <View style={[styles.dot, { backgroundColor: accent }]} />
-        <Text style={styles.sectionTitle}>
-          {title} <Text style={styles.sectionCount}>({rooms.length})</Text>
-        </Text>
-      </Row>
-      {groups.map((g) => (
-        <View key={g.floor_number} style={styles.floorRow}>
-          <View style={styles.floorTag}>
-            <Text style={styles.floorNum}>{g.floor_number}F</Text>
-            <Text style={styles.floorLabel}>{g.floor_name}</Text>
-            <Text style={styles.floorMeta}>{g.rooms.length} rooms</Text>
-          </View>
-          <View style={{ flex: 1, gap: space.sm }}>
-            {g.rooms
-              .sort((a, b) => a.room_number.localeCompare(b.room_number, undefined, { numeric: true }))
-              .map((r) => (
-                <RoomCard key={r.room_id} room={r} tone={tone} />
-              ))}
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function RoomCard({ room, tone }: { room: RoomGroup; tone: 'vacant' | 'upcoming' }) {
-  const isVacant = tone === 'vacant';
-  const isWhole = isVacant && room.wholeRoom;
-  const cardBg = isVacant ? colors.surface : colors.warnBg;
-  const borderColor = isWhole ? colors.success : isVacant ? colors.border : colors.warn;
-  return (
-    <View style={[styles.roomCard, { backgroundColor: cardBg, borderColor }]}>
-      {isWhole && <View style={styles.wholeAccent} />}
-      <Row justify="space-between" style={{ marginBottom: space.xs }}>
-        <Row gap={space.sm}>
-          <Text style={styles.roomNum}>Room {room.room_number}</Text>
-          {isWhole && <StatusPill label="Whole room" tone="success" />}
-        </Row>
-        <Text style={styles.roomRent}>{rupees(room.monthly_base_rent_paise)}/mo</Text>
-      </Row>
-      <Row wrap gap={6} style={{ marginBottom: space.sm }}>
-        <StatusPill label={shortType(room.room_type)} tone="neutral" />
-        {room.has_ac ? (
-          <StatusPill label="AC" tone="info" />
-        ) : (
-          <StatusPill label="Non-AC" tone="neutral" />
-        )}
-        <OccupancyDots capacity={room.capacity} vacant={room.beds.length} />
-      </Row>
-      {/* Nested bed rows */}
-      <View style={styles.bedList}>
-        {room.beds
-          .sort((a, b) => a.bed_label.localeCompare(b.bed_label))
-          .map((b) => (
-            <View key={b.id} style={styles.bedRow}>
-              <View style={[styles.bedDot, { backgroundColor: isVacant ? colors.success : colors.warn }]} />
-              <Text style={styles.bedLabel}>Bed {b.bed_label}</Text>
-              {!isVacant && b.available_from && (
-                <Text style={styles.bedHint}> · leaving {formatDateHuman(b.available_from)}</Text>
-              )}
-              {!isVacant && b.current_tenant_name && (
-                <Text style={styles.bedHint}> ({b.current_tenant_name})</Text>
-              )}
-            </View>
-          ))}
-      </View>
-    </View>
-  );
-}
-
-function OccupancyDots({ capacity, vacant }: { capacity: number; vacant: number }) {
-  return (
-    <Row gap={3}>
-      {Array.from({ length: capacity }).map((_, i) => (
-        <View
-          key={i}
-          style={[
-            styles.capDot,
-            {
-              backgroundColor: i < vacant ? colors.success : colors.surfaceMuted2,
-              borderColor: i < vacant ? colors.success : colors.border,
-            },
-          ]}
-        />
-      ))}
-      <Text style={{ fontSize: fontSize.caption, color: colors.textMuted, marginLeft: 4 }}>
-        {vacant}/{capacity} free
+    <Row gap={space.sm} style={{ marginBottom: space.sm }}>
+      <View style={[styles.dot, { backgroundColor: accent }]} />
+      <Text style={styles.sectionTitle}>
+        {title} <Text style={styles.sectionCount}>({count})</Text>
       </Text>
     </Row>
   );
 }
 
-const styles = StyleSheet.create({
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  sectionTitle: { fontSize: fontSize.h3, fontWeight: '700', color: colors.text },
-  sectionCount: { color: colors.textMuted, fontWeight: '400' },
+function RoomCard({
+  room,
+  tone,
+  onMatchLeads,
+  onAssign,
+}: {
+  room: RoomGroup;
+  tone: 'vacant' | 'upcoming';
+  onMatchLeads: () => void;
+  onAssign: () => void;
+}) {
+  const isVacant = tone === 'vacant';
+  const isWhole = isVacant && room.wholeRoom;
+  const bedTone = isWhole
+    ? { bg: colors.successBg, line: colors.successLine, fg: colors.success }
+    : { bg: colors.warnBg, line: colors.warnLine, fg: colors.warn };
 
-  floorRow: {
-    flexDirection: 'row',
-    gap: space.md,
-    marginBottom: space.md,
-  },
-  floorTag: {
-    width: 68,
-    alignItems: 'center',
-    paddingTop: space.sm,
-  },
-  floorNum: { fontSize: fontSize.h1, fontWeight: '800', color: colors.primary },
-  floorLabel: { fontSize: fontSize.caption, color: colors.textMuted, fontWeight: '600' },
-  floorMeta: { fontSize: fontSize.caption, color: colors.textDim, marginTop: 2 },
+  const freeingNames = Array.from(
+    new Set(room.beds.map((b) => b.current_tenant_name).filter(Boolean) as string[]),
+  );
+  const soonest = room.beds
+    .map((b) => b.available_from)
+    .filter(Boolean)
+    .sort()[0];
+
+  return (
+    <View
+      style={{
+        ...styles.roomCard,
+        ...(isWhole ? { borderColor: colors.successLine, backgroundColor: '#f8fefb' } : null),
+      }}
+    >
+      <Row justify="space-between" align="flex-start">
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Row gap={space.sm} wrap>
+            <Text style={styles.roomNum}>Room {room.room_number}</Text>
+            <Pill
+              label={isWhole ? 'Whole room free' : `${room.beds.length} of ${room.capacity} free`}
+              tone={isWhole ? 'g' : 'a'}
+              dot
+            />
+          </Row>
+          <Text style={styles.roomMeta} numberOfLines={1}>
+            {room.floor_name}
+            {room.room_name ? ` · ${room.room_name}` : ''}
+          </Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={styles.roomRent}>
+            {rupees(room.monthly_base_rent_paise)}
+            <Text style={styles.roomRentPer}>/mo</Text>
+          </Text>
+          {!isVacant && !!soonest && (
+            <Text style={styles.freeFrom}>free {formatDateHuman(soonest)}</Text>
+          )}
+        </View>
+      </Row>
+
+      {/* Room-type / AC tags */}
+      <Row wrap gap={6} style={{ marginTop: space.sm }}>
+        {!!room.room_type && <Tag label={shortType(room.room_type)} kind={tagKindFor(room.room_type)} />}
+        <Tag label={room.has_ac ? 'AC' : 'Non-AC'} kind="ac" />
+      </Row>
+
+      {/* Bed letters */}
+      <Row wrap gap={6} style={{ marginTop: space.sm }}>
+        {[...room.beds]
+          .sort((a, b) => a.bed_label.localeCompare(b.bed_label))
+          .map((b) => (
+            <View
+              key={b.id}
+              style={[styles.bedBox, { backgroundColor: bedTone.bg, borderColor: bedTone.line }]}
+            >
+              <Text style={[styles.bedBoxText, { color: bedTone.fg }]} numberOfLines={1}>
+                {b.bed_label}
+              </Text>
+            </View>
+          ))}
+      </Row>
+
+      {!isVacant && freeingNames.length > 0 && (
+        <Text style={styles.freeing} numberOfLines={2}>
+          Freeing up: {freeingNames.join(', ')}
+        </Text>
+      )}
+
+      {/* Actions */}
+      <Row gap={space.sm} style={{ marginTop: space.md }}>
+        <Button
+          label="Match leads"
+          variant="secondary"
+          size="sm"
+          iconName="people-outline"
+          onPress={onMatchLeads}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label="Assign booking"
+          size="sm"
+          iconName="calendar-outline"
+          onPress={onAssign}
+          style={{ flex: 1 }}
+        />
+      </Row>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  sectionTitle: { fontSize: 13, fontWeight: '800', color: colors.text, letterSpacing: 0.2 },
+  sectionCount: { color: colors.textDim, fontWeight: '700' },
 
   roomCard: {
-    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
     borderWidth: 1,
-    padding: space.md,
-    paddingLeft: space.md + 4,
-    position: 'relative',
-    overflow: 'hidden',
+    borderColor: colors.border,
+    padding: 13,
+    marginBottom: space.sm,
   },
-  wholeAccent: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 4,
-    backgroundColor: colors.success,
-  },
-  roomNum: { fontSize: fontSize.bodyLg, fontWeight: '800', color: colors.text },
-  roomRent: { fontSize: fontSize.body, fontWeight: '700', color: colors.accent },
+  roomNum: { fontSize: 15, fontWeight: '800', color: colors.text, letterSpacing: -0.3 },
+  roomMeta: { fontSize: 11, color: colors.textDim, fontWeight: '600', marginTop: 3 },
+  roomRent: { fontSize: 14, fontWeight: '800', color: colors.text, letterSpacing: -0.3 },
+  roomRentPer: { fontSize: 10, fontWeight: '700', color: colors.textDim },
+  freeFrom: { fontSize: 10, color: colors.warn, fontWeight: '700', marginTop: 3 },
 
-  capDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 1 },
-
-  bedList: {
-    marginTop: space.sm,
-    paddingTop: space.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    gap: 6,
+  bedBox: {
+    width: 19,
+    height: 19,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  bedRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
-  bedDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
-  bedLabel: { fontSize: fontSize.small, color: colors.text, fontWeight: '600' },
-  bedHint: { fontSize: fontSize.caption, color: colors.textMuted },
+  bedBoxText: { fontSize: 10, fontWeight: '800' },
+
+  freeing: { fontSize: 10.5, color: colors.textMuted, fontWeight: '600', marginTop: space.sm },
 });

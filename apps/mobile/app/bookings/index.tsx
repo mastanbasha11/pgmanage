@@ -1,23 +1,26 @@
 /**
  * Bookings — daily stays + advance bookings for the property.
- * Month/year picker + kind filter + list; FAB → add booking.
+ * Month/year picker + kind tabs + list; FAB → add booking.
+ *
+ * Restyled to the redesign mock: three KPI tiles (total / daily / advance),
+ * a Daily-vs-Advance segmented control, an amber notice for advance bookings
+ * with no bed assigned, and bordered pill rows. There is deliberately NO
+ * average-daily-rate KPI — actual money in is what the owner tracks.
  */
 import { useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import {
-  Screen,
   Header,
-  Card,
   Loading,
   Empty,
   Chip,
   ChipStrip,
   Fab,
   Row,
-  StatusPill,
+  Segmented,
   Sheet,
   Field,
   MoneyField,
@@ -27,10 +30,11 @@ import {
   Button,
   IconButton,
   ConfirmDialog,
-  Section,
+  Avatar,
   rupees,
   formatDateHuman,
 } from '../../components/ui';
+import { KpiTile, NoticeCard, Pill, RoomBadge } from '../../components/redesign';
 import { useAppStore } from '../../lib/store';
 import {
   useBookings,
@@ -42,9 +46,11 @@ import {
   type CreateBookingPayload,
 } from '../../lib/hooks/bookings';
 import { getApiError } from '../../lib/api';
-import { colors, radius, space, type as fontSize } from '../../lib/theme';
+import { colors, radius, space, type as fontSize, TOUCH_TARGET } from '../../lib/theme';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+type KindFilter = 'ALL' | BookingKind;
 
 function nowMY() {
   const d = new Date();
@@ -55,28 +61,51 @@ export default function BookingsPage() {
   const router = useRouter();
   const { selectedPropertyId } = useAppStore();
   const [{ m: month, y: year }, setMY] = useState(nowMY);
-  const [kind, setKind] = useState<BookingKind | 'ALL'>('ALL');
+  const [kind, setKind] = useState<KindFilter>('ALL');
+  const [search, setSearch] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<Booking | null>(null);
   const [deleting, setDeleting] = useState<Booking | null>(null);
 
+  // Filtered query — drives the list only.
   const bookings = useBookings({
     property_id: selectedPropertyId ?? undefined,
     month,
     year,
-    kind,
+    kind: kind === 'ALL' ? undefined : kind,
+    q: search.trim() || undefined,
   });
+
+  // KPI totals deliberately ignore the kind tabs and the search box. The
+  // backend applies both to its aggregate query too, so reusing the filtered
+  // response here made "Received — advance bookings" read ₹0 the moment you
+  // tapped the "Daily stays" tab — and the client-side sum it used before also
+  // under-reported, because the returned page is LIMIT-capped. The headline is
+  // "what came in this period", which does not change based on which list you
+  // happen to be looking at.
+  const totalsQ = useBookings({
+    property_id: selectedPropertyId ?? undefined,
+    month,
+    year,
+  });
+  const totals = totalsQ.data;
+
   const del = useDeleteBooking();
 
   const items = bookings.data?.items ?? [];
-  const totalPaise = items.reduce((a, b) => a + b.amount_paise, 0);
-  const dailyPaise = items.filter((b) => b.kind === 'DAILY').reduce((a, b) => a + b.amount_paise, 0);
-  const advancePaise = items.filter((b) => b.kind === 'ADVANCE').reduce((a, b) => a + b.amount_paise, 0);
+
+  // Advance bookings still waiting on a bed — the owner needs to pick one from
+  // vacancies before the guest turns up.
+  const unassignedAdvance = items.filter((b) => b.kind === 'ADVANCE' && !b.room_label?.trim());
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={{ padding: space.lg, paddingBottom: space.sm }}>
-        <Header title="Bookings" subtitle={`${items.length} · ${rupees(totalPaise)}`} onBack={() => router.back()} />
+        <Header
+          title="Bookings"
+          subtitle={`${totals?.count ?? 0} this period · ${rupees(totals?.total_paise ?? 0)}`}
+          onBack={() => router.back()}
+        />
         <ChipStrip>
           {MONTHS.map((m, i) => (
             <Chip key={m} label={m} active={i + 1 === month} onPress={() => setMY({ m: i + 1, y: year })} />
@@ -84,63 +113,165 @@ export default function BookingsPage() {
           <Chip label={String(year)} iconName="calendar-outline" onPress={() => setMY({ m: month, y: year - 1 })} />
         </ChipStrip>
         <View style={{ height: space.sm }} />
-        <Row gap={space.xs} wrap>
-          <Chip label="All" active={kind === 'ALL'} onPress={() => setKind('ALL')} count={items.length} />
-          <Chip label="Daily" active={kind === 'DAILY'} onPress={() => setKind('DAILY')} />
-          <Chip label="Advance" active={kind === 'ADVANCE'} onPress={() => setKind('ADVANCE')} />
-        </Row>
+        <Segmented<KindFilter>
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: 'ALL', label: 'All' },
+            { value: 'DAILY', label: 'Daily stays' },
+            { value: 'ADVANCE', label: 'Advance' },
+          ]}
+        />
+        <View style={{ height: space.sm }} />
+        <View style={styles.searchRow}>
+          <Ionicons name="search-outline" size={17} color={colors.textDim} />
+          <TextInput
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search guest, phone, room…"
+            placeholderTextColor={colors.textDim}
+            returnKeyType="search"
+          />
+          {!!search && (
+            <IconButton name="close-circle" accessibilityLabel="Clear search" size={18} onPress={() => setSearch('')} />
+          )}
+        </View>
       </View>
 
       {bookings.isLoading ? (
         <Loading />
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl }}
-          refreshControl={<RefreshControl refreshing={bookings.isRefetching} onRefresh={bookings.refetch} tintColor={colors.accent} />}
+          contentContainerStyle={{ padding: space.lg, paddingTop: space.sm, paddingBottom: space.xxl }}
+          refreshControl={
+            <RefreshControl
+              refreshing={bookings.isRefetching}
+              onRefresh={() => {
+                bookings.refetch();
+                totalsQ.refetch();
+              }}
+              tintColor={colors.accent}
+            />
+          }
         >
-          <Row gap={space.sm} style={{ marginBottom: space.md }}>
-            <SumTile label="Daily stays" value={rupees(dailyPaise)} tone="info" />
-            <SumTile label="Advance" value={rupees(advancePaise)} tone="warn" />
+          {/* KPI tiles — read straight off the response aggregates (paise). */}
+          <Row gap={space.sm} align="stretch" style={{ marginBottom: space.sm }}>
+            <KpiTile
+              label="Total this period"
+              value={rupees(totals?.total_paise ?? 0)}
+              foot={`${totals?.count ?? 0} ${(totals?.count ?? 0) === 1 ? 'booking' : 'bookings'}`}
+            />
+          </Row>
+          <Row gap={space.sm} align="stretch" style={{ marginBottom: space.md }}>
+            <KpiTile
+              label="Received — daily stays"
+              value={rupees(totals?.daily_paise ?? 0)}
+              foot="guests paying per night"
+            />
+            <KpiTile
+              label="Received — advance bookings"
+              value={rupees(totals?.advance_paise ?? 0)}
+              foot="tokens for upcoming move-ins"
+            />
           </Row>
 
+          {unassignedAdvance.length > 0 && (
+            <NoticeCard tone="warn" style={{ marginBottom: space.md }}>
+              <Row justify="space-between" align="flex-start" gap={space.sm}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.noticeTitle}>
+                    {unassignedAdvance.length} advance booking
+                    {unassignedAdvance.length === 1 ? '' : 's'} with no bed assigned
+                  </Text>
+                  <Text style={styles.noticeBody} numberOfLines={2}>
+                    {unassignedAdvance.map((b) => b.guest_name).join(', ')} — pick a bed before they
+                    move in.
+                  </Text>
+                </View>
+              </Row>
+              <Button
+                label="Assign from vacancies"
+                variant="secondary"
+                size="sm"
+                iconName="bed-outline"
+                onPress={() => router.push('/tabs/rooms')}
+                style={{ marginTop: space.sm, alignSelf: 'flex-start' }}
+              />
+            </NoticeCard>
+          )}
+
           {items.length === 0 ? (
-            <Empty title="No bookings this month" iconName="calendar-outline" hint="Tap + to record one" />
+            <Empty
+              title="No bookings this period"
+              iconName="calendar-outline"
+              hint={search.trim() ? 'Try a different search.' : 'Tap + to record one'}
+            />
           ) : (
             items.map((b) => (
-              <Card key={b.id} style={{ marginBottom: space.sm }}>
-                <Row justify="space-between">
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.name}>{b.guest_name}</Text>
-                    <Text style={styles.meta}>
-                      {b.room_label ?? '—'} · {b.guest_phone ?? ''}
+              <View key={b.id} style={styles.card}>
+                <Row justify="space-between" align="flex-start" gap={space.sm}>
+                  {b.room_label?.trim() ? (
+                    <RoomBadge
+                      room={b.room_label}
+                      sub={b.kind === 'DAILY' ? 'guest' : undefined}
+                      tone={b.kind === 'ADVANCE' ? 'a' : 'g'}
+                    />
+                  ) : (
+                    <View style={styles.roomEmpty}>
+                      <Text style={styles.roomEmptyText}>—</Text>
+                    </View>
+                  )}
+                  <Avatar name={b.guest_name} size={30} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {b.guest_name}
                     </Text>
-                    <Row gap={space.xs} style={{ marginTop: space.xs }}>
-                      <StatusPill label={b.kind} tone={b.kind === 'DAILY' ? 'info' : 'warn'} />
-                      {b.check_in && (
-                        <StatusPill label={formatDateHuman(b.check_in)} tone="neutral" />
+                    {!!b.guest_phone && (
+                      <Text style={styles.meta} numberOfLines={1}>
+                        {b.guest_phone}
+                      </Text>
+                    )}
+                    <Row gap={5} wrap style={{ marginTop: 4 }}>
+                      <Pill
+                        label={b.kind === 'ADVANCE' ? 'Advance' : 'Daily'}
+                        tone={b.kind === 'ADVANCE' ? 'a' : 'b'}
+                        dot
+                      />
+                      {!!b.check_in && (
+                        <Pill
+                          label={
+                            b.check_out
+                              ? `${formatDateHuman(b.check_in)} → ${formatDateHuman(b.check_out)}`
+                              : formatDateHuman(b.check_in)
+                          }
+                          tone="s"
+                        />
                       )}
+                      {!!b.paid_to && <Pill label={`to ${b.paid_to}`} tone="s" />}
                     </Row>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={styles.amount}>{rupees(b.amount_paise)}</Text>
-                    <Row gap={4} style={{ marginTop: 4 }}>
+                    {!!b.payment_mode && <Text style={styles.mode}>{b.payment_mode}</Text>}
+                    <Row gap={0} style={{ marginTop: 2 }}>
                       <IconButton
                         name="pencil"
                         accessibilityLabel="Edit"
                         onPress={() => setEditing(b)}
-                        size={18}
+                        size={16}
                       />
                       <IconButton
                         name="trash-outline"
                         color={colors.danger}
                         accessibilityLabel="Delete"
                         onPress={() => setDeleting(b)}
-                        size={18}
+                        size={16}
                       />
                     </Row>
                   </View>
                 </Row>
-              </Card>
+              </View>
             ))
           )}
         </ScrollView>
@@ -148,17 +279,8 @@ export default function BookingsPage() {
 
       <Fab name="add" accessibilityLabel="Add booking" onPress={() => setAddOpen(true)} />
 
-      {addOpen && (
-        <BookingSheet
-          onClose={() => setAddOpen(false)}
-        />
-      )}
-      {editing && (
-        <BookingSheet
-          initial={editing}
-          onClose={() => setEditing(null)}
-        />
-      )}
+      {addOpen && <BookingSheet onClose={() => setAddOpen(false)} />}
+      {editing && <BookingSheet initial={editing} onClose={() => setEditing(null)} />}
 
       <ConfirmDialog
         open={!!deleting}
@@ -178,17 +300,6 @@ export default function BookingsPage() {
         confirmVariant="danger"
         loading={del.isPending}
       />
-    </View>
-  );
-}
-
-function SumTile({ label, value, tone }: { label: string; value: string; tone: 'info' | 'warn' }) {
-  const bg = tone === 'info' ? colors.infoBg : colors.warnBg;
-  const fg = tone === 'info' ? colors.info : colors.warn;
-  return (
-    <View style={[styles.sum, { backgroundColor: bg }]}>
-      <Text style={[styles.sumVal, { color: fg }]}>{value}</Text>
-      <Text style={styles.sumLabel}>{label}</Text>
     </View>
   );
 }
@@ -260,10 +371,16 @@ function BookingSheet({
       <Text style={{ fontSize: fontSize.small, fontWeight: '600', color: colors.textMuted, marginBottom: 4 }}>
         Kind
       </Text>
-      <Row gap={space.sm} style={{ marginBottom: space.md }}>
-        <Chip label="Daily stay" active={kind === 'DAILY'} onPress={() => setKind('DAILY')} />
-        <Chip label="Advance" active={kind === 'ADVANCE'} onPress={() => setKind('ADVANCE')} />
-      </Row>
+      <View style={{ marginBottom: space.md }}>
+        <Segmented<BookingKind>
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: 'DAILY', label: 'Daily stay' },
+            { value: 'ADVANCE', label: 'Advance' },
+          ]}
+        />
+      </View>
       <MoneyField label="Amount" required valuePaise={amount} onChangeAmount={setAmount} />
       <DateField label="Check-in" value={checkIn} onChange={setCheckIn} />
       {kind === 'DAILY' && (
@@ -295,11 +412,48 @@ function BookingSheet({
 }
 
 const styles = StyleSheet.create({
-  sum: { flex: 1, padding: space.md, borderRadius: radius.md },
-  sumVal: { fontSize: fontSize.h2, fontWeight: '800' },
-  sumLabel: { fontSize: fontSize.caption, color: colors.textMuted, fontWeight: '600', marginTop: 2 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    gap: space.sm,
+  },
+  searchInput: {
+    flex: 1,
+    minHeight: TOUCH_TARGET,
+    fontSize: fontSize.body,
+    color: colors.text,
+  },
 
-  name: { fontSize: fontSize.bodyLg, fontWeight: '700', color: colors.text },
-  meta: { fontSize: fontSize.caption, color: colors.textMuted, marginTop: 2 },
-  amount: { fontSize: fontSize.h3, fontWeight: '800', color: colors.accent },
+  noticeTitle: { fontSize: 12.5, fontWeight: '800', color: colors.warn },
+  noticeBody: { fontSize: 11, color: colors.textMuted, fontWeight: '600', marginTop: 3 },
+
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 11,
+    marginBottom: space.sm,
+  },
+  roomEmpty: {
+    minWidth: 38,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    backgroundColor: colors.neutralBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roomEmptyText: { fontSize: 12.5, fontWeight: '800', color: colors.textDim },
+
+  name: { fontSize: 13.5, fontWeight: '800', color: colors.text, letterSpacing: -0.2 },
+  meta: { fontSize: 11, color: colors.textMuted, fontWeight: '600', marginTop: 2 },
+  amount: { fontSize: 14, fontWeight: '800', color: colors.text, letterSpacing: -0.3 },
+  mode: { fontSize: 9.5, fontWeight: '700', color: colors.textDim, marginTop: 1 },
 });

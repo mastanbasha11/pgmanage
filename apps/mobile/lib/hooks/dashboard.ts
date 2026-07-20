@@ -4,39 +4,88 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
+import { deriveOccupied } from '../dashboard-derive';
 
+/**
+ * Mirrors the `/dashboard/summary` return in app/api/v1/dashboard.py EXACTLY.
+ *
+ * This previously declared invented names (`expected_paise`, `expenses_paise`,
+ * `refunds_paise`, `power_paise`, `occupied_beds`, `owner_split`). None of them
+ * are in the payload, so every screen reading them silently got `undefined` and
+ * rendered 0 — occupancy showed 0%, and cash-out was always ₹0. Do not add a
+ * field here without checking the endpoint.
+ *
+ * Note there is NO `occupied_beds`. Derive it as `total_beds - vacant_beds`,
+ * which already includes RESERVED because the backend counts a reserved bed as
+ * occupied (a held bed isn't sellable).
+ */
 export interface DashboardSummary {
-  property_id: string;
   month: number;
   year: number;
-  // Money-in
-  rent_collected_paise: number;
-  advance_received_paise: number;
-  daily_stays_paise: number;
-  power_paise: number;
-  opening_balance_paise: number;
-  // Money-out
-  expenses_paise: number;
-  refunds_paise: number;
+  period_start: string | null;
+  period_end: string | null;
+
   // Rent state
-  expected_paise: number;
-  outstanding_paise: number;
+  expected_rent_paise: number;
+  collected_rent_paise: number;
+  rent_only_paise: number;
+  ledger_paid_paise: number;
   discount_paise: number;
-  // Occupancy
-  occupied_beds: number;
-  reserved_beds: number;
-  vacant_beds: number;
-  total_beds: number;
+  outstanding_paise: number;
+  /** 0..1 fraction, not a percentage. */
+  collection_rate: number;
+
+  // Money-in
+  advance_received_paise: number;
+  bookings_revenue_paise: number;
+  daily_stays_paise: number;
+  power_received_paise: number;
+  opening_balance_paise: number;
+  total_received_paise: number;
+
+  // Money-out
+  refunds_given_paise: number;
+  total_expenses_paise: number;
+  total_given_paise: number;
+
+  net_income_paise: number;
+
+  // Occupancy — `occupancy_rate` is a 0..1 fraction and INCLUDES reserved.
   occupancy_rate: number;
-  // Movement
-  checkins_this_month?: number;
-  checkouts_this_month?: number;
-  notices_active?: number;
+  vacant_beds: number;
+  reserved_beds: number;
+  total_beds: number;
+
+  total_tenants: number;
+  overdue_tenants: number;
+
   // Attribution
   cash_in_by_person?: Record<string, number>;
   expenses_by_person?: Record<string, number>;
-  owner_split?: Array<{ name: string; share_pct: number; amount_paise: number }>;
-  recurring_alerts?: Array<{ label: string; delta_pct: number; amount_paise: number }>;
+  owner_profits?: Array<{ name: string; share_pct: number; amount_paise: number }>;
+  top_recurring_spikes?: Array<{ label: string; delta_pct: number; amount_paise: number }>;
+
+  // Back-compat aliases the backend still emits.
+  gross_rent_expected_paise?: number;
+  rent_collected_paise?: number;
+  active_tenants?: number;
+}
+
+/**
+ * Beds that are not sellable today (OCCUPIED + RESERVED).
+ * Delegates to the unit-tested derivation in lib/dashboard-derive so there is
+ * exactly one definition of this in the app.
+ */
+export function occupiedBeds(d: DashboardSummary): number {
+  return deriveOccupied(d.total_beds, d.vacant_beds);
+}
+
+/** `month` is a pre-formatted label like "Jul 2026", not a number. */
+export interface CashflowPoint {
+  month: string;
+  income_paise: number;
+  expenses_paise: number;
+  net_paise: number;
 }
 
 export function useDashboardSummary(params: { property_id?: string; month: number; year: number }) {
@@ -48,15 +97,45 @@ export function useDashboardSummary(params: { property_id?: string; month: numbe
 }
 
 export function useCashflow(params: { property_id?: string; months?: number }) {
-  return useQuery({
+  return useQuery<{ items: CashflowPoint[]; months: number }>({
     queryKey: ['dashboard', 'cashflow', params],
     queryFn: () => api.get('/dashboard/cashflow', { params }).then((r) => r.data),
     enabled: !!params.property_id,
   });
 }
 
-export function useRoiByRoom(params: { property_id?: string; window?: 3 | 6 | 12 }) {
-  return useQuery({
+export interface RoiRoom {
+  room_id: string;
+  room_number: string;
+  room_type: string | null;
+  capacity: number | null;
+  monthly_base_rent_paise: number | null;
+  revenue_paise: number;
+  rent_txns: number;
+  occupied_beds: number;
+  vacant_beds: number;
+  reserved_beds: number;
+  total_beds: number;
+  revenue_per_bed_paise: number;
+  revenue_per_bed_per_month_paise: number;
+  expected_monthly_paise: number;
+}
+
+export interface RoiRoomType {
+  room_type: string;
+  rooms: number;
+  total_beds: number;
+  occupied_beds: number;
+  revenue_paise: number;
+  capacity: number | null;
+  revenue_per_bed_per_month_paise: number;
+  /** 0..1 fraction. */
+  occupancy_rate: number;
+}
+
+/** The endpoint's param is `months`, not `window`. */
+export function useRoiByRoom(params: { property_id?: string; months?: number }) {
+  return useQuery<{ months: number; rooms: RoiRoom[]; room_types: RoiRoomType[] }>({
     queryKey: ['dashboard', 'roi', params],
     queryFn: () => api.get('/dashboard/roi-by-room', { params }).then((r) => r.data),
     enabled: !!params.property_id,

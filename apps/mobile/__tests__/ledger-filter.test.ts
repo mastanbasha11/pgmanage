@@ -10,6 +10,7 @@ import {
   filterByStatus,
   sumOutstanding,
   type LedgerEntryLite,
+  avgDaysToCollect,
 } from '../lib/ledger-filter';
 
 const SAMPLE: LedgerEntryLite[] = [
@@ -64,5 +65,58 @@ describe('countByStatus', () => {
   test('counts sum to the total entry count', () => {
     const c = countByStatus(SAMPLE);
     expect(c.PAID + c.PARTIAL + c.UNPAID).toBe(c.ALL);
+  });
+});
+
+describe('avgDaysToCollect', () => {
+  const PERIOD_START = '2026-06-11T00:00:00Z';
+
+  test('averages the gap from period start to each payment', () => {
+    const rows = [
+      { paid_on: '2026-06-13T00:00:00Z' }, // 2 days
+      { paid_on: '2026-06-15T00:00:00Z' }, // 4 days
+      { paid_on: '2026-06-17T00:00:00Z' }, // 6 days
+    ];
+    const { avgDays, paidCount } = avgDaysToCollect(rows, PERIOD_START);
+    expect(paidCount).toBe(3);
+    expect(avgDays).toBeCloseTo(4, 5);
+  });
+
+  test('ignores rows with no payment', () => {
+    const rows = [{ paid_on: '2026-06-13T00:00:00Z' }, { paid_on: null }];
+    const { avgDays, paidCount } = avgDaysToCollect(rows, PERIOD_START);
+    expect(paidCount).toBe(1);
+    expect(avgDays).toBeCloseTo(2, 5);
+  });
+
+  test('drops back-dated payments from before the period opened', () => {
+    const rows = [
+      { paid_on: '2026-06-01T00:00:00Z' }, // negative gap → excluded
+      { paid_on: '2026-06-13T00:00:00Z' },
+    ];
+    const { avgDays, paidCount } = avgDaysToCollect(rows, PERIOD_START);
+    expect(paidCount).toBe(1);
+    expect(avgDays).toBeCloseTo(2, 5);
+  });
+
+  test('drops carried-over payments 90+ days out', () => {
+    const rows = [
+      { paid_on: '2026-10-01T00:00:00Z' }, // >90 days → excluded
+      { paid_on: '2026-06-13T00:00:00Z' },
+    ];
+    expect(avgDaysToCollect(rows, PERIOD_START).paidCount).toBe(1);
+  });
+
+  test('returns null rather than NaN when nothing qualifies', () => {
+    expect(avgDaysToCollect([{ paid_on: null }], PERIOD_START)).toEqual({
+      avgDays: null,
+      paidCount: 0,
+    });
+  });
+
+  test('returns null when the period is missing or unparseable', () => {
+    const rows = [{ paid_on: '2026-06-13T00:00:00Z' }];
+    expect(avgDaysToCollect(rows, undefined).avgDays).toBeNull();
+    expect(avgDaysToCollect(rows, 'not-a-date').avgDays).toBeNull();
   });
 });

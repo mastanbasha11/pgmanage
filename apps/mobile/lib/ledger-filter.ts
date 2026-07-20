@@ -36,3 +36,44 @@ export function countByStatus(entries: LedgerEntryLite[]): Record<LedgerFilter, 
   for (const e of entries) counts[e.status] = (counts[e.status] ?? 0) + 1;
   return counts;
 }
+
+// ── Avg days to collect ──────────────────────────────────────────────────────
+
+export interface AvgDaysResult {
+  /** Mean days from period start to payment, or null when nothing qualifies. */
+  avgDays: number | null;
+  /** How many payments went into the mean — shown as the tile's footnote. */
+  paidCount: number;
+}
+
+/**
+ * "Avg days to collect" — the plain-language replacement for the old
+ * "DSO / on-time" label.
+ *
+ * `paid_on` is the ledger row's most-recent payment timestamp. Gaps outside
+ * [0, 90) are dropped on purpose: a negative gap means the payment was
+ * back-dated before the period opened, and anything past 90 days is a
+ * carried-over entry. Either would drag the mean somewhere useless.
+ */
+export function avgDaysToCollect(
+  entries: { paid_on?: string | null }[],
+  periodStartIso: string | undefined | null,
+): AvgDaysResult {
+  if (!periodStartIso) return { avgDays: null, paidCount: 0 };
+  const start = Date.parse(periodStartIso);
+  if (Number.isNaN(start)) return { avgDays: null, paidCount: 0 };
+
+  const gaps: number[] = [];
+  for (const e of entries) {
+    if (!e.paid_on) continue;
+    const paid = Date.parse(e.paid_on);
+    if (Number.isNaN(paid)) continue;
+    const gap = (paid - start) / 86_400_000;
+    if (gap >= 0 && gap < 90) gaps.push(gap);
+  }
+  if (!gaps.length) return { avgDays: null, paidCount: 0 };
+  return {
+    avgDays: gaps.reduce((a, b) => a + b, 0) / gaps.length,
+    paidCount: gaps.length,
+  };
+}
