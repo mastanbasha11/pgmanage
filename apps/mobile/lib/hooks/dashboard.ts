@@ -59,10 +59,13 @@ export interface DashboardSummary {
   total_tenants: number;
   overdue_tenants: number;
 
-  // Attribution
-  cash_in_by_person?: Record<string, number>;
-  expenses_by_person?: Record<string, number>;
-  owner_profits?: Array<{ name: string; share_pct: number; amount_paise: number }>;
+  // Attribution — the backend emits ARRAYS of rows, not name→amount maps.
+  // Treating them as objects (Object.entries) yielded index keys 0,1,2… and
+  // object values that rendered ₹NaN. `owner_profits` carries `share_paise`,
+  // not `amount_paise`.
+  cash_in_by_person?: Array<{ person: string; total_paise: number; count: number }>;
+  expenses_by_person?: Array<{ person: string; total_paise: number; count: number }>;
+  owner_profits?: Array<{ name: string; share_pct: number; share_paise: number }>;
   top_recurring_spikes?: Array<{ label: string; delta_pct: number; amount_paise: number }>;
 
   // Back-compat aliases the backend still emits.

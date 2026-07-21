@@ -38,6 +38,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, getApiError } from '../../lib/api';
@@ -174,6 +175,7 @@ function SpendDelta({ current, previous }: { current: number; previous: number }
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function ExpensesScreen() {
+  const insets = useSafeAreaInsets();
   const { selectedPropertyId, canAccessFinancials } = useAppStore();
   const hasFinancials = canAccessFinancials();
 
@@ -400,7 +402,7 @@ export default function ExpensesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={styles.headerBox}>
+      <View style={{ ...styles.headerBox, paddingTop: insets.top + space.sm }}>
         <Header
           title="Expenses"
           subtitle={`${MONTH_FULL[month - 1]} ${year} · ${rupees(approvedTotal)} approved`}
@@ -918,7 +920,7 @@ function AddExpenseModal({
 
 const styles = StyleSheet.create({
   headerBox: {
-    padding: space.lg,
+    paddingHorizontal: space.lg,
     paddingBottom: space.sm,
     gap: space.sm,
     backgroundColor: colors.bg,

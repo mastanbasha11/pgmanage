@@ -28,6 +28,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -138,11 +139,15 @@ function followupOffsetDays(iso?: string | null): number | null {
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function LeadsPipelinePage() {
+  const insets = useSafeAreaInsets();
   const { openLead } = useLocalSearchParams<{ openLead?: string }>();
   const { selectedPropertyId, user, voiceGuidance } = useAppStore();
   const [tab, setTab] = useState<'pipeline' | 'website'>('pipeline');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [colIndex, setColIndex] = useState(0);
+  // The match/funnel insights are collapsed by default so the lead list — the
+  // thing you actually work — gets the screen. Tap the summary bar to expand.
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const scrollerRef = useRef<ScrollView>(null);
   const [openLeadId, setOpenLeadId] = useState<string | null>(null);
   const [moveTarget, setMoveTarget] = useState<LeadRow | null>(null);
@@ -252,7 +257,7 @@ export default function LeadsPipelinePage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={{ padding: space.lg, paddingBottom: space.sm, gap: space.sm }}>
+      <View style={{ paddingTop: insets.top + space.sm, paddingHorizontal: space.lg, paddingBottom: space.sm, gap: space.sm }}>
         <Header
           title="Leads"
           subtitle={`${filtered.length} of ${all.length} in pipeline`}
@@ -287,52 +292,76 @@ export default function LeadsPipelinePage() {
       ) : (
         <>
           <View style={{ paddingHorizontal: space.lg, gap: space.sm }}>
-            {/* Match leads → beds */}
-            {match.length > 0 && (
-              <NoticeCard tone="accent">
-                <Text style={styles.noticeTitle}>🎯 Match leads → beds</Text>
-                <Text style={styles.noticeSub}>
-                  Vacant beds → open leads wanting that type.
+            {/* Collapsible insights — summary bar always visible, detail on tap */}
+            {(match.length > 0 || funnel.total > 0) && (
+              <Pressable
+                onPress={() => setInsightsOpen((v) => !v)}
+                style={styles.insightsBar}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: insightsOpen }}
+              >
+                <Text style={styles.insightsSummary} numberOfLines={1}>
+                  🎯 {match.filter((m) => m.demand > m.supply).length} room types in demand
+                  {funnel.total > 0 ? ` · ${funnel.bottleneck} bottleneck` : ''}
                 </Text>
-                <Row gap={space.xs} wrap style={{ marginTop: space.sm }}>
-                  {match.map((m) => (
-                    <Pill
-                      key={m.roomType}
-                      label={`${m.roomType} ${m.supply}→${m.demand}`}
-                      tone={m.demand > m.supply ? 'r' : m.demand === 0 ? 's' : 'g'}
-                      dot
-                    />
-                  ))}
-                </Row>
-              </NoticeCard>
+                <Ionicons
+                  name={insightsOpen ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={colors.textMuted}
+                />
+              </Pressable>
             )}
 
-            {/* Funnel */}
-            {funnel.total > 0 && (
-              <Card style={styles.funnelCard}>
-                <Row gap={space.sm} justify="space-between">
-                  <Text style={styles.funnelText}>
-                    contact <Text style={styles.funnelNum}>{funnel.contact}%</Text> → visit{' '}
-                    <Text style={styles.funnelNum}>{funnel.visit}%</Text> → book{' '}
-                    <Text style={styles.funnelNum}>{funnel.book}%</Text>
-                  </Text>
-                </Row>
-                <Row gap={4} style={{ marginTop: 6 }}>
-                  <View style={{ flex: 1 }}>
-                    <Track pct={funnel.contact} color={colors.info} height={5} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Track pct={funnel.visit} color={colors.purple} height={5} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Track pct={funnel.book} color={colors.accent} height={5} />
-                  </View>
-                </Row>
-                <Text style={styles.funnelFoot}>
-                  {funnel.bottleneck} {funnel.bottleneck === 'visits' ? 'are' : 'is'} the
-                  bottleneck · {funnel.total} lead{funnel.total === 1 ? '' : 's'} total
-                </Text>
-              </Card>
+            {insightsOpen && (
+              <>
+                {/* Match leads → beds */}
+                {match.length > 0 && (
+                  <NoticeCard tone="accent">
+                    <Text style={styles.noticeTitle}>🎯 Match leads → beds</Text>
+                    <Text style={styles.noticeSub}>
+                      Vacant beds → open leads wanting that type.
+                    </Text>
+                    <Row gap={space.xs} wrap style={{ marginTop: space.sm }}>
+                      {match.map((m) => (
+                        <Pill
+                          key={m.roomType}
+                          label={`${m.roomType} ${m.supply}→${m.demand}`}
+                          tone={m.demand > m.supply ? 'r' : m.demand === 0 ? 's' : 'g'}
+                          dot
+                        />
+                      ))}
+                    </Row>
+                  </NoticeCard>
+                )}
+
+                {/* Funnel */}
+                {funnel.total > 0 && (
+                  <Card style={styles.funnelCard}>
+                    <Row gap={space.sm} justify="space-between">
+                      <Text style={styles.funnelText}>
+                        contact <Text style={styles.funnelNum}>{funnel.contact}%</Text> → visit{' '}
+                        <Text style={styles.funnelNum}>{funnel.visit}%</Text> → book{' '}
+                        <Text style={styles.funnelNum}>{funnel.book}%</Text>
+                      </Text>
+                    </Row>
+                    <Row gap={4} style={{ marginTop: 6 }}>
+                      <View style={{ flex: 1 }}>
+                        <Track pct={funnel.contact} color={colors.info} height={5} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Track pct={funnel.visit} color={colors.purple} height={5} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Track pct={funnel.book} color={colors.accent} height={5} />
+                      </View>
+                    </Row>
+                    <Text style={styles.funnelFoot}>
+                      {funnel.bottleneck} {funnel.bottleneck === 'visits' ? 'are' : 'is'} the
+                      bottleneck · {funnel.total} lead{funnel.total === 1 ? '' : 's'} total
+                    </Text>
+                  </Card>
+                )}
+              </>
             )}
 
             <ChipStrip>
@@ -421,16 +450,23 @@ export default function LeadsPipelinePage() {
               horizontal
               pagingEnabled
               showsHorizontalScrollIndicator={false}
+              // flex:1 is what makes the columns fill the space below the
+              // header block. Without it the ScrollView collapsed to its
+              // intrinsic height and each column's list showed in a sliver at
+              // the bottom of the screen, un-scrollable.
+              style={{ flex: 1 }}
               onMomentumScrollEnd={(e) => {
                 const x = e.nativeEvent.contentOffset.x;
                 setColIndex(Math.round(x / SCREEN_W));
               }}
             >
               {LEAD_STATUSES.map((s) => (
-                <View key={s} style={{ width: SCREEN_W }}>
+                <View key={s} style={{ width: SCREEN_W, flex: 1 }}>
                   <FlatList
                     data={byStatus.get(s) ?? []}
                     keyExtractor={(l) => l.id}
+                    style={{ flex: 1 }}
+                    showsVerticalScrollIndicator={false}
                     contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl }}
                     refreshControl={
                       <RefreshControl
@@ -888,6 +924,19 @@ const styles = StyleSheet.create({
   colHint: { fontSize: fontSize.caption, color: colors.textMuted, marginTop: 2 },
   dotsRow: { flexDirection: 'row', gap: 4, marginTop: 6, alignItems: 'center' },
   dot: { height: 6, borderRadius: 3 },
+
+  insightsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
+  insightsSummary: { flex: 1, fontSize: 11.5, fontWeight: '800', color: colors.text },
 
   noticeTitle: { fontSize: 12.5, fontWeight: '800', color: colors.text },
   noticeSub: { fontSize: 10.5, color: colors.textMuted, fontWeight: '600', marginTop: 2, lineHeight: 14 },

@@ -561,17 +561,26 @@ function OperatingMetrics({
 // ── Attribution ─────────────────────────────────────────────────────────────
 
 function Attribution({ data }: { data: DashboardSummary }) {
-  const cashInBy = Object.entries(data.cash_in_by_person ?? {}).sort(([, a], [, b]) => b - a);
-  const spentBy = Object.entries(data.expenses_by_person ?? {}).sort(([, a], [, b]) => b - a);
+  // These are arrays of {person, total_paise, count} — NOT name→amount maps.
+  const cashInBy = [...(data.cash_in_by_person ?? [])].sort(
+    (a, b) => b.total_paise - a.total_paise,
+  );
+  const spentBy = [...(data.expenses_by_person ?? [])].sort(
+    (a, b) => b.total_paise - a.total_paise,
+  );
   const owners = data.owner_profits ?? [];
   if (!cashInBy.length && !spentBy.length && !owners.length) return null;
 
-  const toRows = (entries: [string, number][], color: string) => {
-    const max = Math.max(...entries.map(([, v]) => v), 1);
-    return entries.map(([name, amt]) => ({
-      label: name,
-      value: rupees(amt),
-      pct: (amt / max) * 100,
+  const toRows = (
+    entries: { person: string; total_paise: number; count: number }[],
+    color: string,
+  ) => {
+    const max = Math.max(...entries.map((e) => e.total_paise), 1);
+    return entries.map((e) => ({
+      label: e.person,
+      sub: `${e.count} ${e.count === 1 ? 'txn' : 'txns'}`,
+      value: rupees(e.total_paise),
+      pct: (e.total_paise / max) * 100,
       color,
     }));
   };
@@ -599,7 +608,7 @@ function Attribution({ data }: { data: DashboardSummary }) {
               rows={owners.map((o) => ({
                 label: o.name,
                 sub: `${o.share_pct}%`,
-                value: rupees(o.amount_paise),
+                value: rupees(o.share_paise),
                 pct: o.share_pct,
                 color: colors.info,
               }))}

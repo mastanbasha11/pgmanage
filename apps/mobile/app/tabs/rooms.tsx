@@ -15,6 +15,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { useAppStore } from '../../lib/store';
@@ -105,6 +106,7 @@ function sortRooms(rooms: RoomGroup[]): RoomGroup[] {
 
 export default function VacanciesTab() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { selectedPropertyId, voiceGuidance } = useAppStore();
   const [filter, setFilter] = useState<FilterKey>('all');
   const q = useVacantBeds(selectedPropertyId ?? undefined, { includeUpcoming: true });
@@ -152,7 +154,7 @@ export default function VacanciesTab() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={{ padding: space.lg, paddingBottom: space.sm }}>
+      <View style={{ paddingTop: insets.top + space.sm, paddingHorizontal: space.lg, paddingBottom: space.sm }}>
         <Header
           title="Vacancies"
           subtitle={`${q.data?.vacant_count ?? 0} vacant now · ${q.data?.upcoming_count ?? 0} upcoming`}
