@@ -22,6 +22,7 @@ import TeamPage from '@/pages/settings/TeamPage';
 import AuditLogsPage from '@/pages/audit-logs/AuditLogsPage';
 import WebsiteIntegrationPage from '@/pages/settings/WebsiteIntegrationPage';
 import WhatsAppPage from '@/pages/settings/WhatsAppPage';
+import PaymentsPage from '@/pages/settings/PaymentsPage';
 import MessageLogPage from '@/pages/settings/MessageLogPage';
 import JobMonitorPage from '@/pages/settings/JobMonitorPage';
 import MenuPage from '@/pages/settings/MenuPage';
@@ -163,6 +164,7 @@ export default function App() {
                     <Route path="settings/menu" element={<MenuPage />} />
                     <Route path="inbox" element={<InboxPage />} />
                     <Route path="settings/whatsapp" element={<WhatsAppPage />} />
+                    <Route path="settings/payments" element={<PaymentsPage />} />
                     <Route path="settings/messages" element={<MessageLogPage />} />
                     <Route path="settings/jobs" element={<JobMonitorPage />} />
                     <Route path="audit-logs" element={<AuditLogsPage />} />

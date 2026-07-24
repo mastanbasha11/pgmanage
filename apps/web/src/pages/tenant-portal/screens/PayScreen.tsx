@@ -9,11 +9,17 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useToast } from '@/hooks/useToast';
 import {
+  useCreateTenantOrder,
   useTenantDues,
   useTenantLedger,
+  useTenantPaymentConfig,
   useTenantPayments,
   useTenantProfile,
+  useVerifyTenantPayment,
+  type PaymentPurpose,
 } from '@/lib/tenant-data/hooks';
+import { openRazorpayCheckout } from '@/lib/tenant-data/razorpay';
+import { getApiError } from '@/lib/api';
 import type { DueLine, LedgerEntry, Payment } from '@/lib/tenant-data/types';
 
 import { Money, PageHeader, SectionHeader, SkeletonLines, StatusPill } from './_shared';
@@ -23,24 +29,76 @@ export default function PayScreen() {
   const paymentsQ = useTenantPayments();
   const ledgerQ = useTenantLedger();
   const profileQ = useTenantProfile();
+  const configQ = useTenantPaymentConfig();
+  const createOrder = useCreateTenantOrder();
+  const verifyPayment = useVerifyTenantPayment();
   const { toast } = useToast();
 
   const [expandedKind, setExpandedKind] = useState<string | null>(null);
+  const [paying, setPaying] = useState(false);
 
   const dues = duesQ.data;
   const payments = paymentsQ.data ?? [];
   const ledger = ledgerQ.data ?? [];
   const profile = profileQ.data;
+  const online = configQ.data?.enabled ?? false;
 
-  function quickPay() {
-    if (
-      !confirm(
-        'UPI integration coming soon. Tap OK to simulate a successful payment for testing.',
-      )
-    ) {
+  /**
+   * Full online-payment flow: create an order → open Razorpay checkout →
+   * verify the result. The webhook independently records the same payment, so
+   * even if the browser closes before verify returns, the money still lands.
+   */
+  async function pay(purpose: PaymentPurpose, amountPaise?: number) {
+    if (paying) return;
+    setPaying(true);
+    try {
+      const order = await createOrder.mutateAsync({ purpose, amount_paise: amountPaise });
+      await openRazorpayCheckout({
+        key: order.key_id,
+        order_id: order.order_id,
+        amount: order.amount_paise,
+        currency: 'INR',
+        name: 'PGManage',
+        description:
+          purpose === 'RENT'
+            ? `Rent · ${dues?.monthLabel ?? ''}`
+            : purpose === 'DEPOSIT'
+              ? 'Security deposit'
+              : 'Advance payment',
+        prefill: { name: profile?.name, contact: profile?.phone },
+        theme: { color: '#0e9384' },
+        modal: { ondismiss: () => setPaying(false) },
+        handler: async (resp) => {
+          try {
+            await verifyPayment.mutateAsync(resp);
+            toast({ title: 'Payment successful', description: 'Your payment has been recorded.' });
+          } catch {
+            // Signature/verify hiccup — the webhook is the backstop, so tell
+            // the tenant it's processing rather than that it failed.
+            toast({
+              title: 'Payment received',
+              description: 'Confirmation is processing and will reflect shortly.',
+            });
+          } finally {
+            setPaying(false);
+          }
+        },
+      });
+    } catch (err) {
+      toast({ title: 'Could not start payment', description: getApiError(err), variant: 'destructive' });
+      setPaying(false);
+    }
+  }
+
+  function payAdvance() {
+    const input = prompt('Enter the advance amount (₹):');
+    if (!input) return;
+    const rupees = Number(input);
+    if (!Number.isFinite(rupees) || rupees <= 0) {
+      toast({ title: 'Enter a valid amount', variant: 'destructive' });
       return;
     }
-    toast({ title: 'Payment recorded' });
+    void pay('ADVANCE', Math.round(rupees * 100));
   }
 
   if (duesQ.isLoading || !dues) {
@@ -95,9 +153,25 @@ export default function PayScreen() {
             </div>
           ) : null}
 
-          <div className="mt-4 flex gap-2">
-            <Button onClick={quickPay}>Pay now</Button>
-          </div>
+          {online ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {dues.status !== 'paid' && dues.totalPaise > 0 && (
+                <Button onClick={() => pay('RENT')} disabled={paying}>
+                  {paying ? 'Opening…' : 'Pay rent now'}
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => pay('DEPOSIT')} disabled={paying}>
+                Pay deposit
+              </Button>
+              <Button variant="outline" onClick={payAdvance} disabled={paying}>
+                Pay advance
+              </Button>
+            </div>
+          ) : (
+            <p className="mt-4 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+              Online payment isn't enabled for your PG yet. Please pay your PG directly.
+            </p>
+          )}
         </CardContent>
       </Card>
 

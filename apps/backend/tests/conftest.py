@@ -117,6 +117,20 @@ async def db_setup():
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Per-org Razorpay columns (migration 037) — mirrored here so tests
+        # don't depend on alembic state. ADD COLUMN IF NOT EXISTS also upgrades
+        # a test DB whose organisations table predates this feature.
+        for _col in (
+            "razorpay_key_id VARCHAR(100)",
+            "razorpay_key_secret VARCHAR(200)",
+            "razorpay_key_secret_arn VARCHAR(500)",
+            "razorpay_webhook_secret VARCHAR(200)",
+            "razorpay_webhook_secret_arn VARCHAR(500)",
+            "razorpay_payments_enabled BOOLEAN NOT NULL DEFAULT false",
+        ):
+            await conn.execute(
+                text(f"ALTER TABLE public.organisations ADD COLUMN IF NOT EXISTS {_col}")
+            )
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS public.platform_users (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

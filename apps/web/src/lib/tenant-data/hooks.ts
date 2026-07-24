@@ -294,3 +294,75 @@ export function useTenantGiveNotice(): UseMutationResult<
     },
   });
 }
+
+// ── Online payments (Razorpay) ───────────────────────────────────────────────
+
+export type PaymentPurpose = 'RENT' | 'ADVANCE' | 'DEPOSIT';
+
+export interface TenantPaymentConfig {
+  enabled: boolean;
+  key_id: string | null;
+}
+
+export interface CreateOrderResponse {
+  order_id: string;
+  amount_paise: number;
+  currency: 'INR';
+  key_id: string;
+  purpose: PaymentPurpose;
+}
+
+/** Whether this PG has online payments switched on (drives the Pay button). */
+export function useTenantPaymentConfig(): UseQueryResult<TenantPaymentConfig> {
+  return useQuery({
+    queryKey: ['tenant-payment-config'] as const,
+    queryFn: async () => {
+      const r = await tenantApi.get<TenantPaymentConfig>('/payments/config');
+      return r.data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCreateTenantOrder(): UseMutationResult<
+  CreateOrderResponse,
+  unknown,
+  { purpose: PaymentPurpose; amount_paise?: number }
+> {
+  return useMutation({
+    mutationFn: async (body) => {
+      const r = await tenantApi.post<CreateOrderResponse>('/payments/order', body);
+      return r.data;
+    },
+  });
+}
+
+export interface VerifyPaymentResponse {
+  status: string;
+  payment_id: string;
+  amount_paise: number;
+}
+
+export function useVerifyTenantPayment(): UseMutationResult<
+  VerifyPaymentResponse,
+  unknown,
+  {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  }
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body) => {
+      const r = await tenantApi.post<VerifyPaymentResponse>('/payments/verify', body);
+      return r.data;
+    },
+    onSuccess: () => {
+      // Dues / ledger / payment history all move after a payment.
+      qc.invalidateQueries({ queryKey: k.dues });
+      qc.invalidateQueries({ queryKey: k.ledger });
+      qc.invalidateQueries({ queryKey: k.payments });
+    },
+  });
+}

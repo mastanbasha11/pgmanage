@@ -28,7 +28,12 @@ www.{$DOMAIN} {
 		# Allow blob: in img-src + frame-src so receipt thumbnails and PDF
 		# previews (rendered via URL.createObjectURL on auth-fetched blobs)
 		# can display inline.
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'self' blob:; object-src 'self' blob:; frame-ancestors 'none'"
+		# Razorpay Checkout (tenant online payments) needs its script + iframe +
+		# analytics host allowlisted, else the checkout window is CSP-blocked:
+		#   script-src  https://checkout.razorpay.com
+		#   frame-src   https://api.razorpay.com https://checkout.razorpay.com
+		#   connect-src https://*.razorpay.com  (lumberjack telemetry)
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' https://checkout.razorpay.com; connect-src 'self' https://*.razorpay.com; frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com; object-src 'self' blob:; frame-ancestors 'none'"
 		-Server
 	}
 
