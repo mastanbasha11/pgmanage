@@ -43,8 +43,10 @@ from app.core.security import (
     generate_otp,
     verify_otp,
 )
+from app.services import razorpay_gateway as rzp
 from app.services.email_service import send_tenant_otp_email
 from app.services.inbox_service import record_event as record_inbox_event
+from app.services.online_payment import OnlinePaymentInput, record_online_payment
 
 router = APIRouter(prefix="/tenant")
 
@@ -999,3 +1001,239 @@ async def tenant_announcements(ctx: TenantContext = Depends(get_current_tenant),
     )
     rows = result.mappings().fetchall()
     return {"items": [dict(r) for r in rows]}
+
+
+# ── Online payments (Razorpay) ───────────────────────────────────────────────
+# Tenants pay rent / advance / deposit online. Per-owner model: the order is
+# created against the ORG's Razorpay account (money → owner). The webhook is the
+# source of truth; the verify endpoint gives instant UX. Both are idempotent on
+# rzp_<payment_id>. See app/services/razorpay_gateway.py + online_payment.py.
+
+
+class CreateOrderRequest(BaseModel):
+    purpose: str  # RENT | ADVANCE | DEPOSIT
+    # Only honoured for ADVANCE (tenant pre-pays an owner-agreed sum). RENT and
+    # DEPOSIT amounts are computed server-side and any client value is ignored.
+    amount_paise: int | None = None
+
+    @field_validator("purpose")
+    @classmethod
+    def _valid_purpose(cls, v: str) -> str:
+        v = (v or "").upper()
+        if v not in ("RENT", "ADVANCE", "DEPOSIT"):
+            raise ValueError("purpose must be RENT, ADVANCE or DEPOSIT")
+        return v
+
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+async def _active_rent_plan(db: AsyncSession, tenant_id: UUID) -> dict | None:
+    return (
+        await db.execute(
+            text(
+                "SELECT monthly_rent_paise, food_charges_paise, food_included, "
+                "       other_charges_json, discount_amount_paise, security_deposit_paise "
+                "FROM rent_plans WHERE tenant_id = :id AND is_active = true LIMIT 1"
+            ),
+            {"id": str(tenant_id)},
+        )
+    ).mappings().fetchone()
+
+
+async def _amount_for_purpose(
+    db: AsyncSession, ctx: TenantContext, purpose: str, requested_paise: int | None
+) -> tuple[int, int | None, int | None]:
+    """Return (amount_paise, for_month, for_year) for the purpose, computed
+    server-side. Raises HTTPException on anything not payable."""
+    today = date.today()
+    plan = await _active_rent_plan(db, ctx.tenant_id)
+    if not plan:
+        raise HTTPException(400, "No active rent plan — nothing to pay online")
+
+    if purpose == "RENT":
+        # Outstanding for the current month. Prefer the generated ledger row;
+        # fall back to the plan total when it hasn't been generated yet.
+        entry = (
+            await db.execute(
+                text(
+                    "SELECT amount_due_paise, amount_paid_paise, discount_paise "
+                    "FROM rent_ledger_entries "
+                    "WHERE tenant_id = :id AND month = :m AND year = :y LIMIT 1"
+                ),
+                {"id": str(ctx.tenant_id), "m": today.month, "y": today.year},
+            )
+        ).mappings().fetchone()
+        if entry:
+            outstanding = (
+                (entry["amount_due_paise"] or 0)
+                - (entry["amount_paid_paise"] or 0)
+                - (entry["discount_paise"] or 0)
+            )
+        else:
+            other = 0
+            for c in plan["other_charges_json"] or []:
+                other += int(c.get("amount_paise", 0) or 0)
+            food = int(plan["food_charges_paise"] or 0) if plan["food_included"] else 0
+            outstanding = (
+                int(plan["monthly_rent_paise"] or 0)
+                + food
+                + other
+                - int(plan["discount_amount_paise"] or 0)
+            )
+        if outstanding <= 0:
+            raise HTTPException(409, "This month's rent is already settled")
+        return outstanding, today.month, today.year
+
+    if purpose == "DEPOSIT":
+        target = int(plan["security_deposit_paise"] or 0)
+        if target <= 0:
+            raise HTTPException(409, "No security deposit is due")
+        already = (
+            await db.execute(
+                text(
+                    "SELECT COALESCE(SUM(amount_paise), 0) FROM payments "
+                    "WHERE tenant_id = :id AND payment_type = 'DEPOSIT' AND is_deleted = false"
+                ),
+                {"id": str(ctx.tenant_id)},
+            )
+        ).scalar() or 0
+        remaining = target - int(already)
+        if remaining <= 0:
+            raise HTTPException(409, "Your security deposit is already paid")
+        return remaining, None, None
+
+    # ADVANCE — tenant pre-pays an owner-agreed sum. Client supplies it, but we
+    # sanity-cap at 12 months' rent so a fat-fingered amount can't go through.
+    if not requested_paise or requested_paise <= 0:
+        raise HTTPException(400, "Enter the advance amount")
+    cap = int(plan["monthly_rent_paise"] or 0) * 12
+    if cap and requested_paise > cap:
+        raise HTTPException(400, "Advance can't exceed 12 months' rent")
+    return int(requested_paise), None, None
+
+
+@router.get("/payments/config", summary="Tenant: is online payment available?")
+async def tenant_payments_config(
+    ctx: TenantContext = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+):
+    """Tells the resident app whether to show the Pay button, and the public
+    key id it needs to open Razorpay checkout. No secrets."""
+    try:
+        creds = await rzp.get_org_creds(db, ctx.org_id)
+    except rzp.PaymentsNotConfiguredError:
+        return {"enabled": False, "key_id": None}
+    return {"enabled": True, "key_id": creds.key_id}
+
+
+@router.post("/payments/order", summary="Tenant: create a Razorpay order")
+async def tenant_create_order(
+    body: CreateOrderRequest,
+    ctx: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        creds = await rzp.get_org_creds(db, ctx.org_id)
+    except rzp.PaymentsNotConfiguredError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+    amount, for_month, for_year = await _amount_for_purpose(
+        db, ctx, body.purpose, body.amount_paise
+    )
+
+    # Everything the verify/webhook path needs to record the payment safely,
+    # server-set so the client can't tamper with purpose or attribution.
+    notes = {
+        "tenant_id": str(ctx.tenant_id),
+        "property_id": str(ctx.property_id),
+        "org_id": str(ctx.org_id),
+        "purpose": body.purpose,
+    }
+    if for_month:
+        notes["for_month"] = str(for_month)
+        notes["for_year"] = str(for_year)
+
+    try:
+        order = await rzp.create_order(
+            creds,
+            amount_paise=amount,
+            receipt=f"{body.purpose[:3]}-{str(ctx.tenant_id)[:8]}-{for_month or 0}",
+            notes=notes,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(502, f"Payment gateway error: {exc}") from exc
+
+    return {
+        "order_id": order["id"],
+        "amount_paise": amount,
+        "currency": "INR",
+        "key_id": creds.key_id,
+        "purpose": body.purpose,
+    }
+
+
+@router.post("/payments/verify", summary="Tenant: verify a completed payment")
+async def tenant_verify_payment(
+    body: VerifyPaymentRequest,
+    ctx: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Called by the checkout success handler for instant confirmation. The
+    webhook independently records the same payment (idempotent), so this is
+    about UX, not correctness — but we still verify the signature and read the
+    authoritative amount/notes from Razorpay, never from the client."""
+    try:
+        creds = await rzp.get_org_creds(db, ctx.org_id)
+    except rzp.PaymentsNotConfiguredError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+    if not rzp.verify_payment_signature(
+        order_id=body.razorpay_order_id,
+        payment_id=body.razorpay_payment_id,
+        signature=body.razorpay_signature,
+        key_secret=creds.key_secret,
+    ):
+        raise HTTPException(400, "Payment signature verification failed")
+
+    try:
+        payment = await rzp.fetch_payment(creds, body.razorpay_payment_id)
+        order = await rzp.fetch_order(creds, body.razorpay_order_id)
+    except RuntimeError as exc:
+        # Signature was valid; the webhook will still record it. Tell the app
+        # it succeeded so the tenant isn't left staring at an error.
+        raise HTTPException(202, "Payment received — confirmation is processing") from exc
+
+    if payment.get("status") not in ("captured", "authorized"):
+        raise HTTPException(400, "Payment was not completed")
+    if payment.get("order_id") != body.razorpay_order_id:
+        raise HTTPException(400, "Payment does not match the order")
+
+    notes = order.get("notes") or {}
+    # Defence in depth: the order must belong to THIS tenant.
+    if notes.get("tenant_id") != str(ctx.tenant_id):
+        raise HTTPException(403, "This order does not belong to you")
+
+    result = await record_online_payment(
+        db,
+        OnlinePaymentInput(
+            org_id=ctx.org_id,
+            property_id=ctx.property_id,
+            tenant_id=ctx.tenant_id,
+            amount_paise=int(payment["amount"]),
+            purpose=notes.get("purpose", "RENT"),
+            payment_mode=rzp.method_to_payment_mode(payment.get("method")),
+            razorpay_payment_id=body.razorpay_payment_id,
+            razorpay_order_id=body.razorpay_order_id,
+            for_month=int(notes["for_month"]) if notes.get("for_month") else None,
+            for_year=int(notes["for_year"]) if notes.get("for_year") else None,
+        ),
+    )
+    await db.commit()
+    return {
+        "status": "success",
+        "payment_id": result.payment_id,
+        "amount_paise": int(payment["amount"]),
+    }

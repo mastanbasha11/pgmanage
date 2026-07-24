@@ -48,8 +48,17 @@ class Organisation(Base):
     whatsapp_phone_number_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     whatsapp_access_token_secret_arn: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    # Payment
+    # Payment — Stripe is the platform's SaaS subscription billing (owner pays
+    # PGManage). Razorpay is per-org and powers TENANT→OWNER rent payments: each
+    # owner connects their own account so funds never touch the platform.
     razorpay_key_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    razorpay_key_secret: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    razorpay_key_secret_arn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    razorpay_webhook_secret: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    razorpay_webhook_secret_arn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    razorpay_payments_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     stripe_customer_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 

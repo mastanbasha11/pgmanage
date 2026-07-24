@@ -360,3 +360,102 @@ async def whatsapp_inbound(
 
     await db.commit()
     return {"received": True, "processed": processed}
+
+
+@router.post("/razorpay", summary="Razorpay payment webhook (source of truth)")
+async def razorpay_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    x_razorpay_signature: str | None = Header(None, alias="X-Razorpay-Signature"),
+    org: str | None = None,
+):
+    """
+    Authoritative record of a completed online payment. Each owner registers
+    `…/webhooks/razorpay?org=<slug>` in their Razorpay dashboard, so we resolve
+    the org by slug (like the Meta webhook), verify the signature with THAT
+    org's webhook secret, then record the payment idempotently.
+
+    Auth-exempt by design (Razorpay can't carry a JWT); the HMAC signature is
+    the auth boundary. Idempotent on rzp_<payment_id>, so Razorpay's retries and
+    the tenant's verify-callback all converge on one payment row.
+    """
+    from app.core.database import set_schema
+    from app.services import razorpay_gateway as rzp
+    from app.services.online_payment import OnlinePaymentInput, record_online_payment
+
+    raw_body = await request.body()
+
+    if not org:
+        raise HTTPException(400, "org is required")
+
+    row = (
+        await db.execute(
+            text(
+                "SELECT id, schema_name, razorpay_webhook_secret, razorpay_webhook_secret_arn "
+                "FROM public.organisations WHERE slug = :slug AND is_active = true"
+            ),
+            {"slug": org},
+        )
+    ).mappings().fetchone()
+    if not row:
+        raise HTTPException(404, "Organisation not found")
+
+    webhook_secret = rzp._resolve_secret(
+        row["razorpay_webhook_secret_arn"], row["razorpay_webhook_secret"], "webhook_secret"
+    )
+    if not webhook_secret:
+        # Not configured to receive webhooks yet — ack so Razorpay stops retrying.
+        return {"status": "ignored", "reason": "no webhook secret configured"}
+
+    if not rzp.verify_webhook_signature(
+        raw_body=raw_body, signature=x_razorpay_signature or "", webhook_secret=webhook_secret
+    ):
+        raise HTTPException(401, "Invalid webhook signature")
+
+    try:
+        payload = json.loads(raw_body)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid JSON payload") from exc
+
+    # We only act on a captured payment. Everything else is acked and ignored.
+    event = payload.get("event")
+    if event not in ("payment.captured", "order.paid"):
+        return {"status": "ignored", "event": event}
+
+    payment = (
+        payload.get("payload", {}).get("payment", {}).get("entity", {})
+    )
+    if not payment or payment.get("status") != "captured":
+        return {"status": "ignored", "reason": "payment not captured"}
+
+    # The order notes carry the server-set attribution (never trust the client).
+    notes = payment.get("notes") or {}
+    order_entity = payload.get("payload", {}).get("order", {}).get("entity", {})
+    if not notes and order_entity:
+        notes = order_entity.get("notes") or {}
+
+    tenant_id = notes.get("tenant_id")
+    purpose = notes.get("purpose")
+    if not tenant_id or purpose not in ("RENT", "ADVANCE", "DEPOSIT"):
+        # A payment from outside this integration (or missing our notes) — ack
+        # and skip rather than guessing.
+        return {"status": "ignored", "reason": "missing attribution notes"}
+
+    await set_schema(db, row["schema_name"])
+    result = await record_online_payment(
+        db,
+        OnlinePaymentInput(
+            org_id=row["id"],
+            property_id=notes["property_id"],
+            tenant_id=tenant_id,
+            amount_paise=int(payment["amount"]),
+            purpose=purpose,
+            payment_mode=rzp.method_to_payment_mode(payment.get("method")),
+            razorpay_payment_id=payment["id"],
+            razorpay_order_id=payment.get("order_id", ""),
+            for_month=int(notes["for_month"]) if notes.get("for_month") else None,
+            for_year=int(notes["for_year"]) if notes.get("for_year") else None,
+        ),
+    )
+    await db.commit()
+    return {"status": "ok", "payment_id": result.payment_id, "created": result.created}

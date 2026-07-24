@@ -11,13 +11,120 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.dependencies import OrgContext, get_org_context
+from app.core.dependencies import OrgContext, get_org_context, require_roles
 from app.core.exceptions import ConflictError, IdempotencyError, NotFoundError
 from app.services.audit_constants import Event
 from app.services.audit_service import log_event
 
 router = APIRouter()
+
+
+# ── Owner: Razorpay gateway configuration ────────────────────────────────────
+# Per-owner model — each PG owner connects their own Razorpay account so rent
+# flows tenant→owner directly. Keys live on public.organisations; secrets are
+# write-only over the API (never echoed back).
+
+
+class GatewayConfigUpdate(BaseModel):
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: str | None = None
+    razorpay_webhook_secret: str | None = None
+    payments_enabled: bool | None = None
+
+
+@router.get("/payments/gateway", summary="Owner: Razorpay connection status")
+async def get_gateway_config(
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Non-secret view of the org's Razorpay connection + the webhook URL to
+    register in the Razorpay dashboard. Secrets are never returned — only
+    whether each is set."""
+    row = (
+        await db.execute(
+            text(
+                "SELECT slug, razorpay_key_id, razorpay_key_secret, razorpay_key_secret_arn, "
+                "       razorpay_webhook_secret, razorpay_webhook_secret_arn, "
+                "       razorpay_payments_enabled "
+                "FROM public.organisations WHERE id = :id"
+            ),
+            {"id": str(ctx.org_id)},
+        )
+    ).mappings().fetchone()
+    if not row:
+        raise NotFoundError("Organisation not found")
+
+    webhook_url = f"{settings.APP_BASE_URL}/api/v1/webhooks/razorpay?org={row['slug']}"
+    return {
+        "key_id": row["razorpay_key_id"],
+        "key_secret_set": bool(row["razorpay_key_secret"] or row["razorpay_key_secret_arn"]),
+        "webhook_secret_set": bool(
+            row["razorpay_webhook_secret"] or row["razorpay_webhook_secret_arn"]
+        ),
+        "payments_enabled": row["razorpay_payments_enabled"],
+        "webhook_url": webhook_url,
+    }
+
+
+@router.patch("/payments/gateway", summary="Owner: connect / update Razorpay")
+async def update_gateway_config(
+    body: GatewayConfigUpdate,
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the org's Razorpay key id / secret / webhook secret and the enable
+    flag. Only provided fields change; empty strings are ignored so a save from
+    a UI that doesn't re-send the secret can't wipe it. Enabling requires a key
+    id and secret to be present (either in this payload or already stored)."""
+    sets: list[str] = []
+    params: dict[str, Any] = {"id": str(ctx.org_id)}
+
+    if body.razorpay_key_id is not None and body.razorpay_key_id.strip():
+        sets.append("razorpay_key_id = :kid")
+        params["kid"] = body.razorpay_key_id.strip()
+    if body.razorpay_key_secret is not None and body.razorpay_key_secret.strip():
+        sets.append("razorpay_key_secret = :ksec")
+        params["ksec"] = body.razorpay_key_secret.strip()
+    if body.razorpay_webhook_secret is not None and body.razorpay_webhook_secret.strip():
+        sets.append("razorpay_webhook_secret = :wsec")
+        params["wsec"] = body.razorpay_webhook_secret.strip()
+
+    if body.payments_enabled is not None:
+        if body.payments_enabled:
+            # Don't let an owner switch it on without usable keys — that would
+            # only produce failed checkouts for their tenants.
+            cur = (
+                await db.execute(
+                    text(
+                        "SELECT razorpay_key_id, razorpay_key_secret, razorpay_key_secret_arn "
+                        "FROM public.organisations WHERE id = :id"
+                    ),
+                    {"id": str(ctx.org_id)},
+                )
+            ).mappings().fetchone()
+            has_key = bool(params.get("kid") or (cur and cur["razorpay_key_id"]))
+            has_secret = bool(
+                params.get("ksec")
+                or (cur and (cur["razorpay_key_secret"] or cur["razorpay_key_secret_arn"]))
+            )
+            if not (has_key and has_secret):
+                raise ConflictError(
+                    "Add your Razorpay key id and secret before enabling payments"
+                )
+        sets.append("razorpay_payments_enabled = :enabled")
+        params["enabled"] = body.payments_enabled
+
+    if not sets:
+        raise HTTPException(400, "No changes provided")
+
+    await db.execute(
+        text(f"UPDATE public.organisations SET {', '.join(sets)} WHERE id = :id"),
+        params,
+    )
+    await db.commit()
+    return {"message": "Payment settings updated"}
 
 
 class PaymentCreate(BaseModel):
