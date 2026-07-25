@@ -23,12 +23,13 @@ export type LeadSource =
   | 'WEBSITE'
   | 'OTHER';
 
+// Pipeline columns/pages shown in the app. NEGOTIATING and BOOKED are omitted to
+// match the web board — this PG's flow is New → Contacted → Site Visited →
+// Converted/Lost. Both remain in the backend enum, so legacy leads stay valid.
 export const LEAD_STATUSES: LeadStatus[] = [
   'NEW',
   'CONTACTED',
   'SITE_VISITED',
-  'NEGOTIATING',
-  'BOOKED',
   'CONVERTED',
   'LOST',
 ];

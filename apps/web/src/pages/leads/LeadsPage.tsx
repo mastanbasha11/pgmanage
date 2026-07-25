@@ -95,12 +95,14 @@ function FollowupPill({ iso }: { iso?: string }) {
   );
 }
 
+// Pipeline columns shown on the board. NEGOTIATING and BOOKED are intentionally
+// omitted — this PG's flow goes New → Contacted → Site Visited → Converted/Lost.
+// The two statuses still exist in the backend enum, so any legacy lead in them
+// stays valid; it just isn't a board column or a move target.
 const COLUMNS: { status: LeadStatus; label: string; tone: string }[] = [
   { status: 'NEW', label: 'New', tone: 'bg-sky-50 border-sky-200' },
   { status: 'CONTACTED', label: 'Contacted', tone: 'bg-amber-50 border-amber-200' },
   { status: 'SITE_VISITED', label: 'Site Visited', tone: 'bg-violet-50 border-violet-200' },
-  { status: 'NEGOTIATING', label: 'Negotiating', tone: 'bg-orange-50 border-orange-200' },
-  { status: 'BOOKED', label: 'Booked', tone: 'bg-teal-50 border-teal-200' },
   { status: 'CONVERTED', label: 'Converted', tone: 'bg-emerald-50 border-emerald-200' },
   { status: 'LOST', label: 'Lost', tone: 'bg-rose-50 border-rose-200' },
 ];
