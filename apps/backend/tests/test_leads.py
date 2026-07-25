@@ -5,13 +5,12 @@ Covers create, list, pipeline stats, detail, update, activities, and conversion.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
 
 from tests.conftest import auth_headers
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +50,27 @@ async def test_create_lead_success(
     data = response.json()
     assert "lead_id" in data
     assert data["status"] == "NEW"
+
+
+@pytest.mark.asyncio
+async def test_create_lead_auto_assigns_creator_as_owner(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """A lead added without an explicit assignee is owned by its creator, so it
+    is never left unassigned."""
+    create = await client.post(
+        "/api/v1/leads",
+        headers=auth_headers(test_owner["token"]),
+        json=_lead_payload(test_property["property_id"], phone="+919876543110"),
+    )
+    assert create.status_code == 201
+    lead_id = create.json()["lead_id"]
+
+    listed = await client.get(
+        "/api/v1/leads", headers=auth_headers(test_owner["token"])
+    )
+    lead = next(x for x in listed.json()["items"] if x["id"] == lead_id)
+    assert lead["assigned_to"] == str(test_owner["user_id"])
 
 
 @pytest.mark.asyncio
@@ -231,8 +251,7 @@ async def test_due_today_with_today_followup(
     client: AsyncClient, test_owner: dict, test_property: dict
 ):
     """Lead with follow-up set to today appears in due-today."""
-    today = datetime.now(timezone.utc).date().isoformat()
-    today_dt = datetime.now(timezone.utc).isoformat()
+    today_dt = datetime.now(UTC).isoformat()
 
     create_resp = await client.post(
         "/api/v1/leads",

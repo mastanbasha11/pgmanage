@@ -41,7 +41,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/useToast';
-import { formatDate, whatsappLink } from '@/lib/utils';
+import { formatDate, formatDatetime, whatsappLink } from '@/lib/utils';
 import {
   comparePriority,
   daysSinceTouch,
@@ -111,6 +111,18 @@ const PAGE_SIZE = 50;
 /** Auto-closed leads carry this lost_reason prefix (see lead_auto_lost.py). */
 const AUTO_LOST_PREFIX = 'Auto-closed';
 
+// "Added" date filter — presets over created_at, plus a custom range.
+type DatePreset = 'ALL' | 'TODAY' | '7D' | '30D' | '90D' | 'CUSTOM';
+const DATE_PRESETS: [DatePreset, string][] = [
+  ['ALL', 'Any time'],
+  ['TODAY', 'Today'],
+  ['7D', 'Last 7 days'],
+  ['30D', 'Last 30 days'],
+  ['90D', 'Last 90 days'],
+  ['CUSTOM', 'Custom range…'],
+];
+const PRESET_DAYS: Partial<Record<DatePreset, number>> = { '7D': 7, '30D': 30, '90D': 90 };
+
 function stageTone(status: string): 'b' | 'a' | 'g' | 's' {
   if (status === 'NEW') return 'b';
   if (status === 'CONTACTED') return 'a';
@@ -140,6 +152,10 @@ function lastActivity(l: WorklistLead): string {
   const verb = l.last_contacted_at ? 'contacted' : 'created';
   if (d === 0) return `${verb} today`;
   return `${verb} ${d}d ago`;
+}
+/** ISO of the last touch (last contact, else creation) — for the date stamp. */
+function lastActivityAt(l: WorklistLead): string {
+  return l.last_contacted_at ?? l.created_at;
 }
 
 /** Quote a CSV cell only when it contains a comma/quote/newline (RFC 4180). */
@@ -196,6 +212,9 @@ export default function LeadWorklist({
   const [ownerFilter, setOwnerFilter] = useState('ALL');
   const [wantsFilter, setWantsFilter] = useState('ALL');
   const [sort, setSort] = useState<SortKey>('PRIORITY');
+  const [datePreset, setDatePreset] = useState<DatePreset>('ALL');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -231,6 +250,23 @@ export default function LeadWorklist({
     return c;
   }, [leads]);
 
+  // Resolve the "Added" filter to an inclusive [from, to) millisecond window
+  // over created_at. null bounds mean unbounded on that side.
+  const dateWindow = useMemo(() => {
+    if (datePreset === 'ALL') return null;
+    const now = new Date();
+    if (datePreset === 'TODAY') {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      return { from: start, to: Infinity };
+    }
+    const days = PRESET_DAYS[datePreset];
+    if (days) return { from: now.getTime() - days * 86_400_000, to: Infinity };
+    // CUSTOM — parse the two date inputs; either side may be blank.
+    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : -Infinity;
+    const to = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Infinity;
+    return { from, to };
+  }, [datePreset, dateFrom, dateTo]);
+
   // Apply saved view + all filters + search.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -243,10 +279,14 @@ export default function LeadWorklist({
           return false;
       }
       if (wantsFilter !== 'ALL' && l.interested_room_type !== wantsFilter) return false;
+      if (dateWindow) {
+        const t = new Date(l.created_at).getTime();
+        if (Number.isNaN(t) || t < dateWindow.from || t > dateWindow.to) return false;
+      }
       if (q && !(l.name.toLowerCase().includes(q) || (l.phone ?? '').includes(q))) return false;
       return true;
     });
-  }, [leads, view, stageFilter, sourceFilter, ownerFilter, wantsFilter, search]);
+  }, [leads, view, stageFilter, sourceFilter, ownerFilter, wantsFilter, dateWindow, search]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -320,14 +360,28 @@ export default function LeadWorklist({
     sourceFilter !== 'ALL' ||
     ownerFilter !== 'ALL' ||
     wantsFilter !== 'ALL' ||
+    datePreset !== 'ALL' ||
     !!search;
+
+  function resetFilters() {
+    setView('ALL');
+    setStageFilter(null);
+    setSourceFilter('ALL');
+    setOwnerFilter('ALL');
+    setWantsFilter('ALL');
+    setDatePreset('ALL');
+    setDateFrom('');
+    setDateTo('');
+    setSearch('');
+    resetPage();
+  }
 
   // Export exactly what the user is looking at — the filtered + sorted set,
   // every matching row (not just the current page).
   function exportCsv() {
     const headers = [
       'Name', 'Phone', 'Source', 'Stage', 'Wants', 'Budget max (₹)',
-      'Owner', 'Follow-up', 'Last activity', 'Created',
+      'Owner', 'Follow-up', 'Last activity', 'Added on',
     ];
     const rows = sorted.map((l) => [
       l.name,
@@ -338,8 +392,8 @@ export default function LeadWorklist({
       l.budget_max_paise ? Math.round(l.budget_max_paise / 100) : '',
       l.assigned_to_name ?? '',
       l.next_followup_at ? formatDate(l.next_followup_at) : '',
-      lastActivity(l),
-      formatDate(l.created_at),
+      formatDatetime(lastActivityAt(l)),
+      formatDatetime(l.created_at),
     ]);
     const csv = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     // Prepend a BOM so Excel opens the ₹ / non-ASCII names in UTF-8.
@@ -497,19 +551,45 @@ export default function LeadWorklist({
           }}
           options={[['ALL', 'Any'], ...wants.map((w) => [w, w] as [string, string])]}
         />
+        <ControlSelect
+          label="Added"
+          value={datePreset}
+          onChange={(v) => {
+            setDatePreset(v as DatePreset);
+            resetPage();
+          }}
+          options={DATE_PRESETS}
+        />
+        {datePreset === 'CUSTOM' && (
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                resetPage();
+              }}
+              className="h-9 w-[9.5rem] text-[12px]"
+            />
+            <span className="text-[12px] text-muted-foreground">→</span>
+            <Input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                resetPage();
+              }}
+              className="h-9 w-[9.5rem] text-[12px]"
+            />
+          </div>
+        )}
         {anyFilter && (
           <button
             type="button"
             className="text-[12px] font-bold text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              setView('ALL');
-              setStageFilter(null);
-              setSourceFilter('ALL');
-              setOwnerFilter('ALL');
-              setWantsFilter('ALL');
-              setSearch('');
-              resetPage();
-            }}
+            onClick={resetFilters}
           >
             Clear
           </button>
@@ -641,7 +721,12 @@ export default function LeadWorklist({
                             <Pill tone="s">unassigned</Pill>
                           )}
                         </Td>
-                        <Td className="text-[11.5px] text-[#98a0ad]">{lastActivity(l)}</Td>
+                        <Td className="whitespace-nowrap text-[11.5px] text-[#98a0ad]">
+                          <div className="font-semibold text-[#6b7280]">
+                            {formatDatetime(lastActivityAt(l))}
+                          </div>
+                          <div>{lastActivity(l)}</div>
+                        </Td>
                         <Td onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end gap-1.5">
                             <IconBtn as="a" href={`tel:${l.phone}`} title="Call">

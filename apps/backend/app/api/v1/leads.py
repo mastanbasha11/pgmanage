@@ -191,7 +191,9 @@ async def create_lead(
             "room_type": body.interested_room_type, "bed_count": body.interested_bed_count,
             "budget_min": body.budget_min_paise, "budget_max": body.budget_max_paise,
             "move_in": body.expected_move_in_date, "notes": body.notes,
-            "assigned_to": str(body.assigned_to) if body.assigned_to else None,
+            # Whoever adds the lead owns it by default (never leave it
+            # unassigned). An explicit assignee in the request still wins.
+            "assigned_to": str(body.assigned_to) if body.assigned_to else str(ctx.user_id),
             "followup": body.next_followup_at,
             "created_by": str(ctx.user_id),
         },
