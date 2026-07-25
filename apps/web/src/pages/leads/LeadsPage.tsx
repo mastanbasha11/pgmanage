@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Phone, Globe, MessageCircle, Search, Wallet } from 'lucide-react';
+import { Phone, Globe, MessageCircle, Wallet } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext,
@@ -19,7 +19,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { FilterChip, NameAvatar, Pill } from '@/components/ui/redesign';
+import { NameAvatar, Pill } from '@/components/ui/redesign';
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,7 @@ import WebsiteLeadsView from './WebsiteLeadsView';
 import { useNewWebsiteLeadCount } from '@/hooks/useWebsiteLeads';
 import LeadDetailDrawer from './LeadDetailDrawer';
 import CheckinWizard from '@/pages/tenants/CheckinWizard';
+import LeadWorklist, { type WorklistLead } from './LeadWorklist';
 
 type LeadStatus =
   | 'NEW'
@@ -525,67 +526,17 @@ export default function LeadsPage() {
     queryFn: () => api.get('/leads', { params: { limit: 500 } }).then((r) => r.data),
   });
   const [showCreate, setShowCreate] = useState(false);
-  const { selectedPropertyId } = useAuthStore();
+  const { selectedPropertyId, user } = useAuthStore();
   const newWebsiteCount = useNewWebsiteLeadCount();
+  const canManage = user?.role === 'OWNER' || user?.role === 'PARTNER';
 
   // Open the Website Leads tab directly when arrived via the email deep-link.
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState(searchParams.get('tab') === 'website' ? 'website' : 'pipeline');
 
-  // Pipeline filters. `quickFilter` is a mutually-exclusive one-shot chip
-  // set — a rep is either working "everyone", their own leads, today's
-  // follow-ups, leads with no follow-up scheduled, or stale (idle > 7 days).
-  // Kept plain-string in state (not object-y) to keep URL persistence easy.
-  const { user } = useAuthStore();
-  const [pipelineSearch, setPipelineSearch] = useState('');
-  const [sourceFilter, setSourceFilter] = useState<string>('ALL');
-  type QuickFilter = 'ALL' | 'MINE' | 'DUE_TODAY' | 'NO_FOLLOWUP' | 'IDLE_7D';
-  const [quickFilter, setQuickFilter] = useState<QuickFilter>('ALL');
-
   const leads = data?.items ?? [];
-  const filteredLeads = useMemo(() => {
-    const q = pipelineSearch.trim().toLowerCase();
-    const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
-    return leads.filter((l) => {
-      if (sourceFilter !== 'ALL' && l.source !== sourceFilter) return false;
-      if (q) {
-        const matches =
-          l.name.toLowerCase().includes(q) || (l.phone ?? '').toLowerCase().includes(q);
-        if (!matches) return false;
-      }
-      // Quick filters — these narrow the visible set, they don't stack.
-      if (quickFilter === 'MINE') {
-        if (!user?.user_id || l.assigned_to !== user.user_id) return false;
-      } else if (quickFilter === 'DUE_TODAY') {
-        if (!l.next_followup_at) return false;
-        if (l.next_followup_at.slice(0, 10) !== todayStr) return false;
-      } else if (quickFilter === 'NO_FOLLOWUP') {
-        // Only meaningful for still-open leads.
-        if (l.status === 'CONVERTED' || l.status === 'LOST') return false;
-        if (l.next_followup_at) return false;
-      } else if (quickFilter === 'IDLE_7D') {
-        if (l.status === 'CONVERTED' || l.status === 'LOST') return false;
-        // "Idle" = no contact in the last 7 days. Falls back to created_at
-        // when the lead has never been contacted.
-        const last = new Date(l.last_contacted_at ?? l.created_at);
-        if (last > sevenDaysAgo) return false;
-      }
-      return true;
-    });
-  }, [leads, pipelineSearch, sourceFilter, quickFilter, user?.user_id]);
-  const byStatus = (s: LeadStatus) => filteredLeads.filter((l) => l.status === s);
 
-  const QUICK_FILTERS: { key: QuickFilter; label: string }[] = [
-    { key: 'ALL', label: 'All' },
-    { key: 'MINE', label: 'Mine' },
-    { key: 'DUE_TODAY', label: 'Due today' },
-    { key: 'NO_FOLLOWUP', label: 'No follow-up' },
-    { key: 'IDLE_7D', label: 'Idle > 7 days' },
-  ];
-
-  // ── Drag-to-move ────────────────────────────────────────────────────────
+  // ── Drag-to-move (Board view) ───────────────────────────────────────────
   // Optimistic status update: patch the cache immediately so the card jumps
   // to the new column with no wait, then fire the PATCH. On error, invalidate
   // to snap the cache back to the server truth.
@@ -616,8 +567,6 @@ export default function LeadsPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['leads'] }),
   });
 
-  // A tiny activation distance stops accidental drags on plain clicks —
-  // important because the card itself is the drag handle.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor),
@@ -636,27 +585,57 @@ export default function LeadsPage() {
   };
 
   // ── Drawer + check-in wizard state ──────────────────────────────────────
-  // `openLeadId` = drawer visible for that lead. `checkinPrefill` = open the
-  // tenant check-in wizard, seeded with what we knew about the lead so the
-  // rep can copy the phone/name across at a glance.
   const initialOpenLead = searchParams.get('openLead');
   const [openLeadId, setOpenLeadId] = useState<string | null>(initialOpenLead);
   const [checkinOpen, setCheckinOpen] = useState(false);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Leads</h1>
-          <p className="text-sm text-muted-foreground">
-            {leads.length} {leads.length === 1 ? 'lead' : 'leads'} in the pipeline
-          </p>
+  // The Board view for a given already-filtered set. Passed to LeadWorklist as
+  // `boardSlot` so the worklist owns the filters/views and the board just
+  // renders. The rows ARE Lead objects at runtime — WorklistLead only widens
+  // source/status to string — so the cast is safe.
+  const renderBoard = (filteredWorklist: WorklistLead[]) => {
+    const filtered = filteredWorklist as unknown as Lead[];
+    const byStatus = (s: LeadStatus) => filtered.filter((l) => l.status === s);
+    if (isLoading) {
+      return (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-40 animate-pulse rounded-lg bg-muted" />
+          ))}
         </div>
-        <Button size="sm" className="gap-2" onClick={() => setShowCreate(true)}>
-          <Plus className="h-4 w-4" /> Add Lead
-        </Button>
-      </div>
+      );
+    }
+    return (
+      <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {COLUMNS.map(({ status, label, tone }) => (
+            <div key={status} className="space-y-1.5">
+              <div className="flex items-center justify-between px-0.5 text-[11.5px] font-extrabold text-muted-foreground">
+                <span>{label}</span>
+                <span>{byStatus(status).length}</span>
+              </div>
+              <KanbanColumn
+                status={status}
+                tone={tone}
+                leads={byStatus(status)}
+                onOpenLead={setOpenLeadId}
+              />
+            </div>
+          ))}
+        </div>
+        <DragOverlay>
+          {activeDraggedLead ? (
+            <div className="w-64 rounded-lg border bg-card p-3 text-sm shadow-lg ring-2 ring-accent">
+              <LeadCardBody lead={activeDraggedLead} />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    );
+  };
 
+  return (
+    <div className="space-y-4">
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
@@ -671,98 +650,14 @@ export default function LeadsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pipeline" className="mt-4 space-y-6">
-      {/* Quick filter chips — mutually exclusive one-shot narrowers */}
-      <div className="flex flex-wrap gap-1.5">
-        {QUICK_FILTERS.map((f) => (
-          <FilterChip
-            key={f.key}
-            active={quickFilter === f.key}
-            onClick={() => setQuickFilter(f.key)}
-            warn={f.key === 'DUE_TODAY'}
-          >
-            {f.label}
-          </FilterChip>
-        ))}
-        {filteredLeads.length !== leads.length && (
-          <span className="ml-2 self-center text-xs text-muted-foreground">
-            {filteredLeads.length} of {leads.length}
-          </span>
-        )}
-      </div>
-
-      {/* Source select + name/phone search */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Select value={sourceFilter} onValueChange={setSourceFilter}>
-          <SelectTrigger className="h-9 w-[180px]">
-            <SelectValue placeholder="All sources" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All sources</SelectItem>
-            {(Object.keys(SOURCE_LABEL) as LeadSource[]).map((s) => (
-              <SelectItem key={s} value={s}>
-                {SOURCE_LABEL[s]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="relative sm:w-64">
-          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={pipelineSearch}
-            onChange={(e) => setPipelineSearch(e.target.value)}
-            placeholder="Search name or phone…"
-            className="h-9 pl-8"
+        <TabsContent value="pipeline" className="mt-4">
+          <LeadWorklist
+            leads={leads}
+            onOpenLead={setOpenLeadId}
+            onAddLead={() => setShowCreate(true)}
+            canManage={canManage}
+            boardSlot={renderBoard}
           />
-        </div>
-      </div>
-
-      {/* Kanban board — column headers carry the counts (mock layout) */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
-          {Array.from({ length: 7 }).map((_, i) => (
-            <div key={i} className="h-40 animate-pulse rounded-lg bg-muted" />
-          ))}
-        </div>
-      ) : leads.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
-          <p className="font-medium">No leads yet</p>
-          <p className="text-sm text-muted-foreground">
-            Add a walk-in, referral, or import from an ad.
-          </p>
-          <Button className="mt-4 gap-2" onClick={() => setShowCreate(true)}>
-            <Plus className="h-4 w-4" /> Add your first lead
-          </Button>
-        </div>
-      ) : (
-        <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
-            {COLUMNS.map(({ status, label, tone }) => (
-              <div key={status} className="space-y-1.5">
-                <div className="flex items-center justify-between px-0.5 text-[11.5px] font-extrabold text-muted-foreground">
-                  <span>{label}</span>
-                  <span>{byStatus(status).length}</span>
-                </div>
-                <KanbanColumn
-                  status={status}
-                  tone={tone}
-                  leads={byStatus(status)}
-                  onOpenLead={setOpenLeadId}
-                />
-              </div>
-            ))}
-          </div>
-          {/* The overlay renders the card at the pointer while dragging so
-              it stays visible even as the source card fades to 40% opacity. */}
-          <DragOverlay>
-            {activeDraggedLead ? (
-              <div className="rounded-lg border bg-card p-3 text-sm shadow-lg ring-2 ring-accent w-64">
-                <LeadCardBody lead={activeDraggedLead} />
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      )}
         </TabsContent>
 
         <TabsContent value="website" className="mt-4">
@@ -780,8 +675,6 @@ export default function LeadsPage() {
         leadId={openLeadId}
         onClose={() => setOpenLeadId(null)}
         onOpenCheckin={() => {
-          // Close the drawer first so the wizard has the screen; the rep can
-          // reopen the drawer once the wizard is dismissed.
           setOpenLeadId(null);
           setCheckinOpen(true);
         }}
