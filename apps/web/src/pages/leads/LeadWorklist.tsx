@@ -23,7 +23,16 @@ import {
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { NameAvatar, Pill } from '@/components/ui/redesign';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -37,7 +46,6 @@ import {
   comparePriority,
   daysSinceTouch,
   followupState,
-  leadScore,
   matchesView,
   type SavedView,
 } from './leadScore';
@@ -56,6 +64,7 @@ export interface WorklistLead {
   last_contacted_at?: string | null;
   assigned_to?: string | null;
   assigned_to_name?: string | null;
+  lost_reason?: string | null;
   created_at: string;
 }
 
@@ -84,19 +93,23 @@ const STAGES: { key: string; label: string; color: string }[] = [
 ];
 const MOVE_TARGETS = STAGES.map((s) => s.key);
 
-const VIEWS: { key: SavedView; label: string; hot?: boolean }[] = [
-  { key: 'TO_ACTION', label: '⚡ To action' },
+// "All" leads first and the default; the rest are progressively tighter
+// worklists. HOT was removed — score is no longer surfaced.
+const VIEWS: { key: SavedView; label: string }[] = [
+  { key: 'ALL', label: 'All' },
+  { key: 'TO_ACTION', label: 'To action' },
   { key: 'OVERDUE', label: 'Overdue' },
   { key: 'DUE_TODAY', label: 'Due today' },
-  { key: 'HOT', label: '🔥 Hot', hot: true },
   { key: 'NO_FOLLOWUP', label: 'No follow-up' },
   { key: 'IDLE_30D', label: 'Idle > 30d' },
-  { key: 'ALL', label: 'All' },
 ];
 
-type SortKey = 'PRIORITY' | 'SCORE' | 'NEWEST' | 'OLDEST' | 'NAME';
+type SortKey = 'PRIORITY' | 'NEWEST' | 'OLDEST' | 'NAME';
 type ViewMode = 'LIST' | 'BOARD' | 'SPLIT';
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 50;
+
+/** Auto-closed leads carry this lost_reason prefix (see lead_auto_lost.py). */
+const AUTO_LOST_PREFIX = 'Auto-closed';
 
 function stageTone(status: string): 'b' | 'a' | 'g' | 's' {
   if (status === 'NEW') return 'b';
@@ -107,8 +120,8 @@ function stageTone(status: string): 'b' | 'a' | 'g' | 's' {
 function stageLabel(status: string): string {
   return STAGES.find((s) => s.key === status)?.label ?? status;
 }
-function scoreColor(n: number): string {
-  return n >= 80 ? '#15803d' : n >= 60 ? '#eda100' : '#c7ccd6';
+function isAutoLost(l: WorklistLead): boolean {
+  return l.status === 'LOST' && !!l.lost_reason?.startsWith(AUTO_LOST_PREFIX);
 }
 function wantTag(w?: string | null): ReactNode {
   if (!w) return <span className="text-[#98a0ad]">—</span>;
@@ -128,6 +141,20 @@ function lastActivity(l: WorklistLead): string {
   if (d === 0) return `${verb} today`;
   return `${verb} ${d}d ago`;
 }
+
+/** Quote a CSV cell only when it contains a comma/quote/newline (RFC 4180). */
+function csvCell(v: string | number | null | undefined): string {
+  const s = String(v ?? '');
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Fill {name} in the bulk WhatsApp template for one lead. */
+function fillTemplate(tpl: string, l: WorklistLead): string {
+  return tpl.replace(/\{name\}/g, l.name);
+}
+
+const DEFAULT_WA_TEMPLATE = 'Hi {name}, thanks for your interest in our PG! ' +
+  'Would you like to schedule a visit? We have rooms available.';
 
 // ── Follow-up cell ──────────────────────────────────────────────────────────
 
@@ -163,7 +190,7 @@ export default function LeadWorklist({
   const { toast } = useToast();
 
   const [mode, setMode] = useState<ViewMode>('LIST');
-  const [view, setView] = useState<SavedView>('TO_ACTION');
+  const [view, setView] = useState<SavedView>('ALL');
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState('ALL');
   const [ownerFilter, setOwnerFilter] = useState('ALL');
@@ -172,6 +199,7 @@ export default function LeadWorklist({
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [waOpen, setWaOpen] = useState(false);
 
   const staffQ = useQuery<{ items: StaffMember[] }>({
     queryKey: ['staff'],
@@ -223,8 +251,6 @@ export default function LeadWorklist({
   const sorted = useMemo(() => {
     const arr = [...filtered];
     switch (sort) {
-      case 'SCORE':
-        return arr.sort((a, b) => leadScore(b) - leadScore(a));
       case 'NEWEST':
         return arr.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
       case 'OLDEST':
@@ -283,13 +309,51 @@ export default function LeadWorklist({
       toast({ title: 'Bulk update failed', description: 'Please retry.', variant: 'destructive' }),
   });
 
+  const selectedLeads = useMemo(
+    () => leads.filter((l) => selected.has(l.id)),
+    [leads, selected],
+  );
+
   const anyFilter =
-    view !== 'TO_ACTION' ||
+    view !== 'ALL' ||
     stageFilter ||
     sourceFilter !== 'ALL' ||
     ownerFilter !== 'ALL' ||
     wantsFilter !== 'ALL' ||
     !!search;
+
+  // Export exactly what the user is looking at — the filtered + sorted set,
+  // every matching row (not just the current page).
+  function exportCsv() {
+    const headers = [
+      'Name', 'Phone', 'Source', 'Stage', 'Wants', 'Budget max (₹)',
+      'Owner', 'Follow-up', 'Last activity', 'Created',
+    ];
+    const rows = sorted.map((l) => [
+      l.name,
+      l.phone,
+      SOURCE_LABEL[l.source] ?? l.source,
+      stageLabel(l.status),
+      l.interested_room_type ?? '',
+      l.budget_max_paise ? Math.round(l.budget_max_paise / 100) : '',
+      l.assigned_to_name ?? '',
+      l.next_followup_at ? formatDate(l.next_followup_at) : '',
+      lastActivity(l),
+      formatDate(l.created_at),
+    ]);
+    const csv = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
+    // Prepend a BOM so Excel opens the ₹ / non-ASCII names in UTF-8.
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `leads-${view.toLowerCase()}-${formatDate(new Date().toISOString())}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast({ title: 'Exported', description: `${rows.length} lead(s) downloaded as CSV.` });
+  }
 
   return (
     <div className="space-y-3">
@@ -305,7 +369,13 @@ export default function LeadWorklist({
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" disabled>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={exportCsv}
+            disabled={sorted.length === 0}
+          >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
           <Button size="sm" className="gap-1.5" onClick={onAddLead}>
@@ -353,9 +423,7 @@ export default function LeadWorklist({
                 onClick={() => pickView(v.key)}
                 className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[12.5px] font-bold shadow-sm transition-colors ${
                   on
-                    ? v.hot
-                      ? 'border-[#b45309] bg-[#b45309] text-white'
-                      : 'border-foreground bg-foreground text-white'
+                    ? 'border-foreground bg-foreground text-white'
                     : 'border-border bg-card text-[#42495a] hover:border-[#c8d0dc]'
                 }`}
               >
@@ -391,7 +459,6 @@ export default function LeadWorklist({
           onChange={(v) => setSort(v as SortKey)}
           options={[
             ['PRIORITY', 'Priority'],
-            ['SCORE', 'Score'],
             ['NEWEST', 'Newest'],
             ['OLDEST', 'Oldest'],
             ['NAME', 'Name'],
@@ -486,6 +553,14 @@ export default function LeadWorklist({
                   )}
                   <Button
                     size="sm"
+                    variant="outline"
+                    className="h-7 gap-1.5 border-[#c8ecd5] bg-white text-[12px] font-bold text-[#128C7E]"
+                    onClick={() => setWaOpen(true)}
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                  </Button>
+                  <Button
+                    size="sm"
                     variant="ghost"
                     className="h-7"
                     onClick={() => setSelected(new Set())}
@@ -506,7 +581,6 @@ export default function LeadWorklist({
                     <Th>Lead</Th>
                     <Th>Wants</Th>
                     <Th>Stage</Th>
-                    <Th>Score</Th>
                     <Th>Follow-up</Th>
                     <Th>Owner</Th>
                     <Th>Last activity</Th>
@@ -515,7 +589,6 @@ export default function LeadWorklist({
                 </thead>
                 <tbody>
                   {pageRows.map((l) => {
-                    const score = leadScore(l);
                     return (
                       <tr
                         key={l.id}
@@ -543,22 +616,16 @@ export default function LeadWorklist({
                         </Td>
                         <Td>{wantTag(l.interested_room_type)}</Td>
                         <Td>
-                          <Pill tone={stageTone(l.status)}>{stageLabel(l.status)}</Pill>
-                        </Td>
-                        <Td>
-                          <div className="flex items-center gap-2">
-                            <span className="h-1.5 w-11 overflow-hidden rounded bg-[#eef1f6]">
+                          <div className="flex items-center gap-1.5">
+                            <Pill tone={stageTone(l.status)}>{stageLabel(l.status)}</Pill>
+                            {isAutoLost(l) && (
                               <span
-                                className="block h-full rounded"
-                                style={{ width: `${score}%`, background: scoreColor(score) }}
-                              />
-                            </span>
-                            <span
-                              className="w-5 text-[12px] font-extrabold"
-                              style={{ color: scoreColor(score) }}
-                            >
-                              {score}
-                            </span>
+                                title={l.lost_reason ?? ''}
+                                className="rounded border border-[#e0e5ee] bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-[#7b8394]"
+                              >
+                                auto
+                              </span>
+                            )}
                           </div>
                         </Td>
                         <Td>
@@ -610,7 +677,7 @@ export default function LeadWorklist({
                   })}
                   {pageRows.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-14 text-center text-sm text-muted-foreground">
+                      <td colSpan={8} className="px-4 py-14 text-center text-sm text-muted-foreground">
                         Nothing here — this view is clear. Try another view above.
                       </td>
                     </tr>
@@ -648,7 +715,102 @@ export default function LeadWorklist({
           </div>
         </>
       )}
+
+      <BulkWhatsappDialog
+        open={waOpen}
+        onClose={() => setWaOpen(false)}
+        leads={selectedLeads}
+      />
     </div>
+  );
+}
+
+// ── Bulk WhatsApp ────────────────────────────────────────────────────────────
+// WhatsApp has no true broadcast from a click-to-chat link — each recipient is
+// a separate chat. So this composes ONE editable message ({name} is filled per
+// lead) and opens each lead's chat as its own link. We open the first
+// automatically and list the rest as buttons, because browsers block a burst of
+// window.open() calls from a single gesture.
+
+function BulkWhatsappDialog({
+  open,
+  onClose,
+  leads,
+}: {
+  open: boolean;
+  onClose: () => void;
+  leads: WorklistLead[];
+}) {
+  const [msg, setMsg] = useState(DEFAULT_WA_TEMPLATE);
+  const [sent, setSent] = useState<Set<string>>(new Set());
+
+  // Reset the sent-tracking whenever the dialog is reopened for a new selection.
+  const key = leads.map((l) => l.id).join(',');
+  const [seenKey, setSeenKey] = useState('');
+  if (open && key !== seenKey) {
+    setSeenKey(key);
+    setSent(new Set());
+  }
+
+  function openChat(l: WorklistLead) {
+    window.open(whatsappLink(l.phone, fillTemplate(msg, l)), '_blank', 'noopener');
+    setSent((s) => new Set(s).add(l.id));
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>WhatsApp {leads.length} lead{leads.length === 1 ? '' : 's'}</DialogTitle>
+          <DialogDescription>
+            Edit the message, then open each chat. Use <b>{'{name}'}</b> to insert the lead's name.
+            WhatsApp opens one chat at a time — the message is pre-filled; you tap send.
+          </DialogDescription>
+        </DialogHeader>
+        <Textarea
+          value={msg}
+          onChange={(e) => setMsg(e.target.value)}
+          rows={3}
+          className="text-[13px]"
+        />
+        <div className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-border bg-[#fbfcfe] p-2">
+          {leads.map((l) => (
+            <div
+              key={l.id}
+              className="flex items-center gap-2 rounded-md bg-card px-2.5 py-1.5 text-[12.5px] shadow-sm"
+            >
+              <NameAvatar name={l.name} size={24} />
+              <span className="truncate font-semibold">{l.name}</span>
+              <span className="text-[11px] text-muted-foreground">{l.phone}</span>
+              <Button
+                size="sm"
+                variant={sent.has(l.id) ? 'ghost' : 'outline'}
+                className={`ml-auto h-7 gap-1.5 text-[12px] font-bold ${
+                  sent.has(l.id)
+                    ? 'text-muted-foreground'
+                    : 'border-[#c8ecd5] text-[#128C7E]'
+                }`}
+                onClick={() => openChat(l)}
+              >
+                <MessageCircle className="h-3.5 w-3.5" />
+                {sent.has(l.id) ? 'Opened' : 'Open'}
+              </Button>
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Done
+          </Button>
+          <Button
+            onClick={() => leads.forEach((l) => !sent.has(l.id) && openChat(l))}
+            disabled={leads.length === 0}
+          >
+            Open all ({leads.filter((l) => !sent.has(l.id)).length})
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

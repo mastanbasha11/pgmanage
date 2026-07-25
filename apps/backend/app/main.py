@@ -104,6 +104,7 @@ async def lifespan(app: FastAPI):
         from apscheduler.triggers.cron import CronTrigger
         from pytz import timezone as _tz
 
+        from app.tasks.lead_auto_lost import _run as _auto_lose_stale_leads
         from app.tasks.rent_reminders import (
             _generate_and_remind,
             _send_overdue_reminders,
@@ -129,10 +130,21 @@ async def lifespan(app: FastAPI):
             misfire_grace_time=3600,
             coalesce=True,
         )
+        # Daily at 07:30 IST — auto-close leads idle 30+ days with no pending
+        # follow-up (stamped with a distinctive lost_reason so they read as
+        # auto-closed, not manually lost).
+        scheduler.add_job(
+            _auto_lose_stale_leads,
+            CronTrigger(hour=7, minute=30, timezone=ist),
+            args=[{}, None],
+            id="lead_auto_lost_daily",
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
         scheduler.start()
         print(
             "Scheduler started — rent_reminders_monthly (1st 10:00 IST), "
-            "rent_overdue_daily (10:00 IST)"
+            "rent_overdue_daily (10:00 IST), lead_auto_lost_daily (07:30 IST)"
         )
 
     yield

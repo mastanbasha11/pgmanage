@@ -72,6 +72,7 @@ interface Lead {
   last_contacted_at?: string;
   assigned_to?: string | null;
   assigned_to_name?: string | null;
+  lost_reason?: string | null;
   created_at: string;
 }
 

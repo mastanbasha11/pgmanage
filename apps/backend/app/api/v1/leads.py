@@ -247,6 +247,7 @@ async def list_leads(
     result = await db.execute(
         text(f"""
             SELECT l.id, l.name, l.phone, l.email, l.source, l.status, l.notes,
+                   l.lost_reason,
                    l.budget_min_paise, l.budget_max_paise, l.interested_room_type,
                    l.expected_move_in_date, l.next_followup_at, l.last_contacted_at,
                    l.created_at, l.assigned_to,
