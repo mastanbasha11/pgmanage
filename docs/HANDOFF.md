@@ -17,7 +17,7 @@ self-service portal. Turborepo: `apps/backend` (FastAPI), `apps/web` (React/Vite
 - **Leads scalable worklist** — shipped this session. Replaced the Kanban-as-default with a priority worklist (List/Board/Split). Board (drag-to-move) preserved as a view.
 - **Web redesign** (density fix + new token system) and **dashboard/rent/tenants/bookings/expenses** revamps — shipped earlier this session.
 - **Backend fixes**: `roi-by-room` was 500ing on every call (nonexistent `rooms.is_active` column + asyncpg int/text bind) — fixed + tested; rate limiter re-keyed **per authenticated user** (was per-IP, so colleagues behind one office NAT shared a 60/min bucket) and raised to 300/min (prod env overrides to 120).
-- **Leads data**: `NEGOTIATING` and `BOOKED` removed from the pipeline UI (enum kept); one-time data fix moved 288 `NEW` → `CONTACTED` for the LOOP org.
+- **Leads data**: `NEGOTIATING` and `BOOKED` removed from the pipeline UI (enum kept); one-time data fix moved 288 `NEW` → `CONTACTED` for the LOOP org. Later: worklist defaults to 50/page with "All" as the default view; Score column + Hot view removed; **live CSV export** and **bulk WhatsApp** (editable `{name}` template) added; **daily auto-close** of leads idle 30+ days. One-time data fixes on LOOP: all 339 leads assigned to **Shabeera** (sole manager), and the auto-close run closed 22 stale leads.
 
 ### Mobile
 - **Staff app** fully redesigned to a new mock (all screens), first charts added (`react-native-svg`). Latest APK: v1.1.1 / versionCode 3, from commit `fb4230d`, EAS `preview` profile → APK, API `https://pgmanage.in/api/v1`.
@@ -59,8 +59,9 @@ self-service portal. Turborepo: `apps/backend` (FastAPI), `apps/web` (React/Vite
 - Backend stubs with finished web UI waiting on data: visitors, referrals, notifications, meals schedule, community (events/residents/partners).
 
 ### Leads
-- **True virtualization for 5,000+** — the worklist currently client-paginates the fetched set (`limit: 500`); for much larger tenants, add server pagination or `react-window`.
-- **Export** and **Automations** buttons in the worklist header are stubs.
+- **True virtualization for 5,000+** — the worklist currently client-paginates the fetched set (`limit: 500`, 50/page); for much larger tenants, add server pagination or `react-window`.
+- **Export is live** (client-side CSV of the filtered+sorted set). The **Automations** button is still a stub — the one shipped automation is the daily auto-close job below.
+- **Auto-close stale leads**: a daily scheduler job (07:30 IST, `app/tasks/lead_auto_lost.py`) moves any open lead untouched 30+ days with no pending follow-up to LOST, stamped `lost_reason = "Auto-closed: no activity for 30+ days"` (the worklist shows an `auto` badge on these). Tune the window via `IDLE_DAYS`. If owners later want a heads-up before it closes, add a warning state a few days prior.
 
 ### Mobile (staff)
 - Expenses per-row edit/delete/approve/receipt-upload; push notifications; iOS build config.
