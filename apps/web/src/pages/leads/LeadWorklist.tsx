@@ -211,7 +211,8 @@ export default function LeadWorklist({
   const [sourceFilter, setSourceFilter] = useState('ALL');
   const [ownerFilter, setOwnerFilter] = useState('ALL');
   const [wantsFilter, setWantsFilter] = useState('ALL');
-  const [sort, setSort] = useState<SortKey>('PRIORITY');
+  // Default to newest-first — the latest lead always sits on top.
+  const [sort, setSort] = useState<SortKey>('NEWEST');
   const [datePreset, setDatePreset] = useState<DatePreset>('ALL');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -512,8 +513,8 @@ export default function LeadWorklist({
           value={sort}
           onChange={(v) => setSort(v as SortKey)}
           options={[
-            ['PRIORITY', 'Priority'],
             ['NEWEST', 'Newest'],
+            ['PRIORITY', 'Priority'],
             ['OLDEST', 'Oldest'],
             ['NAME', 'Name'],
           ]}
