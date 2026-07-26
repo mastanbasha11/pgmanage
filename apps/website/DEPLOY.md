@@ -1,5 +1,46 @@
 # Deploying the PGManage marketing site
 
+## As deployed (LIVE) — EC2 + Caddy, 3-host split
+
+The site is live on the production EC2 box (`13.126.139.161`), served by the **same Caddy** as the
+app, under a hostname split:
+
+| Host | Serves |
+|---|---|
+| `pgmanage.in` | this marketing site (static, from `/opt/marketing/dist`) + `/api` passthrough |
+| `app.pgmanage.in` | owner/manager app (the `webdist` SPA) |
+| `my.pgmanage.in` | resident portal (same SPA, lands on `/portal`) |
+
+Config lives in `infrastructure/prod/Caddyfile` (4 vhosts) and `docker-compose.prod.yml` (a
+`/opt/marketing/dist:/srv/marketing:ro` mount on caddy). Backend env gained the new hosts
+(`ALLOWED_HOSTS`, `CORS_ORIGINS`, `APP_BASE_URL=https://app.pgmanage.in`).
+
+**⚠️ Config drift:** during cutover these two tracked files + the env were edited **directly on the
+server**. Merge branch `feat/marketing-website` into `main` so a future `git pull` deploy doesn't
+revert them. A pre-cutover backup is at `/opt/pgmanage/_cutover-backup-<ts>/` (Caddyfile, compose,
+`.env`) for instant rollback.
+
+### Re-deploy the marketing site after a content change
+```bash
+cd apps/website
+npm run media && npm run build                     # regenerate screenshots + build
+rsync -az --delete -e "ssh -i ~/.ssh/pgmanage_prod_ed25519" \
+  dist/ ubuntu@13.126.139.161:/tmp/marketing-dist/
+ssh -i ~/.ssh/pgmanage_prod_ed25519 ubuntu@13.126.139.161 \
+  'sudo rsync -a --delete /tmp/marketing-dist/ /opt/marketing/dist/'
+```
+No Caddy restart needed — it file-serves the directory live. (The sandbox's outbound IP must be
+whitelisted in the EC2 security group for SSH.)
+
+### Follow-ups (optional, nothing breaks without them)
+- Re-point the Meta WhatsApp + Razorpay webhook URLs from `pgmanage.in/api/...` to
+  `app.pgmanage.in/api/...` when convenient (apex still proxies `/api`, so both work).
+- Existing logged-in users had sessions on `pgmanage.in`; they log in once at `app.pgmanage.in`.
+
+---
+
+## Alternative — Cloudflare Pages
+
 Static Astro build → **Cloudflare Pages**. One serverless function (the demo form) rides along
 automatically from `functions/`.
 
