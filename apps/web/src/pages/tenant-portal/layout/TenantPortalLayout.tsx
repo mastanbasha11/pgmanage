@@ -47,7 +47,7 @@ export default function TenantPortalLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-muted/30">
+    <div className="tenant-forest min-h-screen bg-background">
       {/* Top brand bar on mobile + tablet */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b bg-primary px-4 py-3 text-primary-foreground lg:hidden">
         <button

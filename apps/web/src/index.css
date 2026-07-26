@@ -63,6 +63,41 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 172 82% 42%;
   }
+
+  /* ── Resident portal · "Forest & Sage" ──────────────────────────────────
+     A scoped theme (from pgmanageresidentweb / looptokens): forest chrome on
+     sage surfaces, green reserved for money, apricot for "needs attention".
+     Applied to the /portal root only, so the owner app keeps its own palette.
+     Overriding the shadcn HSL vars re-skins every semantic utility and every
+     shadcn component inside the portal with zero markup churn. */
+  .tenant-forest {
+    --background: 140 16% 96%;              /* sage #F4F7F5 */
+    --foreground: 157 18% 14%;              /* ink #1E2B26 */
+    --card: 0 0% 100%;
+    --card-foreground: 157 18% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 157 18% 14%;
+    --primary: 165 42% 19%;                /* forest #1C443A */
+    --primary-foreground: 135 18% 96%;     /* ondark #F2F6F3 */
+    --secondary: 144 15% 94%;              /* sage2 #ECF1EE */
+    --secondary-foreground: 165 42% 19%;
+    --muted: 144 15% 94%;
+    --muted-foreground: 154 8% 38%;        /* mut #5A6A63 */
+    --accent: 159 31% 36%;                 /* money green #3F7763 */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 6 50% 47%;              /* alert #B5483C */
+    --destructive-foreground: 0 0% 100%;
+    --border: 142 14% 89%;                 /* sageline #DFE7E2 */
+    --input: 142 14% 89%;
+    --ring: 159 31% 36%;
+    /* Raw Forest & Sage accents for screens that need them directly. */
+    --forest: #1C443A;
+    --apricot: #C4743F;
+    --apricot-bg: #FAF0E7;
+    --apricot-line: #F0DCCB;
+    --apricot-ink: #9C5A2B;
+    --money: #3F7763;
+  }
 }
 
 @layer base {
@@ -98,3 +133,64 @@
 ::-webkit-scrollbar-track { @apply bg-transparent; }
 ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
 ::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/50; }
+
+/* ── Resident portal · remap hardcoded palette classes to Forest & Sage ──────
+   The portal screens use a few literal Tailwind palette classes (emerald/amber/
+   rose/violet/teal/sky/slate/blue). Rather than edit every JSX site, remap them
+   to the Forest & Sage semantics ONLY inside .tenant-forest: green = money/ok,
+   apricot = attention/due, alert-red = overdue, info-blue = scheduled. Scoped +
+   !important so the owner app is untouched and Tailwind utilities don't win. */
+.tenant-forest .text-emerald-700,
+.tenant-forest .text-emerald-600,
+.tenant-forest .text-teal-700,
+.tenant-forest .text-green-700 { color:#2E7D5B !important }
+.tenant-forest .bg-emerald-50,
+.tenant-forest .bg-teal-50,
+.tenant-forest .bg-green-50 { background-color:#E9F3EE !important }
+.tenant-forest .bg-emerald-100 { background-color:#DCEBE3 !important }
+.tenant-forest .bg-emerald-500,
+.tenant-forest .bg-emerald-600 { background-color:#2E7D5B !important }
+.tenant-forest .border-emerald-200,
+.tenant-forest .border-teal-300,
+.tenant-forest .ring-emerald-200 { border-color:#CFE3D8 !important; --tw-ring-color:#CFE3D8 !important }
+
+.tenant-forest .text-amber-700,
+.tenant-forest .text-orange-700,
+.tenant-forest .text-yellow-700 { color:#9C5A2B !important }
+.tenant-forest .text-amber-400 { color:#C4743F !important }
+.tenant-forest .bg-amber-50,
+.tenant-forest .bg-orange-50,
+.tenant-forest .bg-yellow-50 { background-color:#FAF0E7 !important }
+.tenant-forest .border-amber-200,
+.tenant-forest .ring-amber-200 { border-color:#F0DCCB !important; --tw-ring-color:#F0DCCB !important }
+
+.tenant-forest .text-rose-700,
+.tenant-forest .text-red-700 { color:#B5483C !important }
+.tenant-forest .text-rose-200 { color:#EED8D2 !important }
+.tenant-forest .bg-rose-50,
+.tenant-forest .bg-red-50 { background-color:#FBEEEA !important }
+.tenant-forest .bg-rose-600,
+.tenant-forest .bg-red-600 { background-color:#B5483C !important }
+.tenant-forest .bg-rose-700 { background-color:#9E3E33 !important }
+.tenant-forest .ring-rose-200 { --tw-ring-color:#EED8D2 !important }
+
+/* Wallet credit / notes were violet — money-positive, so map to the green family. */
+.tenant-forest .text-violet-700 { color:#3F7763 !important }
+.tenant-forest .bg-violet-50 { background-color:#ECF1EE !important }
+.tenant-forest .bg-violet-100 { background-color:#E7EFEA !important }
+.tenant-forest .bg-violet-600 { background-color:#3F7763 !important }
+.tenant-forest .bg-violet-700 { background-color:#356451 !important }
+.tenant-forest .border-violet-200,
+.tenant-forest .ring-violet-200 { border-color:#DFE7E2 !important; --tw-ring-color:#DFE7E2 !important }
+
+.tenant-forest .text-sky-700,
+.tenant-forest .text-blue-700 { color:#4A6E86 !important }
+.tenant-forest .bg-sky-50,
+.tenant-forest .bg-blue-50 { background-color:#EAF0F4 !important }
+.tenant-forest .bg-blue-600 { background-color:#1C443A !important }
+.tenant-forest .ring-sky-200 { --tw-ring-color:#D5E1E8 !important }
+
+.tenant-forest .text-slate-700 { color:#5A6A63 !important }
+.tenant-forest .bg-slate-100,
+.tenant-forest .bg-slate-50 { background-color:#ECF1EE !important }
+.tenant-forest .ring-slate-200 { --tw-ring-color:#DFE7E2 !important }
