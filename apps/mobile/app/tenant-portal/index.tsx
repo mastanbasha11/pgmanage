@@ -36,7 +36,11 @@ export default function TenantPortalScreen() {
   async function verifyOtp() {
     setLoading(true);
     try {
-      const res = await api.post<{ access_token: string }>('/tenant/auth/verify', { phone, otp });
+      // Backend expects `code` (phone-first refactor), not `otp`.
+      const res = await api.post<{ access_token: string }>('/tenant/auth/verify', {
+        phone,
+        code: otp,
+      });
       await AsyncStorage.setItem('tenant_access_token', res.data.access_token);
       setStep('home');
     } catch (err) {
