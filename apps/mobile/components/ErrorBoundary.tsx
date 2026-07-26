@@ -58,7 +58,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#143229',
     padding: 16,
     paddingTop: 64,
   },
@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
   stack: { color: '#E5E7EB', fontFamily: 'monospace', fontSize: 12 },
   btn: {
     marginTop: 12,
-    backgroundColor: '#0D9488',
+    backgroundColor: '#3F7763',
     borderRadius: 8,
     padding: 14,
     alignItems: 'center',

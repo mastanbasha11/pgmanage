@@ -21,11 +21,11 @@ import { colors, radius, space, chartColors } from '../lib/theme';
 export type PillTone = 'g' | 'a' | 'r' | 's' | 'b' | 'v';
 
 const PILL: Record<PillTone, { bg: string; fg: string; line: string; dot: string }> = {
-  g: { bg: colors.successBg, fg: colors.success, line: colors.successLine, dot: '#22a559' },
-  a: { bg: colors.warnBg, fg: colors.warn, line: colors.warnLine, dot: '#e0912f' },
+  g: { bg: colors.successBg, fg: colors.success, line: colors.successLine, dot: '#3E8F6B' },
+  a: { bg: colors.warnBg, fg: colors.warn, line: colors.warnLine, dot: '#C98A3C' },
   r: { bg: colors.dangerBg, fg: colors.danger, line: colors.dangerLine, dot: colors.danger },
-  s: { bg: colors.neutralBg, fg: colors.neutralFg, line: colors.neutralLine, dot: '#9aa1ad' },
-  b: { bg: colors.infoBg, fg: '#1c5cab', line: colors.infoLine, dot: colors.info },
+  s: { bg: colors.neutralBg, fg: colors.neutralFg, line: colors.neutralLine, dot: colors.textDim },
+  b: { bg: colors.infoBg, fg: colors.info, line: colors.infoLine, dot: colors.info },
   v: { bg: colors.purpleBg, fg: colors.purple, line: colors.purpleLine, dot: colors.purple },
 };
 
@@ -56,8 +56,8 @@ export type TagKind = 'share' | 'ac' | 'suite';
 
 export function Tag({ label, kind = 'ac' }: { label: string; kind?: TagKind }) {
   const map: Record<TagKind, { bg: string; fg: string; line: string }> = {
-    share: { bg: colors.warnBg, fg: '#92600b', line: colors.warnLine },
-    ac: { bg: colors.neutralBg, fg: '#4b5566', line: colors.neutralLine },
+    share: { bg: colors.warnBg, fg: colors.apricotInk, line: colors.warnLine },
+    ac: { bg: colors.neutralBg, fg: '#4A574F', line: colors.neutralLine },
     suite: { bg: colors.purpleBg, fg: colors.purple, line: colors.purpleLine },
   };
   const t = map[kind];

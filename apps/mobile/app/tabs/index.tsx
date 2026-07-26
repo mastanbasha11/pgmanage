@@ -216,7 +216,7 @@ export default function DashboardTab() {
         {/* Hero — the one number an owner opens the app for. */}
         {hasFinancials && data && (
           <LinearGradient
-            colors={['#0e9384', '#0b6f64']}
+            colors={[colors.forest, colors.forestDark]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.hero}

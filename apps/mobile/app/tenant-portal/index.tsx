@@ -57,7 +57,7 @@ export default function TenantPortalScreen() {
           onChangeText={setPhone}
           keyboardType="phone-pad"
           placeholder="+919876543210"
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor="#6B7A74"
         />
         <TouchableOpacity
           style={[styles.btn, !phone && styles.btnDisabled]}
@@ -82,7 +82,7 @@ export default function TenantPortalScreen() {
           keyboardType="numeric"
           maxLength={6}
           placeholder="------"
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor="#6B7A74"
         />
         <TouchableOpacity
           style={[styles.btn, otp.length < 4 && styles.btnDisabled]}
@@ -95,7 +95,7 @@ export default function TenantPortalScreen() {
           style={[styles.btn, { backgroundColor: '#f1f5f9', marginTop: 8 }]}
           onPress={() => { setStep('phone'); setOtp(''); }}
         >
-          <Text style={{ color: '#374151', fontWeight: '600' }}>Change Number</Text>
+          <Text style={{ color: '#5A6A63', fontWeight: '600' }}>Change Number</Text>
         </TouchableOpacity>
       </View>
     );
@@ -119,7 +119,7 @@ function TenantHome() {
     '₹' + new Intl.NumberFormat('en-IN').format(p / 100);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#f8fafc' }} contentContainerStyle={{ padding: 16 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: '#F4F7F5' }} contentContainerStyle={{ padding: 16 }}>
       <View style={styles.helloCard}>
         <Text style={styles.hello}>Hello, {me?.name ?? '...'} 👋</Text>
         <Text style={styles.helloSub}>Monthly Rent: {me ? fmtPaise(me.monthly_rent_paise) : '—'}</Text>
@@ -134,7 +134,7 @@ function TenantHome() {
           <Text style={styles.ledgerAmt}>{fmtPaise(e.amount_due_paise)}</Text>
           <Text style={[
             styles.ledgerStatus,
-            { color: e.status === 'PAID' ? '#16a34a' : e.status === 'OVERDUE' ? '#dc2626' : '#d97706' }
+            { color: e.status === 'PAID' ? '#2E7D5B' : e.status === 'OVERDUE' ? '#B5483C' : '#9C5A2B' }
           ]}>
             {e.status}
           </Text>
@@ -147,23 +147,23 @@ function TenantHome() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#F4F7F5',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
   },
-  title: { fontSize: 22, fontWeight: '700', color: '#0f172a', marginBottom: 4 },
-  subtitle: { fontSize: 14, color: '#64748b', marginBottom: 24 },
+  title: { fontSize: 22, fontWeight: '700', color: '#1E2B26', marginBottom: 4 },
+  subtitle: { fontSize: 14, color: '#5A6A63', marginBottom: 24 },
   input: {
     width: '100%',
     maxWidth: 320,
     height: 48,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#DFE7E2',
     borderRadius: 10,
     paddingHorizontal: 14,
     fontSize: 16,
-    color: '#0f172a',
+    color: '#1E2B26',
     backgroundColor: '#fff',
     marginBottom: 14,
   },
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 320,
     height: 44,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#1C443A',
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -179,14 +179,14 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.5 },
   btnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
   helloCard: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#1C443A',
     borderRadius: 14,
     padding: 18,
     marginBottom: 20,
   },
   hello: { fontSize: 18, fontWeight: '700', color: '#fff' },
-  helloSub: { fontSize: 13, color: '#bfdbfe', marginTop: 4 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a', marginBottom: 10 },
+  helloSub: { fontSize: 13, color: '#B9CFC7', marginTop: 4 },
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#1E2B26', marginBottom: 10 },
   ledgerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -195,9 +195,9 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#DFE7E2',
   },
-  ledgerMonth: { flex: 1, fontSize: 14, color: '#374151' },
-  ledgerAmt: { fontSize: 14, fontWeight: '700', color: '#0f172a', marginRight: 10 },
+  ledgerMonth: { flex: 1, fontSize: 14, color: '#5A6A63' },
+  ledgerAmt: { fontSize: 14, fontWeight: '700', color: '#1E2B26', marginRight: 10 },
   ledgerStatus: { fontSize: 12, fontWeight: '700' },
 });
