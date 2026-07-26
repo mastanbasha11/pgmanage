@@ -10,7 +10,7 @@ export const home = {
       'PGManage collects the rent on WhatsApp, keeps a name against every rupee of cash, fills empty beds and shows which rooms make money. Built in a 121-bed co-living property in Hyderabad.',
   },
   hero: {
-    headline: 'Ninety-four percent of the rent, collected by the fourth.',
+    headline: 'Collect the rent. Fill the beds. Know the money.',
     sub: 'PGManage runs the rent, the beds and the leads for your PG. Reminders go out on WhatsApp, every rupee of cash has a staff name against it, and you can finally see which rooms make money and which ones just look busy.',
     proofLine:
       'Built in a 121-bed co-living property in Hyderabad — 94% collected, 4.1 days to collect, 98% of WhatsApp reminders delivered.',

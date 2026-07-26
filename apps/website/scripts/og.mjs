@@ -14,7 +14,7 @@ const OUT = join(ROOT, 'public', 'og');
 
 const CARDS = [
   ['default', 'PGManage', 'Rent, beds and leads for your PG — on one screen.'],
-  ['home', 'Ninety-four percent of the rent, collected by the fourth.', 'The owner app that collects on WhatsApp and keeps a name against the cash.'],
+  ['home', 'Collect the rent. Fill the beds. Know the money.', 'The owner app that collects on WhatsApp and keeps a name against the cash.'],
   ['pricing', 'Priced per bed, from ₹25 a month.', '30-day free trial. No card. Free migration from Excel.'],
   ['product', 'Organised around your month, not the modules.', 'Collect the rent · fill the beds · know the money.'],
   ['product-rent-collection', 'Rent collection that leaves a trail.', 'Two taps, a WhatsApp receipt, a name against every rupee of cash.'],

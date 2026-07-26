@@ -233,13 +233,13 @@ function phone(label,tag,inner){
 function sHome(){
   return status()+`
   <div class="appbar"><div class="top">
-    <div style="flex:1"><div class="mut2">Wed, 16 Jul · Greenview PG</div><h2>Hi, Arjun</h2></div>
+    <div style="flex:1"><div class="mut2">Wed, 16 Jan · Greenview PG</div><h2>Hi, Arjun</h2></div>
     <div class="iconbtn">${I('bell')}<span class="dot">4</span></div>
     <div class="iconbtn">${'A'}</div>
   </div></div>
   <div class="body scroll">
     <div class="card" style="background:linear-gradient(150deg,#1C443A,#143229);border:0;color:#fff;border-radius:18px">
-      <div class="between"><span style="font-size:11px;font-weight:700;opacity:.9">NET PROFIT · JULY</span><span class="pill" style="background:#ffffff2e;border-color:transparent;color:#fff">${I('chevU')}12.4%</span></div>
+      <div class="between"><span style="font-size:11px;font-weight:700;opacity:.9">NET PROFIT · JANUARY</span><span class="pill" style="background:#ffffff2e;border-color:transparent;color:#fff">${I('chevU')}12.4%</span></div>
       <div style="font-size:32px;font-weight:800;letter-spacing:-.02em;margin-top:4px">₹4,46,823</div>
       <div class="row" style="margin-top:9px;gap:14px;font-size:11px;opacity:.95">
         <span>Received <b>₹16.57L</b></span><span>·</span><span>Spent <b>₹12.11L</b></span><span>·</span><span>Margin <b>26.9%</b></span>
@@ -273,7 +273,7 @@ function sCollect(){
   </div>
   <div class="body">
     <div class="card" style="margin-top:6px;background:var(--forest-bg);border-color:var(--ok-line)">
-      <div class="row">${av('Rohit Kumar',40)}<div style="flex:1"><div class="b">Rohit Kumar</div><div class="mut2">Room 102 ·C · 3-Share</div></div>
+      <div class="row">${av('Aditya Menon',40)}<div style="flex:1"><div class="b">Aditya Menon</div><div class="mut2">Room 102 ·C · 3-Share</div></div>
       <span class="pill r"><span class="d"></span>16d overdue</span></div>
     </div>
     <div class="big-amt tnum">₹9,000</div>
@@ -286,7 +286,7 @@ function sCollect(){
       <span class="chip" style="justify-content:center;text-align:center;padding:10px">Cash</span>
       <span class="chip" style="justify-content:center;text-align:center;padding:10px">Bank</span>
     </div>
-    <div class="card sp8" style="padding:10px 12px"><div class="between"><span class="mut">Collected by</span><span class="b" style="font-size:12px">${'Pandu'} (you)</span></div></div>
+    <div class="card sp8" style="padding:10px 12px"><div class="between"><span class="mut">Collected by</span><span class="b" style="font-size:12px">${'Sunil'} (you)</span></div></div>
     <div class="btn teal sp">${I('check')}Confirm ₹9,000 · UPI</div>
     <div class="mut2 sp8" style="text-align:center;line-height:1.5">Auto-sends a WhatsApp receipt · adds to your cash-in-hand if Cash · logs to Audit.</div>
   </div>`;
@@ -294,11 +294,11 @@ function sCollect(){
 
 /* ---------------- RENT & PAYMENTS ---------------- */
 function sRent(){
-  const rows=[['102','C','Rohit Kumar',9000,0,'r','Overdue 16d'],['501','A','Vinay',9000,0,'r','Overdue 9d'],
-    ['105','B','K.Hemal Datta',12500,7500,'a','₹5,000 left'],['308','A','Guna Shekar',9000,0,'s','Due 20 Jul'],
-    ['101','A','GVR Laxman',9000,9000,'g','Paid · 05 Jul']];
+  const rows=[['102','C','Aditya Menon',9000,0,'r','Overdue 16d'],['501','A','Farhan',9000,0,'r','Overdue 9d'],
+    ['105','B','Nikhil Rao',12500,7500,'a','₹5,000 left'],['308','A','Rahul Nair',9000,0,'s','Due 20 Jan'],
+    ['101','A','Vikram Shah',9000,9000,'g','Paid · 05 Jan']];
   return status()+`
-  <div class="appbar"><div class="top"><div style="flex:1"><h2>Rent &amp; Payments</h2><div class="sub">July · 94% collected</div></div>
+  <div class="appbar"><div class="top"><div style="flex:1"><h2>Rent &amp; Payments</h2><div class="sub">January · 94% collected</div></div>
     <div class="iconbtn">${I('refresh')}</div><div class="iconbtn">${I('plus')}</div></div></div>
   <div class="body scroll">
     <div class="grid2">
@@ -325,12 +325,12 @@ function sRent(){
 
 /* ---------------- TENANT DETAIL / LEDGER ---------------- */
 function sTenant(){
-  const led=[['Jul rent','16 Jul','due',9000,'r'],['Jun rent','02 Jun','paid · UPI',9000,'g'],['May rent','03 May','paid · Cash',9000,'g'],['Deposit','01 Mar','held',18000,'s'],['Advance','01 Mar','adjusted',9000,'b']];
+  const led=[['Jan rent','16 Jan','due',9000,'r'],['Dec rent','02 Dec','paid · UPI',9000,'g'],['Nov rent','03 Nov','paid · Cash',9000,'g'],['Deposit','01 Sep','held',18000,'s'],['Advance','01 Sep','adjusted',9000,'b']];
   return status()+`
   <div class="appbar teal" style="background:linear-gradient(160deg,#1C443A,#2A5A4D);color:#fff;border-radius:0 0 20px 20px;padding-bottom:16px">
     <div class="top"><span class="iconbtn" style="background:#ffffff26;border:0;color:#fff">${I('chevL')}</span><div style="flex:1"></div>
       <span class="iconbtn" style="background:#ffffff26;border:0;color:#fff">${I('pencil')}</span></div>
-    <div class="row" style="margin-top:8px">${av('Rohit Kumar',48)}<div><div style="font-size:17px;font-weight:800">Rohit Kumar</div>
+    <div class="row" style="margin-top:8px">${av('Aditya Menon',48)}<div><div style="font-size:17px;font-weight:800">Aditya Menon</div>
       <div style="font-size:11.5px;color:#DFE7E2">Room 102 ·C · 3-Share · ₹9,000/mo</div></div></div>
     <div class="row" style="gap:8px;margin-top:11px">
       <span class="btn sm" style="background:#ffffff26;border:0;color:#fff;flex:1">${I('phone')}Call</span>
@@ -341,9 +341,9 @@ function sTenant(){
   <div class="body scroll">
     <div class="grid2" style="margin-top:8px">
       <div class="kpi"><div class="l">Balance due</div><div class="v tnum" style="color:var(--alert)">₹9,000</div><div class="f">16 days overdue</div></div>
-      <div class="kpi"><div class="l">Tenure</div><div class="v">5 mo</div><div class="f">since 02 Mar · on notice</div></div>
+      <div class="kpi"><div class="l">Tenure</div><div class="v">5 mo</div><div class="f">since 02 Sep · on notice</div></div>
     </div>
-    <div class="card sp" style="border-color:var(--warn-line);background:#FCF8F1"><div class="row"><span>${I('bell')}</span><span style="font-size:11.5px;font-weight:600;flex:1">Notice to vacate recorded — leaves <b>31 Jul</b>. Bed now in Upcoming vacancies.</span></div></div>
+    <div class="card sp" style="border-color:var(--warn-line);background:#FCF8F1"><div class="row"><span>${I('bell')}</span><span style="font-size:11.5px;font-weight:600;flex:1">Notice to vacate recorded — leaves <b>31 Jan</b>. Bed now in Upcoming vacancies.</span></div></div>
     <div class="h3 sp">Ledger</div>
     ${led.map(x=>`<div class="listrow"><div style="flex:1"><div class="b" style="font-size:12.5px">${x[0]}</div><div class="mut2">${x[1]} · ${x[2]}</div></div>
       <div style="text-align:right"><div class="tnum b">${money(x[3])}</div><span class="pill ${x[4]}"><span class="d"></span>${x[2].split(' ')[0]}</span></div></div>`).join('')}
@@ -352,10 +352,10 @@ function sTenant(){
 
 /* ---------------- VACANCIES ---------------- */
 function sVac(){
-  const fl=[['4F','405','2-Share · AC',['A','B'],2,12000,'Ganesh, Meena'],['4F','406','2-Share · AC',['B'],2,12000,'Ragunandan'],
-    ['2F','205','2-Share · AC',['A','B'],2,12000,'Manoj, Vijay'],['7F','703','Suite · AC',['A'],1,26000,'—']];
+  const fl=[['4F','405','2-Share · AC',['A','B'],2,12000,'Kabir, Priya'],['4F','406','2-Share · AC',['B'],2,12000,'Karthik'],
+    ['2F','205','2-Share · AC',['A','B'],2,12000,'Deepak, Sameer'],['7F','703','Suite · AC',['A'],1,26000,'—']];
   return status()+`
-  <div class="appbar"><div class="top"><div style="flex:1"><h2>Vacancies</h2><div class="sub">15 beds freeing by 31 Jul</div></div>
+  <div class="appbar"><div class="top"><div style="flex:1"><h2>Vacancies</h2><div class="sub">15 beds freeing by 31 Jan</div></div>
     <div class="iconbtn">${I('search')}</div></div></div>
   <div class="body scroll">
     <div class="grid2"><div class="kpi"><div class="l">Free now</div><div class="v">5</div><div class="f">ready to fill</div></div>
@@ -375,13 +375,13 @@ function sVac(){
 
 /* ---------------- BOOKINGS ---------------- */
 function sBookings(){
-  const adv=[['Sai Kiran','01 Aug','102 ·C',4500,'ready'],['Bala Venkat','01 Aug','',4500,'tbd'],['Oindrila','01 Aug','',2000,'tbd'],['Deepthi','01 Aug','703 ·A',2000,'ready']];
+  const adv=[['Varun Iyer','01 Feb','102 ·C',4500,'ready'],['Rohan Gupta','01 Feb','',4500,'tbd'],['Ananya','01 Feb','',2000,'tbd'],['Sneha','01 Feb','703 ·A',2000,'ready']];
   return status()+`
   <div class="appbar"><div class="top"><div style="flex:1"><h2>Bookings</h2><div class="sub">daily stays &amp; advances</div></div><div class="iconbtn">${I('plus')}</div></div></div>
   <div class="body scroll">
     <div class="seg"><div class="s">Daily · 12</div><div class="s on">Advance · 44</div></div>
     <div class="card sp" style="border-color:var(--warn-line);background:#FCF8F1"><div class="row"><span>${I('warn')}</span>
-      <span style="flex:1;font-size:11.5px;font-weight:600"><b>4 advances arriving 01 Aug</b> have no bed. 15 free on 31 Jul.</span></div>
+      <span style="flex:1;font-size:11.5px;font-weight:600"><b>4 advances arriving 01 Feb</b> have no bed. 15 free on 31 Jan.</span></div>
       <div class="btn sm teal sp8" style="width:100%">Assign from vacancies →</div></div>
     <div class="sp8">${adv.map(a=>`<div class="listrow">${av(a[0],32)}
       <div style="flex:1;min-width:0"><div class="b" style="font-size:12.5px">${a[0]}</div><div class="mut2">Move-in ${a[1]}</div></div>
@@ -396,9 +396,9 @@ function sBookings(){
 /* ---------------- EXPENSES + ADD ---------------- */
 function sExpenses(){
   const cats=[{v:204000,c:'#4A6E86'},{v:92000,c:'#2E7D5B'},{v:74000,c:'#C08CA0'},{v:67000,c:'#C98A3C'},{v:36000,c:'#3F7763'},{v:26000,c:'#6B7A74'}];
-  const rows=[['chicken','Groceries','Shammi',24046,'g'],['Pandu Salary','Salary','Shammi',15000,'g'],['Duplicate Keys','Misc','Mohan',3120,'a'],['Gas','Groceries','Shammi',3350,'a']];
+  const rows=[['chicken','Groceries','Neha',24046,'g'],['Sunil Salary','Salary','Neha',15000,'g'],['Duplicate Keys','Misc','Mohan',3120,'a'],['Gas','Groceries','Neha',3350,'a']];
   return status()+`
-  <div class="appbar"><div class="top"><div style="flex:1"><h2>Expenses</h2><div class="sub">July · ₹11.6L</div></div><div class="iconbtn">${I('camera')}</div></div></div>
+  <div class="appbar"><div class="top"><div style="flex:1"><h2>Expenses</h2><div class="sub">January · ₹11.6L</div></div><div class="iconbtn">${I('camera')}</div></div></div>
   <div class="body scroll">
     <div class="grid2">
       <div class="kpi"><div class="l">Opex</div><div class="v tnum">₹4.99L</div><div class="f"><span class="delta up">${I('chevD')}6%</span> comparable</div></div>
@@ -422,11 +422,11 @@ function sExpenses(){
 
 /* ---------------- LEADS (mobile pipeline) ---------------- */
 function sLeads(){
-  const leads=[['Sudheer Ravi','Website','Site visited','2-Share AC · Aug','Overdue 2d','r','P'],
-    ['Anirudh','Instagram','New','2-Share AC · Aug','Due today','a','S'],
-    ['Satvir Rana','Website','Contacted','Suite · Aug','Due today','a','S'],
-    ['Ragul','Website','Contacted','3-Share · Aug','Overdue 5d','r','P'],
-    ['Naveen Yadav','Website','New','2-Share AC · Sep','18 Jul','s','P']];
+  const leads=[['Tarun Bose','Website','Site visited','2-Share AC · Aug','Overdue 2d','r','P'],
+    ['Ishaan','Instagram','New','2-Share AC · Aug','Due today','a','S'],
+    ['Manav Singh','Website','Contacted','Suite · Aug','Due today','a','S'],
+    ['Nitin','Website','Contacted','3-Share · Aug','Overdue 5d','r','P'],
+    ['Aakash Verma','Website','New','2-Share AC · Sep','18 Jan','s','P']];
   const fu=(t,c)=>`<span class="pill ${c}"><span class="d"></span>${t}</span>`;
   return status()+`
   <div class="appbar"><div class="top"><div style="flex:1"><h2>Leads</h2><div class="sub">47 in pipeline</div></div><div class="iconbtn">${I('search')}</div><div class="iconbtn">${I('plus')}</div></div></div>
@@ -451,7 +451,7 @@ function sLeads(){
 /* ---------------- MATCH ---------------- */
 function sMatch(){
   const beds=[['405 ·A','2-Share · AC',12000],['405 ·B','2-Share · AC',12000],['205 ·A','2-Share · AC',12000]];
-  const leads=[['Sudheer Ravi','2-Share AC','Aug','92% fit'],['Anirudh','2-Share AC','Aug','88% fit'],['AMBU B','2-Share AC','Sep','70% fit']];
+  const leads=[['Tarun Bose','2-Share AC','Aug','92% fit'],['Ishaan','2-Share AC','Aug','88% fit'],['AMBU B','2-Share AC','Sep','70% fit']];
   return status()+`
   <div class="appbar teal" style="background:var(--forest);color:#fff;border-radius:0 0 20px 20px;padding-bottom:15px">
     <div class="top"><span class="iconbtn" style="background:#ffffff26;border:0;color:#fff">${I('chevL')}</span>
@@ -460,7 +460,7 @@ function sMatch(){
   <div class="body scroll">
     <div class="h3" style="margin-top:8px">Beds freeing</div>
     ${beds.map(b=>`<div class="listrow"><span class="rbadge"><b>${b[0].split(' ')[0]}</b><span>${b[0].split(' ')[1]}</span></span>
-      <div style="flex:1"><span class="tag share">${b[1]}</span><div class="mut2" style="margin-top:3px">free 31 Jul</div></div>
+      <div style="flex:1"><span class="tag share">${b[1]}</span><div class="mut2" style="margin-top:3px">free 31 Jan</div></div>
       <div class="tnum b">${money(b[2])}</div></div>`).join('')}
     <div class="h3 sp">Best-fit leads</div>
     ${leads.map(l=>`<div class="card" style="padding:11px;margin-bottom:8px"><div class="between">
@@ -534,10 +534,10 @@ function sMsg(){
 
 /* ---------------- AUDIT ---------------- */
 function sAudit(){
-  const e=[['Pandu edited payment · Rohit','Payment',true,'₹9,000 → ₹7,500','2h','#4A6E86'],
-    ['Arjun gave discount · K.Hemal','Payment',true,'Discount ₹500','3h','#4A6E86'],
-    ['Pandu recorded notice · Ravikanth','Tenant',false,'Vacates 31 Jul','6h','#1C443A'],
-    ['Shammi deleted expense · Gas','Expense',true,'restorable 90d','1d','#C2714F']];
+  const e=[['Sunil edited payment · Aditya','Payment',true,'₹9,000 → ₹7,500','2h','#4A6E86'],
+    ['Arjun gave discount · Nikhil','Payment',true,'Discount ₹500','3h','#4A6E86'],
+    ['Sunil recorded notice · Anil','Tenant',false,'Vacates 31 Jan','6h','#1C443A'],
+    ['Neha deleted expense · Gas','Expense',true,'restorable 90d','1d','#C2714F']];
   return status()+`
   <div class="appbar"><div class="top"><div style="flex:1"><h2>Audit Logs</h2><div class="sub">991 actions</div></div><div class="iconbtn">${I('download')}</div></div></div>
   <div class="body scroll">
