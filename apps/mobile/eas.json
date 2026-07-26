@@ -17,7 +17,7 @@
     },
     "preview": {
       "distribution": "internal",
-      "env": { "EXPO_PUBLIC_API_URL": "https://pgmanage.in/api/v1" },
+      "env": { "EXPO_PUBLIC_API_URL": "https://app.pgmanage.in/api/v1" },
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
@@ -29,7 +29,7 @@
     "production": {
       "distribution": "store",
       "channel": "production",
-      "env": { "EXPO_PUBLIC_API_URL": "https://pgmanage.in/api/v1" },
+      "env": { "EXPO_PUBLIC_API_URL": "https://app.pgmanage.in/api/v1" },
       "android": {
         "buildType": "app-bundle"
       },
@@ -46,7 +46,7 @@
         "track": "internal"
       },
       "ios": {
-        "appleId": "REPLACE_WITH_APPLE_ID_EMAIL",
+        "appleId": "pgmanage9@gmail.com",
         "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID",
         "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID"
       }
