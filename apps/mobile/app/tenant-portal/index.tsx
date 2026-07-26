@@ -7,11 +7,9 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { api, tenantApi, getApiError } from '../../lib/api';
+import { api, getApiError } from '../../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Step = 'phone' | 'otp' | 'home';
@@ -114,48 +112,10 @@ export default function TenantPortalScreen() {
     );
   }
 
-  return <TenantHome />;
+  // verify()/the mount effect route into the (tabs) app; this branch is transient
+  return null;
 }
 
-function TenantHome() {
-  const { data: me } = useQuery({
-    queryKey: ['tenant-me-mobile'],
-    queryFn: () => tenantApi.get('/me').then((r) => r.data),
-  });
-
-  const { data: ledger } = useQuery({
-    queryKey: ['tenant-ledger-mobile'],
-    queryFn: () => tenantApi.get('/ledger').then((r) => r.data),
-  });
-
-  const fmtPaise = (p: number) =>
-    '₹' + new Intl.NumberFormat('en-IN').format(p / 100);
-
-  return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#F4F7F5' }} contentContainerStyle={{ padding: 16 }}>
-      <View style={styles.helloCard}>
-        <Text style={styles.hello}>Hello, {me?.name ?? '...'} 👋</Text>
-        <Text style={styles.helloSub}>Monthly Rent: {me ? fmtPaise(me.monthly_rent_paise) : '—'}</Text>
-      </View>
-
-      <Text style={styles.sectionTitle}>Payment History</Text>
-      {(ledger?.entries ?? []).map((e: { id: string; month: number; year: number; amount_due_paise: number; status: string }) => (
-        <View key={e.id} style={styles.ledgerRow}>
-          <Text style={styles.ledgerMonth}>
-            {new Date(e.year, e.month - 1).toLocaleString('en-IN', { month: 'short', year: 'numeric' })}
-          </Text>
-          <Text style={styles.ledgerAmt}>{fmtPaise(e.amount_due_paise)}</Text>
-          <Text style={[
-            styles.ledgerStatus,
-            { color: e.status === 'PAID' ? '#2E7D5B' : e.status === 'OVERDUE' ? '#B5483C' : '#9C5A2B' }
-          ]}>
-            {e.status}
-          </Text>
-        </View>
-      ))}
-    </ScrollView>
-  );
-}
 
 const styles = StyleSheet.create({
   container: {

@@ -10,6 +10,8 @@ export default function TenantPortalLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="help" />
+      <Stack.Screen name="requests" />
+      <Stack.Screen name="moveout" />
     </Stack>
   );
 }

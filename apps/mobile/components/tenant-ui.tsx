@@ -20,14 +20,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, radius, space, type } from '../lib/theme';
+import { rupees } from '../lib/tenant/money';
+
+export { rupees };
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
-
-/** ₹ from integer paise, grouped Indian-style. */
-export function rupees(paise: number | null | undefined): string {
-  const n = Math.round((paise ?? 0) / 100);
-  return '₹' + n.toLocaleString('en-IN');
-}
 
 // ── Screen shell ─────────────────────────────────────────────────────────────
 

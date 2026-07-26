@@ -123,6 +123,8 @@ export default function TenantMore() {
       <TCard style={{ paddingVertical: 4 }}>
         <TListRow icon="construct-outline" title="Get help" sub="raise a maintenance request" chevron
           onPress={() => router.push('/tenant-portal/help')} />
+        <TListRow icon="list-outline" title="My requests" sub="track your tickets" chevron
+          onPress={() => router.push('/tenant-portal/requests')} />
         <TListRow icon="notifications-outline" title="Notifications" chevron last
           onPress={() => Alert.alert('Notifications', 'No new notifications.')} />
       </TCard>

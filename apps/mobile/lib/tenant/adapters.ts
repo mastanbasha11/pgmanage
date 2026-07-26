@@ -128,27 +128,33 @@ export interface ApiDuesSummary {
 export function adaptDueLine(api: ApiDueLine): DueLine {
   return {
     kind: (api.kind as DueLineKind) ?? 'other',
-    label: api.label,
-    amountPaise: api.amount_paise,
+    label: api.label || 'Charge',
+    amountPaise: num(api.amount_paise),
     explanation: api.explanation ?? undefined,
     expandable: api.expandable,
     items: api.items?.map((i) => ({
       label: i.label,
-      amountPaise: i.amount_paise,
+      amountPaise: num(i.amount_paise),
     })),
   };
 }
 
+/** Coerce anything non-finite to 0 — the UI must never render NaN/undefined. */
+const num = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 export function adaptDues(api: ApiDuesSummary): DuesSummary {
   const status = (api.status as DuesSummary['status']) ?? 'due';
   return {
-    monthLabel: api.month_label,
-    totalPaise: api.total_paise,
+    monthLabel: api.month_label || 'This month',
+    totalPaise: num(api.total_paise),
     dueDate: api.due_date,
-    daysUntilDue: api.days_until_due,
+    daysUntilDue: num(api.days_until_due),
     status,
-    lines: api.lines.map(adaptDueLine),
-    walletAppliedPaise: api.wallet_applied_paise,
+    lines: (api.lines ?? []).map(adaptDueLine),
+    walletAppliedPaise: num(api.wallet_applied_paise),
   };
 }
 
@@ -173,10 +179,10 @@ export function adaptLedgerEntry(api: ApiLedgerEntry): LedgerEntry {
   else status = 'due';
   return {
     id: api.id,
-    month: api.month,
-    year: api.year,
-    totalPaise: api.amount_due_paise,
-    paidPaise: api.amount_paid_paise,
+    month: num(api.month),
+    year: num(api.year),
+    totalPaise: num(api.amount_due_paise),
+    paidPaise: num(api.amount_paid_paise),
     status,
     paidOn: api.paid_on ?? null,
   };
@@ -210,7 +216,7 @@ export function adaptPayment(api: ApiPayment): Payment {
   return {
     id: api.id,
     date: api.date ?? '',
-    amountPaise: api.amount_paise,
+    amountPaise: num(api.amount_paise),
     mode,
     reference: api.reference ?? undefined,
     forMonth: api.for_month ?? undefined,

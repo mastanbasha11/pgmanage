@@ -3,6 +3,7 @@
  * included, and documents/people. Move-out starts a 30-day notice.
  */
 import { Alert, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { colors, space } from '../../../lib/theme';
 import { useTenantProfile, useTenantDues } from '../../../lib/tenant/hooks';
 import {
@@ -32,6 +33,7 @@ function fmtDate(iso?: string | null): string {
 }
 
 export default function TenantStay() {
+  const router = useRouter();
   const profile = useTenantProfile();
   const dues = useTenantDues();
   const p = profile.data;
@@ -109,16 +111,7 @@ export default function TenantStay() {
             <Text style={styles.moTitle}>Planning to move out?</Text>
             <Text style={styles.moSub}>30-day notice · deposit estimate shown first</Text>
           </View>
-          <TButton
-            label="Start"
-            small
-            onPress={() =>
-              Alert.alert(
-                'Move-out notice',
-                'Give 30 days’ notice to keep your advance refundable. Talk to your manager to begin — in-app notice is coming soon.',
-              )
-            }
-          />
+          <TButton label="Start" small onPress={() => router.push('/tenant-portal/moveout')} />
         </View>
       </TCard>
     </TScreen>

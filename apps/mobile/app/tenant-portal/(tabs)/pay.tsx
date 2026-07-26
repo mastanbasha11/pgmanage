@@ -4,14 +4,17 @@
  * "Pay now" opens that in the browser; everything else is native + read-only.
  */
 import { useState } from 'react';
-import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, space } from '../../../lib/theme';
 import {
+  useCreateTenantOrder,
   useTenantDues,
   useTenantPayments,
   useTenantPaymentConfig,
+  useTenantProfile,
+  useVerifyTenantPayment,
 } from '../../../lib/tenant/hooks';
 import {
   TScreen,
@@ -22,9 +25,8 @@ import {
   Cap,
   rupees,
 } from '../../../components/tenant-ui';
+import { RazorpayCheckout, type CheckoutOrder } from '../../../components/RazorpayCheckout';
 import type { DueLine, Payment } from '../../../lib/tenant/types';
-
-const WEB_PORTAL = 'https://pgmanage.in/portal';
 
 function fmtDate(iso?: string): string {
   if (!iso) return '';
@@ -37,11 +39,54 @@ export default function TenantPay() {
   const dues = useTenantDues();
   const payments = useTenantPayments();
   const config = useTenantPaymentConfig();
+  const profile = useTenantProfile();
+  const createOrder = useCreateTenantOrder();
+  const verify = useVerifyTenantPayment();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [order, setOrder] = useState<CheckoutOrder | null>(null);
 
   const d = dues.data;
   const online = config.data?.enabled ?? false;
   const paid = d?.status === 'paid';
+
+  const starting = createOrder.isPending;
+
+  function payRent() {
+    if (starting) return;
+    createOrder.mutate(
+      { purpose: 'RENT' },
+      {
+        onSuccess: (o) => {
+          setOrder({
+            orderId: o.order_id,
+            keyId: o.key_id,
+            amountPaise: o.amount_paise,
+            name: profile.data?.property.name || 'PGManage',
+            description: `Rent · ${d?.monthLabel ?? ''}`.trim(),
+            prefillName: profile.data?.name,
+            prefillContact: profile.data?.phone,
+          });
+        },
+        onError: () =>
+          Alert.alert('Could not start payment', 'Please try again in a moment.'),
+      },
+    );
+  }
+
+  function onPaid(r: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  }) {
+    setOrder(null);
+    verify.mutate(r, {
+      onSuccess: () =>
+        Alert.alert('Payment successful', 'Your rent has been recorded.'),
+      // The webhook still records it server-side, so never show a hard failure.
+      onError: () =>
+        Alert.alert('Payment received', 'Confirmation is processing and will reflect shortly.'),
+    });
+  }
 
   const statusTone = paid ? 'money' : 'warm';
   const statusLabel = paid
@@ -74,11 +119,12 @@ export default function TenantPay() {
         {!paid && (
           online ? (
             <TButton
-              label="Pay now"
+              label={starting ? 'Starting…' : 'Pay now'}
               variant="dark"
               icon="lock-closed-outline"
               style={{ marginTop: space.md }}
-              onPress={() => Linking.openURL(WEB_PORTAL)}
+              disabled={starting}
+              onPress={payRent}
             />
           ) : (
             <Text style={styles.offNote}>
@@ -118,6 +164,13 @@ export default function TenantPay() {
           ))
         )}
       </TCard>
+
+      <RazorpayCheckout
+        order={order}
+        onSuccess={onPaid}
+        onClose={() => setOrder(null)}
+        onFailure={(msg) => Alert.alert('Payment not completed', msg)}
+      />
     </TScreen>
   );
 }
