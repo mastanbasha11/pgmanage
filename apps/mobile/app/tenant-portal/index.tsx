@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { api, tenantApi, getApiError } from '../../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -16,10 +17,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 type Step = 'phone' | 'otp' | 'home';
 
 export default function TenantPortalScreen() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Already signed in? Skip straight to the app.
+  useEffect(() => {
+    AsyncStorage.getItem('tenant_access_token').then((tok) => {
+      if (tok) router.replace('/tenant-portal/home');
+    });
+  }, [router]);
 
   async function requestOtp() {
     setLoading(true);
@@ -42,7 +51,7 @@ export default function TenantPortalScreen() {
         code: otp,
       });
       await AsyncStorage.setItem('tenant_access_token', res.data.access_token);
-      setStep('home');
+      router.replace('/tenant-portal/home');
     } catch (err) {
       Alert.alert('Invalid OTP', getApiError(err));
     } finally {
