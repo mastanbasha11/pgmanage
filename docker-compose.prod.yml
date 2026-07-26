@@ -125,6 +125,8 @@ services:
     volumes:
       - ./infrastructure/prod/Caddyfile:/etc/caddy/Caddyfile:ro
       - webdist:/srv/web:ro
+      # Static marketing build (apps/website), shipped to the host by deploy.
+      - /opt/marketing/dist:/srv/marketing:ro
       - caddydata:/data
       - caddyconfig:/config
 

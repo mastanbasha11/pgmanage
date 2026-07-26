@@ -5,6 +5,9 @@ export const site = {
   name: 'PGManage',
   domain: 'pgmanage.in',
   url: 'https://pgmanage.in',
+  // The owner/staff app + resident portal live on their own subdomains.
+  appUrl: 'https://app.pgmanage.in',
+  portalUrl: 'https://my.pgmanage.in',
   // One line, used as the default meta description base and OG fallback.
   tagline: 'Rent, beds and leads for a PG — on one screen.',
 

@@ -1,15 +1,27 @@
 ---
-// Progressive-enhancement demo form. Posts to /api/demo (a Cloudflare Pages
-// Function) as a normal form submit — works with JavaScript disabled. HTML5
-// constraint validation runs client-side with no JS. Honeypot, no CAPTCHA.
+// Demo form → WhatsApp handoff (this buyer lives on WhatsApp). On submit a tiny
+// script packs the six fields into a prefilled wa.me message; with JS disabled
+// the native GET submit still opens the WhatsApp chat. HTML5 validation runs
+// client-side. Honeypot, no CAPTCHA. (On a Cloudflare deploy, functions/api/demo
+// remains available if you prefer a stored lead — swap the action back.)
+import { site } from '@/content/site';
+import Icon from '@/components/Icon.astro';
 interface Props {
   id?: string;
 }
 const { id = 'demo-form' } = Astro.props;
 const tools = ['Excel or Google Sheets', 'A notebook / register', 'WhatsApp only', 'Another software', 'Nothing yet'];
+const waBase = `https://wa.me/${site.contact.whatsapp}`;
 ---
 
-<form class="df" id={id} method="POST" action="/api/demo" novalidate={false}>
+<form
+  class="df"
+  id={id}
+  method="get"
+  action={waBase}
+  data-wa={site.contact.whatsapp}
+  novalidate={false}
+>
   <!-- honeypot: real people never fill this; bots do -->
   <div class="hp" aria-hidden="true">
     <label>Company<input type="text" name="company" tabindex="-1" autocomplete="off" /></label>
@@ -66,10 +78,37 @@ const tools = ['Excel or Google Sheets', 'A notebook / register', 'WhatsApp only
   </div>
 
   <div class="actions">
-    <button class="btn btn--primary" type="submit">Book my demo</button>
+    <button class="btn btn--primary" type="submit">
+      <Icon name="chat" /> Send on WhatsApp
+    </button>
     <p class="fineprint">No card. We load your property before the call.</p>
   </div>
 </form>
+
+<script>
+  // Pack the fields into a prefilled WhatsApp message on submit. No-JS users
+  // fall back to the form's native GET action (opens the chat unprefilled).
+  for (const form of document.querySelectorAll<HTMLFormElement>('form.df')) {
+    form.addEventListener('submit', (e) => {
+      if (!form.reportValidity()) return; // let HTML5 validation block it
+      e.preventDefault();
+      const num = form.dataset.wa;
+      const get = (n: string) =>
+        (form.elements.namedItem(n) as HTMLInputElement | null)?.value.trim() ?? '';
+      if ((form.elements.namedItem('company') as HTMLInputElement)?.value) return; // honeypot
+      const lines = [
+        `Hi PGManage — I'd like a demo.`,
+        ``,
+        `Name: ${get('name')}`,
+        `Phone: +91 ${get('phone')}`,
+        `City: ${get('city')}`,
+        `Beds: ${get('beds')} · Properties: ${get('properties')}`,
+        `Using today: ${get('current_tool')}`,
+      ];
+      window.location.href = `https://wa.me/${num}?text=${encodeURIComponent(lines.join('\n'))}`;
+    });
+  }
+</script>
 
 <style>
   .df {

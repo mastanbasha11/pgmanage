@@ -26,6 +26,7 @@ const isActive = (href: string) => current === href || current.startsWith(href +
     </nav>
 
     <div class="cta-d">
+      <a class="login-link" href={site.appUrl} rel="noopener">Log in</a>
       <a class="btn btn-wa-sm" href={wa} rel="noopener">
         <Icon name="chat" /> WhatsApp
       </a>
@@ -45,6 +46,7 @@ const isActive = (href: string) => current === href || current.startsWith(href +
             </a>
           ))
         }
+        <a class="m-link" href={site.appUrl} rel="noopener">Log in</a>
         <a class="m-link" href={wa} rel="noopener">Chat on WhatsApp</a>
         <a class="btn btn--primary m-cta" href="/demo">Book a demo</a>
       </div>
@@ -119,6 +121,16 @@ const isActive = (href: string) => current === href || current.startsWith(href +
     display: flex;
     align-items: center;
     gap: var(--s2);
+  }
+  .login-link {
+    padding: 8px 12px;
+    font-size: var(--t-base);
+    font-weight: 600;
+    color: var(--mut);
+    text-decoration: none;
+  }
+  .login-link:hover {
+    color: var(--ink);
   }
   .btn-sm,
   .btn-wa-sm {

@@ -1,43 +1,18 @@
 # Caddy configuration for production.
-# Domain comes from $DOMAIN env, e.g. pgmanage.in (root) and www.pgmanage.in.
-# Caddy auto-fetches Let's Encrypt certs at startup and renews them
-# silently every ~60 days.
+#
+# Three hostnames, one backend:
+#   {$DOMAIN}          → marketing site (canonical) + /api kept reachable
+#   app.{$DOMAIN}      → owner / manager app (React SPA)
+#   my.{$DOMAIN}       → resident portal (same SPA, lands on /portal)
+#
+# Caddy auto-fetches Let's Encrypt certs per host and renews silently.
 
 {
 	email {$LETSENCRYPT_EMAIL}
-	# servers { protocols h1 h2 h3 }      # uncomment to enable HTTP/3
 }
 
-# Redirect www → apex
-www.{$DOMAIN} {
-	redir https://{$DOMAIN}{uri} permanent
-}
-
-# Main site: react SPA + reverse-proxied backend
-{$DOMAIN} {
-	encode zstd gzip
-
-	# Security headers
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options nosniff
-		X-Frame-Options DENY
-		Referrer-Policy strict-origin-when-cross-origin
-		Permissions-Policy "camera=(), microphone=(), geolocation=()"
-		# Defense-in-depth CSP — relax if recharts / shadcn break.
-		# Allow blob: in img-src + frame-src so receipt thumbnails and PDF
-		# previews (rendered via URL.createObjectURL on auth-fetched blobs)
-		# can display inline.
-		# Razorpay Checkout (tenant online payments) needs its script + iframe +
-		# analytics host allowlisted, else the checkout window is CSP-blocked:
-		#   script-src  https://checkout.razorpay.com
-		#   frame-src   https://api.razorpay.com https://checkout.razorpay.com
-		#   connect-src https://*.razorpay.com  (lumberjack telemetry)
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' https://checkout.razorpay.com; connect-src 'self' https://*.razorpay.com; frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com; object-src 'self' blob:; frame-ancestors 'none'"
-		-Server
-	}
-
-	# Backend API
+# ── reusable snippets ────────────────────────────────────────────────────────
+(api) {
 	@api path /api/* /health /docs /openapi.json
 	handle @api {
 		reverse_proxy backend:8000 {
@@ -50,22 +25,106 @@ www.{$DOMAIN} {
 			}
 		}
 	}
+}
 
-	# Static React build — fall through to index.html for SPA routes
+(appsec) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		X-Robots-Tag "noindex, nofollow"
+		# Razorpay Checkout (tenant payments) needs its script/iframe/telemetry.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' https://checkout.razorpay.com; connect-src 'self' https://*.razorpay.com; frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com; object-src 'self' blob:; frame-ancestors 'none'"
+		-Server
+	}
+}
+
+(spa) {
 	handle {
 		root * /srv/web
 		try_files {path} /index.html
 		file_server
 	}
-
-	# Long-cache hashed assets
 	@hashed path /assets/* /icon-*.png /manifest.webmanifest
 	header @hashed Cache-Control "public, max-age=31536000, immutable"
-
-	# Don't cache the SPA shell
 	@shell path /index.html /sw.js /registerSW.js
 	header @shell Cache-Control "public, max-age=0, must-revalidate"
+}
 
+# ── www → apex ───────────────────────────────────────────────────────────────
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
+# ── marketing site (canonical, indexed) ──────────────────────────────────────
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Marketing CSP: self + inline (styles + the small calculator script are
+		# inlined by Astro). form-action allows the demo form's WhatsApp handoff.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'self'; form-action 'self' https://wa.me; frame-ancestors 'none'"
+		-Server
+	}
+
+	# Keep the backend reachable on the apex so already-registered webhooks and
+	# embedded website-lead snippets pointed at pgmanage.in/api keep working.
+	import api
+
+	# Grace redirects for the app's old entry points on the apex.
+	redir /auth /auth/login 302
+	@auth path /auth /auth/*
+	redir @auth https://app.{$DOMAIN}{uri} 302
+	@portal path /portal /portal/*
+	redir @portal https://my.{$DOMAIN}{uri} 302
+
+	# Static marketing build (Astro, directory-style output).
+	handle {
+		root * /srv/marketing
+		try_files {path} {path}/index.html {path}.html /404.html
+		file_server
+	}
+
+	@static path /media/* /fonts/* /og/* /_astro/*
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}
+
+# ── owner / manager app ──────────────────────────────────────────────────────
+app.{$DOMAIN} {
+	encode zstd gzip
+	import appsec
+	import api
+	import spa
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}
+
+# ── resident portal ──────────────────────────────────────────────────────────
+my.{$DOMAIN} {
+	encode zstd gzip
+	import appsec
+	import api
+
+	# Land the bare host on the portal.
+	@root path /
+	redir @root /portal 302
+
+	import spa
 	log {
 		output stdout
 		format console
