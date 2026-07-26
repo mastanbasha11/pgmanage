@@ -227,7 +227,7 @@ export default function WhatsAppPage() {
               <Label htmlFor="upiVpa">UPI VPA (for rent reminders)</Label>
               <Input
                 id="upiVpa"
-                placeholder="loopliving@okhdfc"
+                placeholder="yourpg@okhdfc"
                 value={upiVpa}
                 onChange={(e) => setUpiVpa(e.target.value)}
                 disabled={settingsLoading}

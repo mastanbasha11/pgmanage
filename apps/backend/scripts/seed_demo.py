@@ -133,8 +133,35 @@ async def main() -> None:
         # Close books on the 28th so the fiscal-aware dashboards default to the
         # *current* calendar month (rich, mostly-collected demo data) rather than
         # rolling to an empty upcoming month. Re-run the seed to refresh for a
-        # later date if the demo is shown near month-end.
-        await ins("UPDATE properties SET settlement_day = 28 WHERE id = :id", {"id": prop_id})
+        # later date if the demo is shown near month-end. + ROI plan so the ROI
+        # screen has a real payback story.
+        await ins(
+            """UPDATE properties SET
+                   settlement_day = 28,
+                   roi_investment_paise = 750000000,     -- ₹75,00,000 fit-out + deposit
+                   roi_target_months = 36,
+                   roi_grace_months = 4,
+                   roi_lessor_rent_paise = 20000000,      -- ₹2,00,000 / mo to the building owner
+                   roi_plan_start_date = :start,
+                   roi_lease_term_months = 60,
+                   roi_annual_rent_hike_pct = 6.0
+               WHERE id = :id""",
+            {"id": prop_id, "start": TODAY - timedelta(days=14 * 30)},
+        )
+
+        # Team & Owners for this property (profit split + Paid To / Paid By).
+        for tname, tphone, trole, share, capital, so in [
+            ("Aarav Mehta", "+919000000000", "OWNER", 60, 450000000, 0),   # ₹45L capital
+            ("Priya Nair", "+919000000010", "OWNER", 40, 300000000, 1),    # ₹30L capital
+            ("Ramesh Kumar", "+919000000011", "MANAGER", None, None, 2),
+            ("Neha Sharma", "+919000000012", "COLLECTOR", None, None, 3),
+        ]:
+            await ins(
+                """INSERT INTO property_team (property_id, name, phone, role, share_pct, capital_paise, sort_order)
+                   VALUES (:pid,:name,:phone,CAST(:role AS team_role_enum),:share,:cap,:so)""",
+                {"pid": prop_id, "name": tname, "phone": tphone, "role": trole,
+                 "share": share, "cap": capital, "so": so},
+            )
 
         floors = {}
         for n, name in [(0, "Ground Floor"), (1, "1st Floor"), (2, "2nd Floor"), (3, "3rd Floor")]:
@@ -259,6 +286,9 @@ async def main() -> None:
         # Current month mostly paid (healthy collection); two prior months all paid.
         # Tenant 0 = overdue (rich Pay screen); tenant 1 = fully paid (calm state).
         modes = ["UPI", "UPI", "BANK_TRANSFER", "CASH", "UPI"]
+        # Real staff names so "Cash collected by person" reads like a team, not
+        # a "Front desk" label — and matches "Expenses by person".
+        CASH_COLLECTORS = ["Ramesh Kumar", "Priya Nair", "Neha Sharma"]
         for mi in range(3):
             month, year = months_back(mi)
             due = date(year, month, 5)
@@ -295,23 +325,23 @@ async def main() -> None:
                         {"org": org_id, "pid": prop_id, "tid": t["id"], "amt": paid,
                          "mode": "UPI" if online else mode,
                          "ref": f"rzp_demo{mi}{ti}" if online else f"{mode[:3]}/{year}{month:02d}/{ti:03d}",
-                         "paidto": "Online (Razorpay)" if online else "Front desk",
+                         "paidto": "Online (Razorpay)" if online else CASH_COLLECTORS[ti % len(CASH_COLLECTORS)],
                          "m": month, "y": year, "col": collected, "by": sup_id,
                          "idem": u()},
                     )
 
         # ── 8. expenses (current month, some pending approval) ─────────────────
         EXP = [
-            ("Groceries", 2404600, "chicken, vegetables, rice — weekly", "More Supermarket", "Ramesh", "APPROVED", "UPI"),
-            ("Salaries", 1500000, "Cook salary — July", "—", "Aarav", "APPROVED", "BANK_TRANSFER"),
-            ("Salaries", 1200000, "Housekeeping staff — July", "—", "Aarav", "APPROVED", "BANK_TRANSFER"),
-            ("Electricity", 928400, "BESCOM bill — June", "BESCOM", "Priya", "APPROVED", "UPI"),
-            ("Groceries", 335000, "Gas + milk top-up", "Local dairy", "Ramesh", "PENDING", "CASH"),
-            ("Maintenance", 312000, "Duplicate keys + plumbing", "MannaSmith", "Ramesh", "PENDING", "CASH"),
-            ("Internet", 189900, "ACT Fibernet — July", "ACT", "Priya", "APPROVED", "UPI"),
-            ("Water", 240000, "Tanker water — 2 trips", "Sri Sai Tankers", "Ramesh", "APPROVED", "CASH"),
-            ("Gas", 220000, "Commercial cylinders x2", "Bharat Gas", "Ramesh", "APPROVED", "UPI"),
-            ("Maintenance", 74000, "Ceiling fan replacement 203", "Bajaj", "Priya", "APPROVED", "UPI"),
+            ("Groceries", 2404600, "chicken, vegetables, rice — weekly", "More Supermarket", "Ramesh Kumar", "APPROVED", "UPI"),
+            ("Salaries", 1500000, "Cook salary — July", "—", "Aarav Mehta", "APPROVED", "BANK_TRANSFER"),
+            ("Salaries", 1200000, "Housekeeping staff — July", "—", "Aarav Mehta", "APPROVED", "BANK_TRANSFER"),
+            ("Electricity", 928400, "BESCOM bill — June", "BESCOM", "Priya Nair", "APPROVED", "UPI"),
+            ("Groceries", 335000, "Gas + milk top-up", "Local dairy", "Ramesh Kumar", "PENDING", "CASH"),
+            ("Maintenance", 312000, "Duplicate keys + plumbing", "MannaSmith", "Ramesh Kumar", "PENDING", "CASH"),
+            ("Internet", 189900, "ACT Fibernet — July", "ACT", "Priya Nair", "APPROVED", "UPI"),
+            ("Water", 240000, "Tanker water — 2 trips", "Sri Sai Tankers", "Ramesh Kumar", "APPROVED", "CASH"),
+            ("Gas", 220000, "Commercial cylinders x2", "Bharat Gas", "Ramesh Kumar", "APPROVED", "UPI"),
+            ("Maintenance", 74000, "Ceiling fan replacement 203", "Bajaj", "Priya Nair", "APPROVED", "UPI"),
         ]
         for cat, amt, desc, vendor, paidby, appr, mode in EXP:
             days_ago = hash(desc) % 24
