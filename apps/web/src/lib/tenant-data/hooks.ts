@@ -119,6 +119,28 @@ export function useTenantPayments(): UseQueryResult<Payment[]> {
   });
 }
 
+export interface DepositInfo {
+  securityDepositPaise: number;
+  advancePaidPaise: number;
+}
+
+/** Deposit + advance held — from /ledger, for the Home "Security deposit" card. */
+export function useTenantDepositInfo(): UseQueryResult<DepositInfo> {
+  return useQuery({
+    queryKey: ['tenant-deposit-info'] as const,
+    queryFn: async () => {
+      const r = await tenantApi.get<{
+        security_deposit_paise?: number;
+        advance_paid_paise?: number;
+      }>('/ledger');
+      return {
+        securityDepositPaise: Number(r.data.security_deposit_paise) || 0,
+        advancePaidPaise: Number(r.data.advance_paid_paise) || 0,
+      };
+    },
+  });
+}
+
 export function useTenantLedger(): UseQueryResult<LedgerEntry[]> {
   return useQuery({
     queryKey: k.ledger,
