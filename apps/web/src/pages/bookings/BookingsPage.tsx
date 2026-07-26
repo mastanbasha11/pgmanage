@@ -40,11 +40,11 @@ import {
   type PaymentMode,
 } from '@/hooks/useBookings';
 import { useAuthStore } from '@/store/auth';
+import { useFiscalMonthState } from '@/hooks/useFiscalMonth';
 import { useToast } from '@/hooks/useToast';
 import {
   formatPaise,
   formatDate,
-  currentMonthYear,
   rupeesToPaise,
 } from '@/lib/utils';
 
@@ -379,9 +379,9 @@ function BookingDialog({
 
 export default function BookingsPage() {
   const { selectedPropertyId } = useAuthStore();
-  const cmy = currentMonthYear();
-  const [month, setMonth] = useState(cmy.month);
-  const [year, setYear] = useState(cmy.year);
+  const { month, year, setMonth, setYear } = useFiscalMonthState(
+    selectedPropertyId ?? undefined,
+  );
   const [kindFilter, setKindFilter] = useState<'ALL' | BookingKind>('ALL');
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

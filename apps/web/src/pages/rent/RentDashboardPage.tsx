@@ -36,10 +36,10 @@ import {
   type PaymentMode,
 } from '@/hooks/usePayments';
 import { useAuthStore } from '@/store/auth';
+import { useFiscalMonthState } from '@/hooks/useFiscalMonth';
 import {
   formatPaise,
   monthName,
-  currentMonthYear,
   rupeesToPaise,
   shortRoomType,
 } from '@/lib/utils';
@@ -518,9 +518,9 @@ interface OverdueItem {
 export default function RentDashboardPage() {
   const { selectedPropertyId, canAccessFinancials } = useAuthStore();
   const showMoneyTotals = canAccessFinancials();
-  const { month: cm, year: cy } = currentMonthYear();
-  const [month, setMonth] = useState(cm);
-  const [year, setYear] = useState(cy);
+  const { month, year, setMonth, setYear } = useFiscalMonthState(
+    selectedPropertyId ?? undefined,
+  );
   const [statusFilter, setStatusFilter] = useState<LedgerStatus>('ALL');
   const [collectorFilter, setCollectorFilter] = useState<string>('ALL');
   const [activeTab, setActiveTab] = useState<RentTab>('tenants');

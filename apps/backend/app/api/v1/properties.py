@@ -131,6 +131,94 @@ async def list_properties(
     return {"items": [dict(r) for r in rows], "total": len(rows)}
 
 
+@router.get(
+    "/billing/current-period",
+    summary="Current fiscal month/year (settlement-aware default for dashboards)",
+)
+async def current_fiscal_period(
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+    property_id: UUID | None = Query(
+        None, description="Scope to one property; omit for the all-properties default."
+    ),
+):
+    """The month the financial dashboards should default to.
+
+    Fiscal months close on each property's `settlement_day` (or a per-month
+    override in `billing_periods`). Once today (IST) is past that close, the
+    current month's books are shut, so the natural default becomes the *next*
+    month — the period people are now operating in. E.g. settlement day 18:
+    on Jul 18 it still shows July; from Jul 19 it shows August.
+
+    For the all-properties view we only roll forward once the LAST property has
+    closed (the latest close date), so a single early-closing property doesn't
+    prematurely flip the aggregate dashboards.
+    """
+    from calendar import monthrange
+    from datetime import datetime
+
+    import pytz
+
+    today = datetime.now(pytz.timezone("Asia/Kolkata")).date()
+    month, year = today.month, today.year
+
+    if property_id:
+        props = (
+            await db.execute(
+                text(
+                    "SELECT id, settlement_day FROM properties "
+                    "WHERE id = :id AND org_id = :org"
+                ),
+                {"id": str(property_id), "org": str(ctx.org_id)},
+            )
+        ).mappings().fetchall()
+    else:
+        props = (
+            await db.execute(
+                text(
+                    "SELECT id, settlement_day FROM properties "
+                    "WHERE org_id = :org AND is_active = true"
+                ),
+                {"org": str(ctx.org_id)},
+            )
+        ).mappings().fetchall()
+
+    if not props:
+        return {"month": month, "year": year, "rolled": False}
+
+    last_day = monthrange(year, month)[1]
+    close_dates: list[date] = []
+    for p in props:
+        override = (
+            await db.execute(
+                text(
+                    "SELECT close_date FROM billing_periods "
+                    "WHERE property_id = :pid AND period_month = :m AND period_year = :y"
+                ),
+                {"pid": str(p["id"]), "m": month, "y": year},
+            )
+        ).scalar_one_or_none()
+        if override:
+            close_dates.append(override)
+        else:
+            sd = min(int(p["settlement_day"] or 10), last_day)
+            close_dates.append(date(year, month, sd))
+
+    # Roll forward only once every property in scope has closed.
+    close_date = max(close_dates)
+    rolled = today > close_date
+    if rolled:
+        month, year = (1, year + 1) if month == 12 else (month + 1, year)
+
+    return {
+        "month": month,
+        "year": year,
+        "rolled": rolled,
+        "close_date": str(close_date),
+        "today": str(today),
+    }
+
+
 @router.post("/properties", status_code=status.HTTP_201_CREATED, summary="Create property")
 async def create_property(
     body: PropertyCreate,

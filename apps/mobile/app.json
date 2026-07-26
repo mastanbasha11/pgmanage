@@ -22,7 +22,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.pgmanage.app",
-      "buildNumber": "3"
+      "buildNumber": "3",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -50,6 +53,13 @@
         {
           "icon": "./assets/notification-icon.png",
           "color": "#0D9488"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "PGManage needs access to your photos so you can attach expense receipts and tenant documents.",
+          "cameraPermission": "PGManage needs camera access so you can photograph expense receipts and tenant documents."
         }
       ]
     ],

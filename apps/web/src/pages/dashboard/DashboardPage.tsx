@@ -12,7 +12,7 @@
  *   6. Cash collected / Expenses by person (ranked bars)
  *   7. Overdue alert + Followups worklist
  */
-import { useState } from 'react';
+import { useFiscalMonthState } from '@/hooks/useFiscalMonth';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Building2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -36,7 +36,7 @@ import { usePaybackPlan } from '@/hooks/usePaybackPlan';
 import { useDashboardSummary, useCashflow, useOccupancyTrend } from '@/hooks/useDashboard';
 import { useProperties } from '@/hooks/useProperties';
 import { useAuthStore } from '@/store/auth';
-import { formatPaise, currentMonthYear, monthName } from '@/lib/utils';
+import { formatPaise, monthName } from '@/lib/utils';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -134,9 +134,9 @@ function MoneyCard({
 export default function DashboardPage() {
   const { selectedPropertyId, canAccessFinancials, user } = useAuthStore();
   const navigate = useNavigate();
-  const cmy = currentMonthYear();
-  const [month, setMonth] = useState(cmy.month);
-  const [year, setYear] = useState(cmy.year);
+  const { month, year, setMonth, setYear } = useFiscalMonthState(
+    selectedPropertyId ?? undefined,
+  );
 
   if (!canAccessFinancials()) {
     return <Navigate to={user?.role === 'MARKETING' ? '/leads' : '/tenants'} replace />;

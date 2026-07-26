@@ -112,11 +112,11 @@ import {
   type Expense,
 } from '@/hooks/useExpenses';
 import { useAuthStore } from '@/store/auth';
+import { useFiscalMonthState } from '@/hooks/useFiscalMonth';
 import PaidPersonSelect from '@/components/PaidPersonSelect';
 import {
   formatPaise,
   formatDate,
-  currentMonthYear,
   rupeesToPaise,
 } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
@@ -547,9 +547,9 @@ export default function ExpensesPage() {
   const [viewingReceipt, setViewingReceipt] = useState<string | null>(null);
   const { selectedPropertyId, canApproveExpenses, user } = useAuthStore();
   const isOwnerOrPartner = user?.role === 'OWNER' || user?.role === 'PARTNER';
-  const cmy = currentMonthYear();
-  const [month, setMonth] = useState(cmy.month);
-  const [year, setYear] = useState(cmy.year);
+  const { month, year, setMonth, setYear } = useFiscalMonthState(
+    selectedPropertyId ?? undefined,
+  );
 
   // Filter / search state
   const [searchInput, setSearchInput] = useState('');
