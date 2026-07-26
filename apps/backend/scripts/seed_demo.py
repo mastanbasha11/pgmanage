@@ -130,7 +130,11 @@ async def main() -> None:
                VALUES (:id,:org,'Greenview Coliving','142, 27th Main, HSR Layout','Bengaluru','Karnataka','560102',true)""",
             {"id": prop_id, "org": org_id},
         )
-        await ins("UPDATE properties SET settlement_day = 5 WHERE id = :id", {"id": prop_id})
+        # Close books on the 28th so the fiscal-aware dashboards default to the
+        # *current* calendar month (rich, mostly-collected demo data) rather than
+        # rolling to an empty upcoming month. Re-run the seed to refresh for a
+        # later date if the demo is shown near month-end.
+        await ins("UPDATE properties SET settlement_day = 28 WHERE id = :id", {"id": prop_id})
 
         floors = {}
         for n, name in [(0, "Ground Floor"), (1, "1st Floor"), (2, "2nd Floor"), (3, "3rd Floor")]:
