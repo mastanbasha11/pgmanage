@@ -1,105 +1,105 @@
 # PGManage — Handoff
 
-_Last updated: 2026-07-25 · main @ `a543755` (deployed to prod)_
+_Last updated: 2026-07-26 · `main` @ `eff4319` (deployed)_
 
 Multi-tenant SaaS for Paying-Guest / hostel owners in India. Owners manage
-properties, beds, tenants, rent, expenses, bookings and leads; tenants get a
-self-service portal. Turborepo: `apps/backend` (FastAPI), `apps/web` (React/Vite),
-`apps/mobile` (Expo — **staff-only**), `packages/shared`, `infrastructure/prod`.
+properties, beds, tenants, rent, expenses, bookings and leads; residents get a
+self-service portal (web + mobile). Turborepo: `apps/backend` (FastAPI),
+`apps/web` (React/Vite — owner app **and** resident portal), `apps/mobile`
+(Expo — staff app **and** resident app), `apps/website` (Astro marketing site,
+**in progress**), `packages/shared`, `infrastructure/prod`.
 
 ---
 
 ## 1. Current project state
 
-### Live in production (pgmanage.in)
-- **Backend + web + Caddy** via `docker-compose.prod.yml`, host `ubuntu@13.126.139.161`, repo at `/opt/pgmanage`.
-- **Tenant online payments (Razorpay)** — shipped this session. Owners connect their own Razorpay account under **Settings → Payments**; tenants pay rent/advance/deposit from the web portal. Webhook is the source of truth. Not yet exercised end-to-end with real keys — waiting on the owner's Razorpay test keys / KYC. See `docs/tenant-online-payments.md`.
-- **Leads scalable worklist** — shipped this session. Replaced the Kanban-as-default with a priority worklist (List/Board/Split). Board (drag-to-move) preserved as a view.
-- **Web redesign** (density fix + new token system) and **dashboard/rent/tenants/bookings/expenses** revamps — shipped earlier this session.
-- **Backend fixes**: `roi-by-room` was 500ing on every call (nonexistent `rooms.is_active` column + asyncpg int/text bind) — fixed + tested; rate limiter re-keyed **per authenticated user** (was per-IP, so colleagues behind one office NAT shared a 60/min bucket) and raised to 300/min (prod env overrides to 120).
-- **Leads data**: `NEGOTIATING` and `BOOKED` removed from the pipeline UI (enum kept); one-time data fix moved 288 `NEW` → `CONTACTED` for the LOOP org. Later: worklist defaults to 50/page with "All" as the default view; Score column + Hot view removed; **live CSV export** and **bulk WhatsApp** (editable `{name}` template) added; **daily auto-close** of leads idle 30+ days. One-time data fixes on LOOP: all 339 leads assigned to **Shabeera** (sole manager), and the auto-close run closed 22 stale leads.
+### Domains (production)
+Three hostnames, one backend + SPA (Caddy `infrastructure/prod/Caddyfile`, 3-host config):
+- **`pgmanage.in`** → marketing site (Astro, `apps/website`) — **owner is actively building this**.
+- **`app.pgmanage.in`** → owner / manager app (the React SPA).
+- **`my.pgmanage.in`** → resident portal (same SPA, lands on `/portal`).
 
-### Mobile
-- **Staff app** fully redesigned to a new mock (all screens), first charts added (`react-native-svg`). Latest APK: v1.1.1 / versionCode 3, from commit `fb4230d`, EAS `preview` profile → APK, API `https://pgmanage.in/api/v1`.
-- **Tenant mobile portal is dead v0 scaffolding** — unreachable and out of sync with the API. Mobile is effectively staff-only. Tenants use the **web** portal.
+Prod host `ubuntu@13.126.139.161`, repo at `/opt/pgmanage`, behind Caddy.
+
+### Web (`apps/web`)
+- **Owner app** — dashboards default to the **current fiscal month** (settlement-aware: rolls to next month once a property's close day passes; honours `billing_periods` overrides; IST). Leads is a **priority worklist** (list/board/split, saved views, live CSV export, bulk WhatsApp, "Added" date filter, newest-first default, auto-close of leads idle 30+ days). Payments/settings/rent/bookings/expenses revamped earlier.
+- **Resident portal** (`pages/tenant-portal/**`) — repainted to **Forest & Sage** via a *scoped* theme (`.tenant-forest`, see constraints) so the owner app is untouched. **Home is restructured** to the two-column `pgmanageresidentweb` reference (forest rent-anchor card, quick actions, open requests, notice + a room / food / deposit / Wi-Fi sidebar). **Other portal screens are recoloured but NOT yet restructured** — see Pending.
+- Online payments (Razorpay) shipped: owners connect their own account under Settings → Payments; residents pay rent/advance/deposit; webhook is source of truth.
+
+### Mobile (`apps/mobile`)
+- **Staff app** — repainted to Forest & Sage (token remap; Ionicons, not the mock SVGs).
+- **Resident app** — **fully built** to `looptenantcalm` (was dead scaffolding): bottom tabs **Home / Pay / Stay / Food / More**, plus **Get Help** (raises a real complaint), **My Requests** (list + timeline), **Move-out** (refund estimate + `/me/notice`). **In-app Razorpay checkout via a WebView modal** (Expo-friendly, no bare native module; webhook still records). OTP login kept as-is. Data layer ported from the web portal (`lib/tenant/*`). Money + every numeric adapter are **NaN-proofed**.
+- **Latest build:** Android **preview APK** from `2d3326d` — https://expo.dev/artifacts/eas/32Vv_PtmUozEsADnJvi_7MDIedkdYk3ewmAgzJnrPFQ.apk (installable, points at prod API).
 
 ### Tests / gates
-- Backend: `poetry run pytest` — **342 passing**, **6 pre-existing failures** (5 in `test_auth.py`, 1 in `test_expenses.py`) that also fail on a clean `main` (verified via `git stash`). Not caused by recent work.
-- Mobile: `npx tsc --noEmit` clean; `npx jest` 77 passing.
-- Web: `npx tsc --noEmit` clean, `npm run build` succeeds. **No test runner or ESLint config exists in `apps/web` or `apps/mobile`** — the `lint` scripts have never worked; `tsc` + `build` are the real gates.
+- Backend: `poetry run pytest` — green except **6 pre-existing failures** (5 auth, 1 expenses) that also fail on clean `main`.
+- Mobile: `npx tsc --noEmit` clean; `npx jest` **94 passing** (incl. tenant money/adapter NaN tests + 7-screen render smoke tests).
+- Web: `npx tsc --noEmit` clean, `npm run build` succeeds. **No web test runner / ESLint** exists — `tsc` + `build` are the gates.
 
 ---
 
 ## 2. Decisions made (with rationale)
 
-- **Payments use a per-owner Razorpay model, not a platform marketplace.** Each PG owner connects their own account; money flows tenant→owner and the platform never holds funds — this avoids needing an RBI Payment Aggregator licence. Credentials live per-org on `public.organisations`; secrets are write-only over the API and resolve Secrets-Manager-ARN → plaintext (DB encrypted at rest), mirroring the WhatsApp token pattern.
-- **Payments v1 scope = RENT / ADVANCE / DEPOSIT.** Amounts are computed server-side (rent = current-month outstanding; deposit = plan deposit minus already-paid, with a pay-twice guard; advance = client amount capped at 12× rent). Client amounts are never trusted.
-- **Exactly-once payment recording** via `idempotency_key = "rzp_<payment_id>"` (that column is `UNIQUE`), so the verify-callback and the webhook converge on one row. No org-schema change — the existing `payments` table is reused.
-- **Razorpay integration uses `httpx.AsyncClient` + stdlib `hmac`, not the official SDK** — the SDK is synchronous and would block the event loop. Zero new dependencies.
-- **Leads: worklist over Kanban at scale.** At 328 leads growing ~40/wk, browsing a board doesn't work; the default is now a priority-sorted table where the ~20 needing action rise to the top. The Kanban is kept as the "Board" view (render-prop) so drag-to-move survives. Lead **score** is a client-side heuristic (`leadScore.ts`) — the backend has no score column.
-- **`NEGOTIATING` + `BOOKED` dropped from the pipeline UI** (this PG's flow is New → Contacted → Site Visited → Converted/Lost). Both remain valid backend enum values, so legacy leads don't break.
-- **Money is integer paise everywhere** — never floats. Razorpay's native unit is also paise, so no conversion.
-- **Mobile is staff-only; the tenant experience is the web `/portal/*` app.** The mobile tenant folder is v0 scaffolding.
-- **Design tokens are shared between web and mobile** (`apps/mobile/lib/theme.ts` mirrors `apps/web/src/index.css`) plus a shared `chartColors`/`EXPENSE_COLORS` palette, so a category is the same colour on both apps.
+- **One "Forest & Sage" design system for both resident apps** (web + mobile), from `looptokens`: forest `#1C443A` is the only chrome colour, sage `#F4F7F5` surfaces, white cards on hairline borders (not shadows), **green reserved for money**, **apricot for "needs attention"**, low-chroma status colours so a busy screen still reads calm.
+- **Web portal repaint is a *scoped* theme, not a global change.** A `.tenant-forest` class on the portal root overrides the shadcn HSL vars + remaps the ~75 literal palette classes the screens use — all scoped, so the **owner app keeps its slate/teal palette**. Re-skinned everything with near-zero markup churn.
+- **Mobile keeps Ionicons** (an established line-icon family) rather than copying the mock's raw SVGs — satisfies "unique, not AI-generated, don't use these exact icons".
+- **In-app payment = WebView + Razorpay checkout.js**, not `react-native-razorpay`. Avoids a bare native module / config-plugin, works in EAS builds and Expo Go. The **webhook remains the source of truth**, so a closed modal still records the payment.
+- **Per-owner Razorpay** (money flows tenant→owner; platform never holds funds → no RBI PA licence). Exactly-once via `idempotency_key = rzp_<payment_id>`.
+- **Dashboards default to the fiscal month** (`GET /billing/current-period`), not the calendar month.
+- **Whoever adds a lead owns it**; leads idle 30+ days auto-close to LOST with a flagged `lost_reason`.
+- **Money is integer paise everywhere**; UI formatters + adapters coerce non-finite input to 0 (kills the ₹NaN class of bug).
 
 ---
 
 ## 3. Pending tasks / backlog
 
-### Payments (highest-value follow-ups)
-- **Owner completes Razorpay KYC** (PAN + bank + IFSC) to move from test to live money — on the owner, ~1–2 days. Guided in Settings → Payments Step 5.
-- **Real end-to-end test** with the owner's Razorpay test keys (the one thing that couldn't be automated).
-- Refunds from the portal (owner-side refund flow exists; wiring a Razorpay refund call is a follow-up); partial rent payments across charge types; **mobile** tenant payments (blocked on the mobile tenant app rebuild).
+### Web resident portal (highest priority for the resident launch)
+- **Restructure the remaining portal screens to the reference** — only **Home** is done. Pay / My stay / Food / Services (requests) / Notices / Profile / Refer are *recoloured* but still the old simpler layout. Same pattern as Home (two-column, cards, forest anchor).
+- **Topbar** from the reference (sticky search + "Rent due · Pay" chip + notifications + profile) isn't built — the desktop layout has no topbar yet; Home has header action buttons instead.
+- Structured **Today's menu** on Home is a link, not per-slot items (backend meals is a stub; only a menu image/PDF upload exists).
 
-### Tenant side
-- **Real OTP delivery (WhatsApp/SMS)** — currently email-only, and dev returns the code inline (no real auth barrier). This blocks everything else on the tenant side.
-- **Tenant self-serve ID-proof upload** — only an owner/staff endpoint exists today; complaint photo upload proves the plumbing.
-- **Multi-org tenants are refused on web** (told to "use the app", which is the dead mobile app) — no working door for that segment.
-- **Rebuild the mobile tenant portal** on the new design system (biggest effort; deferrable since web portal is responsive).
-- Backend stubs with finished web UI waiting on data: visitors, referrals, notifications, meals schedule, community (events/residents/partners).
+### Mobile
+- **Real device test of the in-app Razorpay checkout** (order → pay with a test key → shows in history) — the one thing that needs a device.
+- **iOS** build: `preview` is simulator-only; use `production` (needs Apple Developer credentials — run interactively). **Android `production` app-bundle** can be built anytime (uses existing keystore).
+- Move-out full timeline / requests photo upload; push notifications; iOS build config.
 
-### Leads
-- **True virtualization for 5,000+** — the worklist currently client-paginates the fetched set (`limit: 500`, 50/page); for much larger tenants, add server pagination or `react-window`.
-- **Export is live** (client-side CSV of the filtered+sorted set). The **Automations** button is still a stub — the one shipped automation is the daily auto-close job below.
-- **Auto-close stale leads**: a daily scheduler job (07:30 IST, `app/tasks/lead_auto_lost.py`) moves any open lead untouched 30+ days with no pending follow-up to LOST, stamped `lost_reason = "Auto-closed: no activity for 30+ days"` (the worklist shows an `auto` badge on these). Tune the window via `IDLE_DAYS`. If owners later want a heads-up before it closes, add a warning state a few days prior.
-
-### Mobile (staff)
-- Expenses per-row edit/delete/approve/receipt-upload; push notifications; iOS build config.
+### Backend / tenant
+- **Real OTP delivery (WhatsApp/SMS)** — currently email + inline dev code. Blocks tenant onboarding at scale.
+- Refunds from the portal; multi-org resident door on web.
 
 ### Platform / CI
-- **6 pre-existing backend test failures** (5 auth, 1 expenses) — unrelated to recent work; worth fixing.
-- **No ESLint config** in web or mobile — the `lint` scripts are broken repo-wide.
-- Consider a CI check that diffs frontend hook param/field names against the FastAPI routers — this class of drift bit ~10 times this session (see constraints).
-- **Deploys depend on the sandbox's rotating outbound IP** being whitelisted in the EC2 security group each time. Wiring `.github/workflows/deploy-prod.yml` with `SSH_HOST`/`SSH_USER`/`SSH_KEY`/`PROD_DOMAIN` secrets would remove this (the private key must be pasted by the user directly).
+- 6 pre-existing backend test failures; no ESLint in web/mobile; wire GH Actions deploy secrets (removes the SSH IP-whitelist dance).
 
 ---
 
-## 4. Important constraints (read before touching prod or the data layer)
+## 4. Important constraints (read before touching prod / the data layer)
 
-### Deploy
-- **Always** deploy with `sudo docker compose -f docker-compose.prod.yml --env-file /etc/pgmanage/.env <cmd>`. The env file is root-owned at `/etc/pgmanage/.env`, outside the repo. Omitting it recreates containers with **blank env** → `RS256_PRIVATE_KEY must be set` → backend down → Caddy dependency fails → site offline. (This caused a ~2-min outage once.)
-- **Migrations:** run via the profiled service — `… --profile migrate run --build --rm migrate`. **The `--build` is required** — the migrate image is cached and won't contain a new migration file otherwise (this silently no-ops and leaves the DB a version behind).
-- **The Caddyfile is bind-mounted** (`./infrastructure/prod/Caddyfile`). A CSP/config change needs `… restart caddy` — a plain `up -d` won't reload it.
-- **Web deploys**: `up -d --build web-build` rebuilds the SPA into the volume Caddy serves. Users may need a hard refresh (PWA service worker caches the old bundle).
-- Prod host `13.126.139.161`, key `~/.ssh/pgmanage_prod_ed25519`. The sandbox's outbound IP rotates and must be whitelisted (port 22) in the EC2 security group each session.
+### Deploy — prod has UNCOMMITTED infra changes; do not clobber them
+- **`infrastructure/prod/Caddyfile` and `docker-compose.prod.yml` are modified in the prod working tree** (the 3-subdomain Caddy config + a `/opt/marketing/dist:/srv/marketing` volume for the marketing site). A plain `git pull` **aborts**. To deploy an `apps/web`/`apps/backend` change: `git stash push <those two files>` → `git pull --ff-only` → `git stash pop` (safe because app commits don't touch them), then rebuild. **Never force-checkout those files.**
+- **Always** deploy with `sudo docker compose -f docker-compose.prod.yml --env-file /etc/pgmanage/.env <cmd>` (env file is root-owned at `/etc/pgmanage/.env`; omitting it recreates containers with blank env → backend down).
+- **Web deploy:** `up -d --build web-build` (rebuilds the SPA into the volume Caddy serves; does NOT touch Caddy, so it's safe re: the subdomain config). Users need a hard refresh (PWA caches the old bundle).
+- **Caddyfile is bind-mounted** — a config change needs `… restart caddy`. Don't recreate `caddy` casually: the compose adds a `/opt/marketing/dist` mount that must exist or the container fails to start.
+- **Migrations:** `… --profile migrate run --build --rm migrate` — the **`--build` is required** (cached image otherwise misses new migrations).
+- Prod host `13.126.139.161`, key `~/.ssh/pgmanage_prod_ed25519`. **The sandbox's outbound IP rotates and must be whitelisted (port 22) each session** — check `curl api.ipify.org` and ask the owner to add the `/32`.
+- The local dev branch is often **`feat/marketing-website`**, not `main`. Push app commits with `git push origin HEAD:main`.
 
-### Data model
-- **Per-org Postgres schema multi-tenancy** (`org_<uuid_with_underscores>`). `public` holds only `organisations`, `subscription_plans`, `platform_users`, `tenant_identity*`. Every protected request does `SET LOCAL search_path` via `get_org_context` / `get_current_tenant`.
-- **Adding a column to an org-scoped table means updating BOTH** `provision_org_schema` (new orgs) **and** an Alembic migration looping existing schemas. For **public** tables it's Alembic only — and also the **hand-maintained DDL in `tests/conftest.py`** (it recreates `public.organisations` etc. so tests don't depend on alembic state).
-- **Money is integer paise**, columns named `*_paise`. Never floats.
-- **Fiscal/billing months** use a per-property `settlement_day` with per-month overrides in `billing_periods`. Cash-flow KPIs attribute by fiscal window (`collected_at`); Expected/Outstanding/Discount stay rent-month-based.
+### Resident-portal theme
+- The Forest & Sage repaint lives entirely under **`.tenant-forest`** (in `apps/web/src/index.css`, applied to the portal layout + login roots). It overrides shadcn HSL vars **and** remaps literal Tailwind palette classes (emerald/amber/rose/violet/…). Adding a new hardcoded palette class in a portal screen that isn't in that remap block will render in the wrong colour — prefer semantic classes (`bg-primary`, `text-muted-foreground`, `text-accent`) or add the class to the remap block.
 
-### Frontend ↔ backend contract drift (bit ~10× this session)
-- Hand-written client types/params are **assertions, not contracts** — nothing validates them against the routers. A wrong field name compiles and renders `0`/`—`/blank; a wrong query param is **silently dropped by FastAPI**. Before trusting a hook, read the router's `return {…}` and `Query(...)` decls. See the `feedback-client-type-drift` memory.
-- **`total` from list endpoints is `len(items)` for the page, not a table count** — a `limit: 1` probe always answers 1. Count client-side with the same limit as the main list.
-- **Enum labels vs members**: the UI's `'BANK'` is not in `payment_mode_enum` (`CASH|UPI|BANK_TRANSFER|CARD|CHEQUE`); route UI labels through an explicit mapper (`mapPaymentModeForApi`).
+### Data model / money
+- **Per-org Postgres schema multi-tenancy** (`org_<uuid>`). Adding a column to an org-scoped table means updating BOTH `provision_org_schema` AND an Alembic migration looping schemas; public tables also need the hand-maintained DDL in `tests/conftest.py`.
+- **Money is integer paise** (`*_paise`); never floats. UI + adapters coerce non-finite → 0.
+- **Fiscal/billing months** use a per-property `settlement_day` + `billing_periods` overrides. Cash-flow KPIs attribute by fiscal window (`collected_at`).
+
+### Frontend ↔ backend contract drift
+- Hand-written client types/params are assertions, not contracts. FastAPI silently drops undeclared query params; `total` from list endpoints is `len(items)` for the page, not a table count. Read the router before trusting a hook. The **web and mobile tenant data layers are twins** (`apps/web/src/lib/tenant-data/*` ↔ `apps/mobile/lib/tenant/*`) — keep them in sync.
 
 ### Auth / integrations
-- JWT via `python-jose`, **HS256 in dev / RS256 in prod** (auto-selected). Three token audiences/dependencies — don't mix: `get_org_context` (owner/staff), `get_current_tenant` (portal), `get_platform_admin`.
-- **Razorpay**: the webhook (`/api/v1/webhooks/razorpay?org=<slug>`) is the source of truth and is HMAC-verified with the org's webhook secret; it's auth-exempt by design. The site **CSP must allow** `checkout.razorpay.com` (script/frame), `api.razorpay.com` (frame), `*.razorpay.com` (connect) — already in the Caddyfile.
+- JWT via `python-jose`, **HS256 dev / RS256 prod**. Three audiences: `get_org_context` (owner/staff), `get_current_tenant` (portal), `get_platform_admin`.
+- **Razorpay** webhook (`/api/v1/webhooks/razorpay?org=<slug>`) is HMAC-verified and auth-exempt by design; it's the source of truth. Web CSP (in the Caddyfile) must allow `checkout.razorpay.com` / `api.razorpay.com` / `*.razorpay.com`. The mobile in-app checkout uses a WebView (no CSP restriction there).
 
 ### Frontend stack (locked)
-- shadcn/ui only, React Hook Form + Zod, TanStack Query v5, Zustand (auth), Recharts. Don't add another component/form/chart library. (There is **no** `Switch`/`Checkbox` shadcn component installed — build inline or add via shadcn if needed.)
+- Web: shadcn/ui only, React Hook Form + Zod, TanStack Query v5, Zustand, Recharts. Mobile: Expo Router, TanStack Query, Ionicons, react-native-svg, react-native-webview (added for the payment checkout).
 
 ---
 
@@ -107,8 +107,9 @@ self-service portal. Turborepo: `apps/backend` (FastAPI), `apps/web` (React/Vite
 
 | Area | Files |
 |---|---|
-| Payments (backend) | `app/services/razorpay_gateway.py`, `app/services/online_payment.py`, tenant endpoints in `app/api/v1/tenant_portal.py`, owner config in `app/api/v1/payments.py`, webhook in `app/api/v1/webhooks.py`, migration `alembic/versions/037_*` |
-| Payments (web) | `pages/settings/PaymentsPage.tsx` (owner), `pages/tenant-portal/screens/PayScreen.tsx` (tenant), `lib/tenant-data/razorpay.ts`, `hooks/usePaymentGateway.ts` |
-| Leads worklist | `pages/leads/leadScore.ts` (pure), `pages/leads/LeadWorklist.tsx`, `pages/leads/LeadsPage.tsx` (orchestrator + Board render-prop) |
-| Multi-tenancy | `app/core/database.py` (`get_org_schema_name`), `app/core/dependencies.py`, `app/models/schemas_migration.py` (`provision_org_schema`) |
-| Docs | `docs/tenant-online-payments.md`, `CLAUDE.md`, agent memory under `~/.claude/projects/-Users-mastan-pgmanage/memory/` |
+| Resident portal (web) | `pages/tenant-portal/**` (Home restructured: `screens/HomeScreen.tsx`), theme in `index.css` (`.tenant-forest`), data `lib/tenant-data/{hooks,adapters,types}.ts` |
+| Resident app (mobile) | `app/tenant-portal/(tabs)/*` + `help/moveout/requests`, `components/tenant-ui.tsx`, `components/RazorpayCheckout.tsx`, data `lib/tenant/{hooks,adapters,types,money}.ts` |
+| Design tokens | mobile `lib/theme.ts` (Forest & Sage); web scoped theme in `index.css` |
+| Payments (backend) | `app/services/{razorpay_gateway,online_payment}.py`, `app/api/v1/{tenant_portal,payments,webhooks}.py`, migration `alembic/versions/037_*` |
+| Fiscal month | `app/services/billing_period.py`, `GET /billing/current-period` in `app/api/v1/properties.py`, web `hooks/useFiscalMonth.ts` |
+| Deploy | `docker-compose.prod.yml`, `infrastructure/prod/Caddyfile` (3-host; **modified on prod**) |
