@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /styleguide
+Disallow: /demo/thanks
+
+Sitemap: https://pgmanage.in/sitemap-index.xml

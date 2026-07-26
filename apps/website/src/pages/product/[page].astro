@@ -1,0 +1,233 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import PhoneShot from '@/components/PhoneShot.astro';
+import { details, detailOrder } from '@/content/productDetail';
+import { product } from '@/content/copy';
+import { site } from '@/content/site';
+
+export function getStaticPaths() {
+  return detailOrder.map((slug) => ({ params: { page: slug } }));
+}
+
+const { page } = Astro.params;
+const d = details[page as string];
+const meta = product.subpages[page as keyof typeof product.subpages].meta;
+
+const breadcrumb = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'Product', item: `${site.url}/product` },
+    { '@type': 'ListItem', position: 2, name: d.eyebrow, item: `${site.url}/product/${d.slug}` },
+  ],
+};
+---
+
+<Base
+  title={meta.title}
+  description={meta.description}
+  path={`/product/${d.slug}`}
+  ogSlug={`product-${d.slug}`}
+  jsonLd={[breadcrumb]}
+>
+  <nav class="wrap crumb" aria-label="Breadcrumb">
+    <a href="/product">Product</a> <Icon name="chevR" /> <span>{d.eyebrow}</span>
+  </nav>
+
+  <section class="wrap head">
+    <div class="head-grid">
+      <div>
+        <p class="eyebrow">{d.eyebrow}</p>
+        <h1>{d.h1}</h1>
+        <p class="lede measure">{d.intro}</p>
+        <div class="hcta">
+          <a class="btn btn--primary" href="/demo">Book a demo</a>
+          <a class="btn btn--ghost" href="/pricing">See pricing</a>
+        </div>
+      </div>
+      <div class="head-art">
+        <PhoneShot name={d.shot} eager={true} sizes="(max-width:900px) 60vw, 300px" />
+      </div>
+    </div>
+  </section>
+
+  <article class="wrap body">
+    {
+      d.sections.map((s) => (
+        <section class="sec">
+          <h2>{s.h}</h2>
+          {s.p.map((para) => (
+            <p>{para}</p>
+          ))}
+        </section>
+      ))
+    }
+
+    <aside class="check card">
+      <h2>{d.checklist.title}</h2>
+      <ul>
+        {
+          d.checklist.items.map((it) => (
+            <li>
+              <Icon name="check" /> {it}
+            </li>
+          ))
+        }
+      </ul>
+    </aside>
+  </article>
+
+  <section class="wrap nextrow">
+    <a class="next" href={d.next.href}>
+      <span class="eyebrow">Keep going</span>
+      <span class="nl">{d.next.label} <Icon name="chevR" /></span>
+    </a>
+    <a class="btn btn--primary" href="/demo">Book a demo</a>
+  </section>
+</Base>
+
+<style>
+  .crumb {
+    padding-top: var(--s5);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+  .crumb a {
+    font-weight: 700;
+    color: var(--mut);
+    text-decoration: none;
+  }
+  .crumb :global(.i) {
+    width: 0.9em;
+    height: 0.9em;
+  }
+
+  .head {
+    padding-block: var(--s5) var(--s6);
+  }
+  .head-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: var(--s7);
+    align-items: center;
+  }
+  .head h1 {
+    font-size: clamp(2.1rem, 5vw, var(--t-4xl));
+    margin-top: var(--s2);
+    max-width: 16ch;
+  }
+  .head .lede {
+    margin-top: var(--s4);
+    font-size: var(--t-md);
+    color: var(--mut);
+  }
+  .hcta {
+    display: flex;
+    gap: var(--s3);
+    margin-top: var(--s6);
+    flex-wrap: wrap;
+  }
+  .head-art :global(.shot img) {
+    max-width: 300px;
+    margin-inline: auto;
+    filter: drop-shadow(0 22px 44px rgba(20, 50, 41, 0.2));
+  }
+
+  .body {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: var(--s8);
+    align-items: start;
+    padding-bottom: var(--s8);
+  }
+  .sec {
+    margin-bottom: var(--s7);
+  }
+  .sec h2 {
+    font-size: var(--t-xl);
+    margin-bottom: var(--s3);
+    max-width: 24ch;
+  }
+  .sec p {
+    color: var(--mut);
+    max-width: 68ch;
+    margin-bottom: var(--s3);
+    line-height: 1.6;
+  }
+  .check {
+    position: sticky;
+    top: 88px;
+    padding: var(--s5);
+  }
+  .check h2 {
+    font-family: var(--font-body);
+    font-size: var(--t-xs);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--mut);
+    margin-bottom: var(--s3);
+  }
+  .check ul {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+  .check li {
+    display: flex;
+    gap: var(--s2);
+    align-items: flex-start;
+    font-size: var(--t-sm);
+    color: var(--ink);
+  }
+  .check li :global(.i) {
+    color: var(--accent);
+    flex: none;
+    margin-top: 2px;
+  }
+
+  .nextrow {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--s5);
+    padding: var(--s6) var(--s5);
+    margin-bottom: var(--s9);
+    border-top: 1px solid var(--sageline);
+    flex-wrap: wrap;
+  }
+  .next {
+    text-decoration: none;
+  }
+  .next .eyebrow {
+    display: block;
+  }
+  .nl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-display);
+    font-size: var(--t-lg);
+    color: var(--forest);
+  }
+  .next:hover .nl {
+    gap: 10px;
+  }
+
+  @media (max-width: 900px) {
+    .head-grid,
+    .body {
+      grid-template-columns: 1fr;
+    }
+    .head-art {
+      order: -1;
+    }
+    .check {
+      position: static;
+    }
+  }
+</style>

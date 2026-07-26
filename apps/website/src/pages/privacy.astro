@@ -1,0 +1,119 @@
+---
+import Base from '@/layouts/Base.astro';
+import { site } from '@/content/site';
+
+const updated = 'July 2026';
+const sections = [
+  {
+    h: '1. Who we are',
+    p: [
+      `${site.name} provides property-management software for paying-guest and co-living operators in India. In this policy, “we” and “us” mean ${site.name}; “you” means the operator using our software, and “residents” means the tenants whose details an operator records in it.`,
+      `For the operator’s own account data, we are the data fiduciary. For resident data an operator enters, the operator is the data fiduciary and we act as a data processor on their instructions.`,
+    ],
+  },
+  {
+    h: '2. What we collect',
+    p: [
+      'Operator account: name, email, phone, organisation and property details, staff logins, and billing information.',
+      'Resident data entered by operators: names, phone numbers, room and tenancy details, rent and payment records, deposits, KYC and ID-proof documents, vehicle details and emergency contacts.',
+      'Usage data: log and device information needed to run and secure the service.',
+    ],
+  },
+  {
+    h: '3. How we use it',
+    p: [
+      'To provide the service — collecting rent, sending WhatsApp reminders and receipts, tracking occupancy, and the other functions you use.',
+      'To support you, secure the platform, prevent fraud, and meet legal obligations. We do not sell personal data, and we do not use resident data for advertising.',
+    ],
+  },
+  {
+    h: '4. WhatsApp and payments',
+    p: [
+      'Reminders and receipts are sent via the WhatsApp Business Platform; message delivery is subject to Meta’s terms. Online rent payments are processed by our payment gateway; card and bank details are handled by the gateway, not stored by us.',
+    ],
+  },
+  {
+    h: '5. Where data lives and how long',
+    p: [
+      'Data is hosted in India (AWS Mumbai / ap-south-1). We keep it for as long as your account is active and for a limited period afterwards, then delete it. You can export your data at any time.',
+    ],
+  },
+  {
+    h: '6. Your rights',
+    p: [
+      'Consistent with India’s Digital Personal Data Protection Act, 2023, you may access, correct, or request deletion of personal data, and withdraw consent where processing relies on it. Residents should direct such requests to the operator who holds their data; we will assist that operator in fulfilling them.',
+    ],
+  },
+  {
+    h: '7. Security',
+    p: [
+      `We protect data with encryption in transit and at rest, per-organisation isolation, role-based access and an audit log. See our security page for detail. No system is perfectly secure; we work to reduce risk and to notify you of a material breach as required by law.`,
+    ],
+  },
+  {
+    h: '8. Contact',
+    p: [`Questions or requests: ${site.contact.email}.`],
+  },
+];
+---
+
+<Base
+  title="Privacy Policy | PGManage"
+  description="How PGManage collects, uses and protects operator and resident data, hosted in India."
+  path="/privacy"
+  noindex={true}
+>
+  <article class="wrap legal">
+    <p class="review" role="note">
+      Draft — this document must be reviewed by legal counsel before launch. It is a
+      structural starting point, not legal advice.
+    </p>
+    <h1>Privacy Policy</h1>
+    <p class="upd">Last updated: {updated}</p>
+    {
+      sections.map((s) => (
+        <section>
+          <h2>{s.h}</h2>
+          {s.p.map((para) => (
+            <p>{para}</p>
+          ))}
+        </section>
+      ))
+    }
+  </article>
+</Base>
+
+<style>
+  .legal {
+    max-width: 740px;
+    padding-block: var(--s6) var(--s9);
+  }
+  .review {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-line);
+    color: var(--apricot-ink);
+    padding: var(--s3) var(--s4);
+    border-radius: var(--r-btn);
+    font-size: var(--t-sm);
+    font-weight: 600;
+    margin-bottom: var(--s6);
+  }
+  .legal h1 {
+    font-size: var(--t-3xl);
+  }
+  .upd {
+    color: var(--mut);
+    font-size: var(--t-sm);
+    margin-top: var(--s2);
+  }
+  .legal h2 {
+    font-size: var(--t-lg);
+    margin-top: var(--s6);
+    margin-bottom: var(--s2);
+  }
+  .legal p {
+    color: var(--mut);
+    line-height: 1.65;
+    margin-top: var(--s2);
+  }
+</style>

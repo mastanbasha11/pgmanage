@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "q": "Does my manager need a smartphone?",
+      "a": "Yes — an Android phone is enough. Your manager and collection staff use the owner app on their own phones. There is nothing to install from an app store; it runs in the browser and can be added to the home screen. If a staff member has a ₹7,000 Android phone, they can collect rent on it."
+    },
+    {
+      "q": "Can staff edit a payment after they have recorded it?",
+      "a": "No — and that is the point. A recorded payment cannot be quietly changed. A correction is a new entry, the original stays, and both show in the audit log with who did what and the before and after values. The reconciliation gap is where cash goes missing, so we closed it."
+    },
+    {
+      "q": "Do residents have to download anything?",
+      "a": "No. The resident app opens from a link in their WhatsApp. They see rent due, pay by UPI, download receipts, check the menu and raise a request without installing anything. Fewer residents in your WhatsApp asking 'how much do I owe' is the whole idea."
+    },
+    {
+      "q": "What happens to my data if I stop paying?",
+      "a": "You export it. Residents, ledgers, payments and expenses come out as spreadsheets you keep, at any time, including the day you leave. We do not hold your data hostage to keep you subscribed. After you cancel we retain it for a grace period in case you come back, then delete it."
+    },
+    {
+      "q": "I have two properties. Do they share one plan?",
+      "a": "On Standard, yes — up to three properties sit under one account, each with its own beds, staff and numbers, and you switch between them from the top of every screen. Owners see all properties; a manager sees only the ones you give them. Four or more properties move to Portfolio."
+    },
+    {
+      "q": "Do I pay for empty beds?",
+      "a": "You pay per bed in the property, filled or empty, with a minimum of ₹999 a month. An empty bed is exactly when the vacancy and lead-matching tools earn their keep — so the month a bed sits empty is the month the software is working hardest for you."
+    },
+    {
+      "q": "How long does setup take?",
+      "a": "A day or two, and we do the heavy part. Send us your current Excel or resident list and we load the property, rooms, beds and residents for you. The setup wizard bulk-creates rooms by range instead of one at a time, so a 55-room building is not 55 forms. You are collecting rent through it the same week."
+    }
+  ]
+}

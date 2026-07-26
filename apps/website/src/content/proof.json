@@ -1,0 +1,62 @@
+{
+  "source": "Every figure below comes from the property PGManage was built to run — a 121-bed co-living property in Hyderabad. The property is not named and is not a customer; it is where the software was written and is used every day. Update numbers here and they change everywhere on the site.",
+  "asOf": "July 2026",
+  "stats": [
+    {
+      "key": "floors",
+      "value": 7,
+      "label": "floors",
+      "display": "7",
+      "note": "Physical layout of the property PGManage was built in — 7 floors."
+    },
+    {
+      "key": "rooms",
+      "value": 55,
+      "label": "rooms",
+      "display": "55",
+      "note": "55 rooms across the 7 floors."
+    },
+    {
+      "key": "beds",
+      "value": 121,
+      "label": "beds",
+      "display": "121",
+      "note": "121 rentable beds — the unit the whole product and pricing is counted in."
+    },
+    {
+      "key": "residents",
+      "value": 106,
+      "label": "residents living there",
+      "display": "106",
+      "note": "106 residents in the building at time of writing — 88% of 121 beds."
+    },
+    {
+      "key": "occupancy",
+      "value": 88,
+      "label": "occupancy",
+      "display": "88%",
+      "note": "106 of 121 beds filled. Vacancy tracking is what keeps this number from slipping."
+    },
+    {
+      "key": "collection",
+      "value": 94,
+      "label": "of rent collected",
+      "display": "94%",
+      "note": "Share of billed rent collected in the month it was due, measured across the property."
+    },
+    {
+      "key": "dso",
+      "value": 4.1,
+      "label": "days to collect",
+      "display": "4.1 days",
+      "note": "Days sales outstanding — average gap between rent falling due and rent landing. Sub-five is the point of the WhatsApp reminders."
+    },
+    {
+      "key": "waDelivery",
+      "value": 98,
+      "label": "WhatsApp delivery",
+      "display": "98%",
+      "note": "Share of rent reminders and receipts that reached the resident's WhatsApp, measured from Meta delivery receipts."
+    }
+  ]
+}

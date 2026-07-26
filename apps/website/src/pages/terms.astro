@@ -1,0 +1,129 @@
+---
+import Base from '@/layouts/Base.astro';
+import { site } from '@/content/site';
+
+const updated = 'July 2026';
+const sections = [
+  {
+    h: '1. Agreement',
+    p: [
+      `These terms govern your use of ${site.name}. By creating an account or using the service, you agree to them. If you are agreeing on behalf of an organisation, you confirm you are authorised to do so.`,
+    ],
+  },
+  {
+    h: '2. The service',
+    p: [
+      `${site.name} is software for managing PG and co-living properties — rent, residents, occupancy, expenses and related functions. We may improve or change features over time; we will not materially reduce a paid feature without notice.`,
+    ],
+  },
+  {
+    h: '3. Accounts and staff',
+    p: [
+      'You are responsible for your account, your staff logins, and the actions taken under them. Keep credentials secure. You must have the right to record the resident data you enter, and to send the messages you send through the service.',
+    ],
+  },
+  {
+    h: '4. Fees, trial and GST',
+    p: [
+      'Pricing is per bed, per month, as shown on the pricing page, subject to a monthly minimum. A 30-day free trial is available without a card. Paid plans are billed in advance; annual billing is charged for ten months. All fees are exclusive of GST, which is added at 18%. WhatsApp message charges are passed through at cost.',
+    ],
+  },
+  {
+    h: '5. Payments to you',
+    p: [
+      'Where residents pay rent online, funds settle to the payment account you connect, through our payment gateway, under that gateway’s terms. We do not hold your funds.',
+    ],
+  },
+  {
+    h: '6. Your data',
+    p: [
+      'Your data remains yours. You can export it at any time. Our handling of personal data is described in the privacy policy. On cancellation you may export your data before it is deleted after a grace period.',
+    ],
+  },
+  {
+    h: '7. Acceptable use',
+    p: [
+      'Do not use the service to break the law, to send messages a recipient has not agreed to receive, or to store data you have no right to store. We may suspend accounts that put the platform or other users at risk.',
+    ],
+  },
+  {
+    h: '8. Availability and liability',
+    p: [
+      'We work to keep the service available but do not guarantee uninterrupted operation. To the extent permitted by law, our liability is limited to the fees you paid in the three months before a claim. We are not liable for indirect or consequential loss.',
+    ],
+  },
+  {
+    h: '9. Termination',
+    p: [
+      'You may cancel at any time; the service continues to the end of your paid period. We may terminate for material breach of these terms.',
+    ],
+  },
+  {
+    h: '10. Governing law & contact',
+    p: [
+      `These terms are governed by the laws of India, with courts in Hyderabad, Telangana having jurisdiction. Questions: ${site.contact.email}.`,
+    ],
+  },
+];
+---
+
+<Base
+  title="Terms of Service | PGManage"
+  description="The terms governing use of PGManage — fees, trial, GST, data ownership and acceptable use."
+  path="/terms"
+  noindex={true}
+>
+  <article class="wrap legal">
+    <p class="review" role="note">
+      Draft — this document must be reviewed by legal counsel before launch. It is a structural
+      starting point, not legal advice.
+    </p>
+    <h1>Terms of Service</h1>
+    <p class="upd">Last updated: {updated}</p>
+    {
+      sections.map((s) => (
+        <section>
+          <h2>{s.h}</h2>
+          {s.p.map((para) => (
+            <p>{para}</p>
+          ))}
+        </section>
+      ))
+    }
+  </article>
+</Base>
+
+<style>
+  .legal {
+    max-width: 740px;
+    padding-block: var(--s6) var(--s9);
+  }
+  .review {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-line);
+    color: var(--apricot-ink);
+    padding: var(--s3) var(--s4);
+    border-radius: var(--r-btn);
+    font-size: var(--t-sm);
+    font-weight: 600;
+    margin-bottom: var(--s6);
+  }
+  .legal h1 {
+    font-size: var(--t-3xl);
+  }
+  .upd {
+    color: var(--mut);
+    font-size: var(--t-sm);
+    margin-top: var(--s2);
+  }
+  .legal h2 {
+    font-size: var(--t-lg);
+    margin-top: var(--s6);
+    margin-bottom: var(--s2);
+  }
+  .legal p {
+    color: var(--mut);
+    line-height: 1.65;
+    margin-top: var(--s2);
+  }
+</style>

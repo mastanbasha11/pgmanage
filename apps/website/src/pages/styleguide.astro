@@ -1,0 +1,199 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import { ICON_NAMES } from '@/icons';
+
+const core = [
+  ['--forest', '#1C443A'],
+  ['--forest2', '#2A5A4D'],
+  ['--sage', '#F4F7F5'],
+  ['--sage2', '#ECF1EE'],
+  ['--sageline', '#DFE7E2'],
+  ['--accent', '#3F7763'],
+  ['--apricot', '#C4743F'],
+  ['--apricot-t', '#FAF0E7'],
+];
+const status = [
+  ['--ok', '#2E7D5B'],
+  ['--alert', '#B5483C'],
+  ['--warn', '#9C5A2B'],
+  ['--info', '#4A6E86'],
+  ['--note', '#6A5F8C'],
+];
+const type = [
+  ['--t-5xl', 'Display / 76', 'display'],
+  ['--t-4xl', '56', 'display'],
+  ['--t-3xl', '44', 'display'],
+  ['--t-2xl', '32', 'display'],
+  ['--t-xl', '24', 'display'],
+  ['--t-lg', '20', 'body'],
+  ['--t-base', '15 · body', 'body'],
+  ['--t-sm', '13', 'body'],
+];
+---
+
+<Base
+  title="Styleguide — PGManage"
+  description="Internal design token reference."
+  noindex={true}
+>
+  <div class="wrap sg">
+    <h1>Styleguide</h1>
+    <p class="measure">Every token, type size and icon the site is built from. Not indexed.</p>
+
+    <h2>Core</h2>
+    <div class="swatches">
+      {
+        core.map(([tok, hex]) => (
+          <div class="sw">
+            <div class="chip" style={`background:${hex}`} />
+            <code>{tok}</code>
+            <span>{hex}</span>
+          </div>
+        ))
+      }
+    </div>
+
+    <h2>Operational status</h2>
+    <div class="swatches">
+      {
+        status.map(([tok, hex]) => (
+          <div class="sw">
+            <div class="chip" style={`background:${hex}`} />
+            <code>{tok}</code>
+            <span>{hex}</span>
+          </div>
+        ))
+      }
+    </div>
+
+    <h2>Type scale</h2>
+    <div class="typescale">
+      {
+        type.map(([tok, label, fam]) => (
+          <div class="tline">
+            <span class="tlabel"><code>{tok}</code> {label}</span>
+            <span
+              class="tsample"
+              style={`font-size:var(${tok});font-family:${fam === 'display' ? 'var(--font-display)' : 'var(--font-body)'}`}
+            >
+              Ninety-four percent, by the fourth
+            </span>
+          </div>
+        ))
+      }
+    </div>
+
+    <h2>Buttons</h2>
+    <div class="row">
+      <a class="btn btn--primary" href="#">Book a demo</a>
+      <a class="btn btn--ghost" href="#">Secondary</a>
+      <a class="btn btn--wa" href="#"><Icon name="chat" /> WhatsApp</a>
+    </div>
+
+    <h2>Icons — the whole set ({ICON_NAMES.length})</h2>
+    <div class="iconboard">
+      {
+        ICON_NAMES.map((n) => (
+          <div class="ic">
+            <span class="g"><Icon name={n} /></span>
+            <code>{n}</code>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</Base>
+
+<style>
+  .sg {
+    padding-block: var(--s7) var(--s9);
+  }
+  .sg h1 {
+    font-size: var(--t-3xl);
+  }
+  .sg h2 {
+    font-family: var(--font-body);
+    font-size: var(--t-md);
+    font-weight: 800;
+    margin: var(--s7) 0 var(--s3);
+    padding-bottom: var(--s2);
+    border-bottom: 1px solid var(--sageline);
+  }
+  .swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--s3);
+  }
+  .sw {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    font-size: var(--t-sm);
+  }
+  .sw .chip {
+    width: 34px;
+    height: 24px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    flex: none;
+  }
+  .sw span {
+    color: var(--mut);
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .typescale {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+  }
+  .tline {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    align-items: baseline;
+    gap: var(--s4);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: var(--s3);
+  }
+  .tlabel {
+    font-size: var(--t-xs);
+    color: var(--mut);
+  }
+  .tsample {
+    line-height: 1.05;
+    color: var(--ink);
+    overflow: hidden;
+  }
+  .row {
+    display: flex;
+    gap: var(--s3);
+    flex-wrap: wrap;
+  }
+  .iconboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: var(--s2);
+  }
+  .ic {
+    background: #fff;
+    border: 1px solid var(--sageline);
+    border-radius: 12px;
+    padding: 14px 6px 8px;
+    text-align: center;
+    color: var(--forest);
+  }
+  .ic .g {
+    font-size: 24px;
+  }
+  .ic code {
+    display: block;
+    margin-top: 8px;
+    font-size: 10px;
+    color: var(--mut);
+  }
+  code {
+    font-family: ui-monospace, Menlo, monospace;
+    font-weight: 700;
+    color: var(--forest);
+  }
+</style>

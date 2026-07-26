@@ -1,0 +1,316 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import PhoneShot from '@/components/PhoneShot.astro';
+import { product } from '@/content/copy';
+import { details, detailOrder } from '@/content/productDetail';
+import features from '@/content/features.json';
+
+const tierRank: Record<string, number> = { starter: 0, standard: 1, portfolio: 2 };
+---
+
+<Base
+  title={product.meta.title}
+  description={product.meta.description}
+  path="/product"
+  ogSlug="product"
+>
+  <section class="wrap head">
+    <p class="eyebrow">Product</p>
+    <h1>{product.hero.heading}</h1>
+    <p class="lede measure">{product.hero.sub}</p>
+  </section>
+
+  <!-- three deep-link blocks -->
+  {
+    detailOrder.map((slug, i) => {
+      const d = details[slug];
+      return (
+        <section class="pblock" data-flip={i % 2 === 1}>
+          <div class="wrap pb-grid">
+            <div class="pb-art">
+              <PhoneShot name={d.shot} sizes="(max-width:900px) 60vw, 300px" />
+            </div>
+            <div class="pb-copy">
+              <p class="eyebrow">{d.eyebrow}</p>
+              <h2>{d.h1}</h2>
+              <p class="lede measure">{d.intro}</p>
+              <ul class="mini">
+                {d.checklist.items.slice(0, 4).map((it) => (
+                  <li>
+                    <Icon name="check" /> {it}
+                  </li>
+                ))}
+              </ul>
+              <a class="jlink" href={`/product/${slug}`}>
+                {d.h1.replace(/\.$/, '')} — in full <Icon name="chevR" />
+              </a>
+            </div>
+          </div>
+        </section>
+      );
+    })
+  }
+
+  <!-- ── The feature table — the dense centrepiece ────────────────────── -->
+  <section class="wrap tablewrap">
+    <div class="t-head">
+      <h2>The whole thing, in one table.</h2>
+      <p class="lede">
+        No adjectives. What each plan does, so you can scan for the one capability you came to
+        check.
+      </p>
+    </div>
+
+    <div class="t-scroll">
+      <table class="ftable">
+        <thead>
+          <tr>
+            <th scope="col" class="c-name">Capability</th>
+            <th scope="col" class="c-detail">What it does</th>
+            {
+              features.tierOrder.map((t) => (
+                <th scope="col" class="c-tier">
+                  {features.tierLabels[t as keyof typeof features.tierLabels]}
+                </th>
+              ))
+            }
+          </tr>
+        </thead>
+        <tbody>
+          {
+            features.groups.map((g) => (
+              <>
+                <tr class="grouprow">
+                  <th scope="colgroup" colspan={2 + features.tierOrder.length}>
+                    <Icon name={g.icon as any} /> {g.title}
+                  </th>
+                </tr>
+                {g.rows.map((r) => (
+                  <tr>
+                    <th scope="row" class="c-name">
+                      {r.name}
+                    </th>
+                    <td class="c-detail">{r.detail}</td>
+                    {features.tierOrder.map((t) => {
+                      const on = tierRank[t] >= tierRank[r.tier];
+                      return (
+                        <td class="c-tier">
+                          {on ? (
+                            <Icon name="check" class="yes" label={`Included in ${features.tierLabels[t as keyof typeof features.tierLabels]}`} />
+                          ) : (
+                            <span class="no" aria-label="Not included">
+                              —
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="t-foot">
+      Prices are per bed, per month. <a href="/pricing">See pricing →</a>
+    </p>
+  </section>
+
+  <section class="wrap endcta">
+    <h2>See it on your building.</h2>
+    <a class="btn btn--primary" href="/demo">Book a demo</a>
+  </section>
+</Base>
+
+<style>
+  .head {
+    padding-block: var(--s7) var(--s2);
+  }
+  .head h1 {
+    font-size: clamp(2.2rem, 5vw, var(--t-4xl));
+    margin-top: var(--s2);
+    max-width: 18ch;
+  }
+  .head .lede {
+    margin-top: var(--s4);
+    color: var(--mut);
+    font-size: var(--t-md);
+  }
+
+  .pblock {
+    padding-block: var(--s7);
+  }
+  .pb-grid {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: var(--s8);
+    align-items: center;
+  }
+  .pblock[data-flip='true'] .pb-grid {
+    grid-template-columns: 1fr 300px;
+  }
+  .pblock[data-flip='true'] .pb-art {
+    order: 2;
+  }
+  .pb-art :global(.shot img) {
+    max-width: 280px;
+    margin-inline: auto;
+    filter: drop-shadow(0 20px 40px rgba(20, 50, 41, 0.18));
+  }
+  .pb-copy h2 {
+    font-size: var(--t-2xl);
+    max-width: 18ch;
+  }
+  .pb-copy .lede {
+    margin-top: var(--s3);
+  }
+  .mini {
+    margin-top: var(--s4);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s2) var(--s4);
+  }
+  .mini li {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: var(--t-sm);
+    font-weight: 600;
+  }
+  .mini li :global(.i) {
+    color: var(--accent);
+  }
+  .jlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: var(--s5);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .jlink:hover {
+    gap: 10px;
+  }
+
+  /* Table */
+  .tablewrap {
+    padding-block: var(--s8);
+  }
+  .t-head h2 {
+    font-size: var(--t-2xl);
+  }
+  .t-head .lede {
+    margin-top: var(--s2);
+    color: var(--mut);
+    max-width: 52ch;
+  }
+  .t-scroll {
+    margin-top: var(--s5);
+    overflow-x: auto;
+    border: 1px solid var(--sageline);
+    border-radius: var(--r-card);
+    background: #fff;
+  }
+  .ftable {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: var(--t-sm);
+  }
+  .ftable thead th {
+    text-align: left;
+    font-family: var(--font-body);
+    font-size: var(--t-xs);
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--mut);
+    padding: var(--s4);
+    border-bottom: 1px solid var(--sageline);
+    background: var(--sage);
+    position: sticky;
+    top: 0;
+  }
+  .c-tier {
+    text-align: center !important;
+    width: 92px;
+  }
+  .grouprow th {
+    text-align: left;
+    padding: var(--s4) var(--s4) var(--s2);
+    font-family: var(--font-body);
+    font-weight: 800;
+    color: var(--forest);
+    background: var(--sage2);
+    border-top: 1px solid var(--sageline);
+    display: table-cell;
+    letter-spacing: -0.01em;
+    text-transform: none;
+    font-size: var(--t-base);
+  }
+  .grouprow th :global(.i) {
+    color: var(--forest);
+    margin-right: 6px;
+    vertical-align: -0.2em;
+  }
+  .ftable tbody th.c-name {
+    text-align: left;
+    font-weight: 700;
+    color: var(--ink);
+    padding: var(--s3) var(--s4);
+    vertical-align: top;
+    width: 210px;
+  }
+  .ftable td.c-detail {
+    color: var(--mut);
+    padding: var(--s3) var(--s4);
+    vertical-align: top;
+  }
+  .ftable td.c-tier {
+    border-left: 1px solid var(--line);
+  }
+  .ftable tbody tr {
+    border-top: 1px solid var(--line);
+  }
+  .yes {
+    color: var(--ok);
+  }
+  .no {
+    color: var(--sageline);
+    font-weight: 700;
+  }
+  .t-foot {
+    margin-top: var(--s4);
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+  .t-foot a {
+    font-weight: 700;
+  }
+
+  .endcta {
+    text-align: center;
+    padding-block: var(--s8);
+  }
+  .endcta h2 {
+    font-size: var(--t-2xl);
+    margin-bottom: var(--s5);
+  }
+
+  @media (max-width: 900px) {
+    .pb-grid,
+    .pblock[data-flip='true'] .pb-grid {
+      grid-template-columns: 1fr;
+    }
+    .pb-art,
+    .pblock[data-flip='true'] .pb-art {
+      order: -1;
+    }
+    .mini {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

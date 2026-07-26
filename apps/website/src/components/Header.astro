@@ -1,0 +1,203 @@
+---
+import { site, waLink } from '@/content/site';
+import Icon from '@/components/Icon.astro';
+
+const nav = site.nav;
+const wa = waLink();
+const current = Astro.url.pathname;
+const isActive = (href: string) => current === href || current.startsWith(href + '/');
+---
+
+<header class="hd">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label={`${site.name} home`}>
+      <span class="mark" aria-hidden="true">P</span>
+      <span class="wordmark">{site.name}</span>
+    </a>
+
+    <nav class="nav-d" aria-label="Primary">
+      {
+        nav.map((n) => (
+          <a href={n.href} class:list={['nav-link', { on: isActive(n.href) }]}>
+            {n.label}
+          </a>
+        ))
+      }
+    </nav>
+
+    <div class="cta-d">
+      <a class="btn btn-wa-sm" href={wa} rel="noopener">
+        <Icon name="chat" /> WhatsApp
+      </a>
+      <a class="btn btn--primary btn-sm" href="/demo">Book a demo</a>
+    </div>
+
+    <!-- Zero-JS mobile menu: a native disclosure. -->
+    <details class="menu">
+      <summary aria-label="Menu">
+        <Icon name="dots" /> <span>Menu</span>
+      </summary>
+      <div class="panel card">
+        {
+          nav.map((n) => (
+            <a href={n.href} class:list={['m-link', { on: isActive(n.href) }]}>
+              {n.label}
+            </a>
+          ))
+        }
+        <a class="m-link" href={wa} rel="noopener">Chat on WhatsApp</a>
+        <a class="btn btn--primary m-cta" href="/demo">Book a demo</a>
+      </div>
+    </details>
+  </div>
+</header>
+
+<style>
+  .hd {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: color-mix(in srgb, var(--sage) 88%, transparent);
+    border-bottom: 1px solid var(--sageline);
+    backdrop-filter: saturate(1.1);
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: var(--s5);
+    min-height: 64px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    text-decoration: none;
+    color: var(--ink);
+    margin-right: auto;
+  }
+  .mark {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--forest);
+    color: #fff;
+    font-family: var(--font-body);
+    font-weight: 800;
+    font-size: 15px;
+  }
+  .wordmark {
+    font-family: var(--font-body);
+    font-weight: 800;
+    font-size: 1.0625rem;
+    letter-spacing: -0.02em;
+  }
+
+  .nav-d {
+    display: flex;
+    gap: var(--s2);
+  }
+  .nav-link {
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: var(--t-base);
+    font-weight: 600;
+    color: var(--mut);
+    text-decoration: none;
+  }
+  .nav-link:hover {
+    color: var(--ink);
+    background: var(--sage2);
+  }
+  .nav-link.on {
+    color: var(--forest);
+    background: var(--sage2);
+  }
+
+  .cta-d {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .btn-sm,
+  .btn-wa-sm {
+    min-height: 40px;
+    padding: 0 var(--s4);
+    font-size: var(--t-sm);
+    border-radius: 11px;
+  }
+  .btn-wa-sm {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--forest);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .btn-wa-sm:hover {
+    color: var(--forest2);
+  }
+
+  /* Mobile disclosure */
+  .menu {
+    display: none;
+    position: relative;
+  }
+  .menu summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    list-style: none;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--sageline);
+    border-radius: var(--r-btn);
+    background: #fff;
+    font-weight: 700;
+    font-size: var(--t-sm);
+    cursor: pointer;
+  }
+  .menu summary::-webkit-details-marker {
+    display: none;
+  }
+  .panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: min(78vw, 280px);
+    padding: var(--s2);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    box-shadow: 0 12px 40px rgba(20, 50, 41, 0.14);
+  }
+  .m-link {
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  .m-link:hover,
+  .m-link.on {
+    background: var(--sage2);
+    color: var(--forest);
+  }
+  .m-cta {
+    margin-top: 6px;
+  }
+
+  @media (max-width: 860px) {
+    .nav-d,
+    .cta-d {
+      display: none;
+    }
+    .menu {
+      display: block;
+    }
+  }
+</style>

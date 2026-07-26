@@ -1,0 +1,146 @@
+{
+  "owner-home": {
+    "app": "owner",
+    "alt": "Owner app — home",
+    "w": 326,
+    "h": 713
+  },
+  "owner-collect-rent": {
+    "app": "owner",
+    "alt": "Owner app — collecting rent in two taps",
+    "w": 326,
+    "h": 713
+  },
+  "owner-rent-payments": {
+    "app": "owner",
+    "alt": "Owner app — rent and payments with ageing buckets",
+    "w": 326,
+    "h": 713
+  },
+  "owner-tenant-ledger": {
+    "app": "owner",
+    "alt": "Owner app — a resident’s ledger",
+    "w": 326,
+    "h": 713
+  },
+  "owner-vacancies": {
+    "app": "owner",
+    "alt": "Owner app — vacancies with whole-room detection",
+    "w": 326,
+    "h": 713
+  },
+  "owner-bookings": {
+    "app": "owner",
+    "alt": "Owner app — bookings and the unassigned queue",
+    "w": 326,
+    "h": 713
+  },
+  "owner-expenses": {
+    "app": "owner",
+    "alt": "Owner app — expenses with receipt capture",
+    "w": 326,
+    "h": 713
+  },
+  "owner-leads": {
+    "app": "owner",
+    "alt": "Owner app — the leads pipeline",
+    "w": 326,
+    "h": 713
+  },
+  "owner-lead-bed-match": {
+    "app": "owner",
+    "alt": "Owner app — matching a lead to a bed",
+    "w": 326,
+    "h": 713
+  },
+  "owner-roi-payback": {
+    "app": "owner",
+    "alt": "Owner app — ROI payback per room type",
+    "w": 326,
+    "h": 713
+  },
+  "owner-messages": {
+    "app": "owner",
+    "alt": "Owner app — WhatsApp message sequences",
+    "w": 326,
+    "h": 713
+  },
+  "owner-audit": {
+    "app": "owner",
+    "alt": "Owner app — the audit log, before and after",
+    "w": 326,
+    "h": 713
+  },
+  "owner-more": {
+    "app": "owner",
+    "alt": "Owner app — the app hub",
+    "w": 326,
+    "h": 713
+  },
+  "owner-setup-wizard": {
+    "app": "owner",
+    "alt": "Owner app — the bulk room setup wizard",
+    "w": 326,
+    "h": 713
+  },
+  "resident-home": {
+    "app": "resident",
+    "alt": "Resident app — today digest",
+    "w": 326,
+    "h": 719
+  },
+  "resident-payments": {
+    "app": "resident",
+    "alt": "Resident app — rent and payments",
+    "w": 326,
+    "h": 719
+  },
+  "resident-food": {
+    "app": "resident",
+    "alt": "Resident app — the food menu",
+    "w": 326,
+    "h": 719
+  },
+  "resident-my-stay": {
+    "app": "resident",
+    "alt": "Resident app — my stay",
+    "w": 326,
+    "h": 719
+  },
+  "resident-get-help": {
+    "app": "resident",
+    "alt": "Resident app — get help",
+    "w": 326,
+    "h": 719
+  },
+  "resident-my-requests": {
+    "app": "resident",
+    "alt": "Resident app — my requests",
+    "w": 326,
+    "h": 719
+  },
+  "resident-move-out": {
+    "app": "resident",
+    "alt": "Resident app — move out",
+    "w": 326,
+    "h": 719
+  },
+  "resident-refer": {
+    "app": "resident",
+    "alt": "Resident app — refer a friend",
+    "w": 326,
+    "h": 719
+  },
+  "resident-more": {
+    "app": "resident",
+    "alt": "Resident app — profile",
+    "w": 326,
+    "h": 719
+  },
+  "resident-vehicle": {
+    "app": "resident",
+    "alt": "Resident app — vehicle details",
+    "w": 326,
+    "h": 719
+  }
+}

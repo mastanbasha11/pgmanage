@@ -1,0 +1,81 @@
+/* Forest & Sage palette — lifted verbatim from the product design tokens.
+   One palette shared by the product apps and this marketing site, so the two
+   read as one thing. Do not add colours. Saturated colour is reserved for
+   money and for a decision; chrome is forest, surfaces are neutral. */
+:root {
+  /* core */
+  --forest: #1c443a;
+  --forest2: #2a5a4d;
+  --forest-d: #143229;
+  --sage: #f4f7f5;
+  --sage2: #ecf1ee;
+  --sageline: #dfe7e2;
+  --line: #e8edea;
+  --ondark: #f2f6f3;
+
+  /* text */
+  --ink: #1e2b26;
+  --mut: #5a6a63;
+  --mut2: #6b7a74;
+
+  /* accents — money & attention */
+  --accent: #3f7763;
+  --apricot: #c4743f;
+  --apricot-t: #faf0e7;
+  --apricot-l: #f0dccb;
+  --apricot-ink: #9c5a2b;
+
+  /* operational status — appears only inside product screenshots + the
+     feature table's status vocabulary, never as marketing chrome */
+  --ok: #2e7d5b;
+  --ok-bg: #e9f3ee;
+  --ok-line: #cfe3d8;
+  --alert: #b5483c;
+  --alert-bg: #fbeeea;
+  --alert-line: #eed8d2;
+  --warn: #9c5a2b;
+  --warn-bg: #faf0e7;
+  --warn-line: #f0dccb;
+  --info: #4a6e86;
+  --info-bg: #eaf0f4;
+  --note: #6a5f8c;
+  --note-bg: #efedf5;
+
+  /* shape — carried over from the mockups */
+  --r-card: 16px;
+  --r-btn: 14px;
+  --r-pill: 999px;
+  --r-tile: 11px;
+
+  /* spacing scale — one 4px-based ramp, used everywhere. Section rhythm
+     varies by composing these, not by inventing new values. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+  --s9: 96px;
+  --s10: 128px;
+
+  /* type scale — Public Sans body, Newsreader display. One genuinely large
+     display step (--t-display) gives the page a spine. */
+  --font-body: 'Public Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Newsreader Variable', Georgia, 'Times New Roman', serif;
+
+  --t-xs: 0.75rem; /* 12 */
+  --t-sm: 0.8125rem; /* 13 */
+  --t-base: 0.9375rem; /* 15 */
+  --t-md: 1.0625rem; /* 17 */
+  --t-lg: 1.25rem; /* 20 */
+  --t-xl: 1.5rem; /* 24 */
+  --t-2xl: 2rem; /* 32 */
+  --t-3xl: 2.75rem; /* 44 */
+  --t-4xl: 3.5rem; /* 56 */
+  --t-5xl: 4.75rem; /* 76 — the display spine */
+
+  --measure: 68ch;
+  --wrap: 1120px;
+}

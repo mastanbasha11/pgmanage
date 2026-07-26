@@ -1,0 +1,84 @@
+{
+  "currency": "INR",
+  "unit": "per bed / month",
+  "gstNote": "All prices are exclusive of GST. India GST of 18% is added at invoicing.",
+  "gstRate": 0.18,
+  "minMonthly": 999,
+  "annualNote": "Pay annually and two months are free — you pay for ten.",
+  "trialNote": "30-day free trial. No card to start.",
+  "migrationNote": "Free migration from Excel, and we set it up for you. The week of data entry you are dreading is on us, not you.",
+  "calc": {
+    "minBeds": 20,
+    "maxBeds": 500,
+    "defaultBeds": 121,
+    "defaultRent": 9000,
+    "defaultDaysOverdue": 12
+  },
+  "tiers": [
+    {
+      "id": "starter",
+      "name": "Starter",
+      "pricePerBed": 25,
+      "priceLabel": "₹25",
+      "custom": false,
+      "fits": "One property, up to 75 beds",
+      "for": "A single PG you run yourself, moving off Excel and the notebook.",
+      "includes": [
+        "Rent collection — full, partial or late fee",
+        "Resident ledger, month by month",
+        "The resident app",
+        "WhatsApp rent reminders and receipts",
+        "Deposit tracking"
+      ]
+    },
+    {
+      "id": "standard",
+      "name": "Standard",
+      "pricePerBed": 40,
+      "priceLabel": "₹40",
+      "custom": false,
+      "popular": true,
+      "fits": "Up to 3 properties",
+      "for": "You have staff collecting cash and beds you need to keep full.",
+      "includes": [
+        "Everything in Starter",
+        "Leads and vacancy matching",
+        "Bookings and the unassigned queue",
+        "Expenses with approvals",
+        "ROI per room type",
+        "Audit log with before → after",
+        "Staff roles and cash-in-hand"
+      ]
+    },
+    {
+      "id": "portfolio",
+      "name": "Portfolio",
+      "pricePerBed": 35,
+      "priceLabel": "from ₹35",
+      "custom": true,
+      "fits": "4+ properties, or 500+ beds",
+      "for": "You run several buildings and want them on one set of numbers.",
+      "includes": [
+        "Everything in Standard",
+        "Multi-property consolidation",
+        "Owner payouts",
+        "API access",
+        "A named onboarding manager",
+        "SLA"
+      ]
+    }
+  ],
+  "whatsapp": {
+    "headline": "WhatsApp messages are billed at cost, passed straight through.",
+    "ratePaise": 11.5,
+    "rateDisplay": "₹0.115",
+    "category": "utility template (rent reminders and receipts are utility messages)",
+    "asOf": "rate current as of Meta's 1 January 2026 India card; per-message billing has applied since 1 July 2025",
+    "freeWindow": "A utility message sent inside an open 24-hour reply window is free — so a resident who replies makes the whole exchange cost nothing.",
+    "changes": "Meta sets this rate and changes it periodically. We bill exactly what Meta charges — no markup — plus 18% GST, and we do not guess the figure here: check Meta's current India rate card for the live number.",
+    "sources": [
+      "https://www.ycloud.com/blog/whatsapp-api-pricing-update",
+      "https://whautomate.com/whatsapp-business-api-pricing-india"
+    ]
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "tierOrder": ["starter", "standard", "portfolio"],
+  "tierLabels": { "starter": "Starter", "standard": "Standard", "portfolio": "Portfolio" },
+  "groups": [
+    {
+      "id": "rent",
+      "title": "Rent & payments",
+      "icon": "wallet",
+      "rows": [
+        { "name": "Two-tap collection", "detail": "Search resident, pick full / partial / late fee, choose UPI, cash or bank. Records who collected it.", "tier": "starter" },
+        { "name": "WhatsApp receipt", "detail": "Receipt sent to the resident's WhatsApp the moment a payment is recorded.", "tier": "starter" },
+        { "name": "Cash-in-hand", "detail": "Cash a staff member collects adds to their running balance until they hand it over.", "tier": "starter" },
+        { "name": "Resident ledger", "detail": "Balance, tenure, month-by-month history, deposit held, notice status — per person.", "tier": "starter" },
+        { "name": "Ageing buckets", "detail": "Outstanding split 0–15 / 16–30 / 31–60 / 60+ days.", "tier": "standard" },
+        { "name": "DSO", "detail": "Days sales outstanding, tracked across the property.", "tier": "standard" },
+        { "name": "Bulk WhatsApp reminders", "detail": "Send the overdue list a reminder in one action, filtered by state.", "tier": "starter" },
+        { "name": "Deposit tracking", "detail": "Deposit held per resident, refundable and non-refundable split, settled at move-out.", "tier": "starter" }
+      ]
+    },
+    {
+      "id": "occupancy",
+      "title": "Occupancy, leads & bookings",
+      "icon": "bed",
+      "rows": [
+        { "name": "Vacancy view", "detail": "Beds free now, whole rooms free, and beds freeing by date.", "tier": "standard" },
+        { "name": "Whole-room detection", "detail": "A two-sharing room with both beds empty shows as one room, not two loose beds.", "tier": "standard" },
+        { "name": "Notice tracking", "detail": "Who gave notice, when, and which bed frees on which date.", "tier": "standard" },
+        { "name": "Lead-to-bed matching", "detail": "Waiting leads scored against beds about to free, by room type and move-in date.", "tier": "standard" },
+        { "name": "Leads pipeline", "detail": "Contact → visit → book, with source attribution and a real funnel.", "tier": "standard" },
+        { "name": "Bookings", "detail": "Daily stays and advance bookings in one place.", "tier": "standard" },
+        { "name": "Unassigned queue", "detail": "Flags an advance that arrived without a bed assigned.", "tier": "standard" },
+        { "name": "One-tap conversion", "detail": "Turn a booking into a resident without re-keying anything.", "tier": "standard" }
+      ]
+    },
+    {
+      "id": "money",
+      "title": "Money & control",
+      "icon": "pie",
+      "rows": [
+        { "name": "Expense capture", "detail": "Photograph the bill, categorise it, route it through approval.", "tier": "standard" },
+        { "name": "Opex vs capex", "detail": "Operating spend separated from capital spend, per category against budget.", "tier": "standard" },
+        { "name": "ROI per room type", "detail": "Payback tracked per room type — actual vs expected recovery, and catch-up pace.", "tier": "standard" },
+        { "name": "Reprice / fill verdicts", "detail": "Whether a room type should be repriced or filled first.", "tier": "standard" },
+        { "name": "Audit log", "detail": "Every action with before → after values and sensitive-action flags.", "tier": "standard" },
+        { "name": "Restorable deletes", "detail": "A deleted record can be brought back from the audit log.", "tier": "standard" },
+        { "name": "Owner payouts", "detail": "Consolidated payout view across properties.", "tier": "portfolio" },
+        { "name": "API access", "detail": "Programmatic access to your own data.", "tier": "portfolio" }
+      ]
+    },
+    {
+      "id": "resident",
+      "title": "The resident app",
+      "icon": "home",
+      "rows": [
+        { "name": "Rent & receipts", "detail": "Rent due, payment history, downloadable receipts, deposit status.", "tier": "starter" },
+        { "name": "Pay by UPI", "detail": "Resident pays their rent from the app.", "tier": "starter" },
+        { "name": "Food menu", "detail": "View-only menu for the week.", "tier": "starter" },
+        { "name": "My stay", "detail": "Room, roommate, agreement, notice to vacate.", "tier": "starter" },
+        { "name": "Raise a request", "detail": "Cleaning, electrical, repairs, food, laundry, security — raised and tracked.", "tier": "starter" },
+        { "name": "Guest pass & referral", "detail": "Issue a guest pass; refer a friend.", "tier": "starter" },
+        { "name": "KYC & vehicle", "detail": "ID proof, vehicle details, emergency contact, house rules, Wi-Fi.", "tier": "starter" }
+      ]
+    },
+    {
+      "id": "access",
+      "title": "Access, roles & setup",
+      "icon": "key",
+      "rows": [
+        { "name": "Owner / manager / staff roles", "detail": "Each role sees only what it should; collection staff are scoped to their properties.", "tier": "standard" },
+        { "name": "Multi-property", "detail": "Up to 3 properties on Standard; 4+ on Portfolio, consolidated.", "tier": "standard" },
+        { "name": "Setup wizard", "detail": "Bulk-create rooms by range instead of one at a time.", "tier": "starter" },
+        { "name": "Free Excel migration", "detail": "We load your existing resident list and property for you.", "tier": "starter" },
+        { "name": "Named onboarding manager", "detail": "A person who sets you up and stays reachable.", "tier": "portfolio" },
+        { "name": "SLA", "detail": "A written response-time commitment.", "tier": "portfolio" }
+      ]
+    }
+  ]
+}

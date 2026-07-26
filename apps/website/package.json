@@ -1,0 +1,33 @@
+{
+  "name": "@pgmanage/website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PGManage public marketing site — Astro 5, static, vanilla CSS.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "shoot": "node scripts/shoot.mjs",
+    "og": "node scripts/og.mjs",
+    "media": "node scripts/shoot.mjs && node scripts/og.mjs",
+    "shots:install": "playwright install chromium",
+    "check": "astro check",
+    "verify:a11y": "node scripts/a11y.mjs",
+    "verify:snap": "node scripts/snap.mjs",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name pgmanage-site"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.2.1",
+    "astro": "^5.2.5",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@fontsource-variable/newsreader": "^5.1.0",
+    "@fontsource-variable/public-sans": "^5.1.0",
+    "axe-core": "^4.10.2",
+    "playwright": "^1.49.1",
+    "wrangler": "^3.99.0"
+  }
+}

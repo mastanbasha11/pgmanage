@@ -1,0 +1,575 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import PhoneShot from '@/components/PhoneShot.astro';
+import DemoForm from '@/components/DemoForm.astro';
+import { home } from '@/content/copy';
+import proof from '@/content/proof.json';
+import pricing from '@/content/pricing.json';
+import { site, waLink, inr } from '@/content/site';
+
+const stat = (k: string) => proof.stats.find((s) => s.key === k)!;
+const heroStats = ['collection', 'dso', 'waDelivery', 'occupancy'].map(stat);
+
+const softwareApp = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: site.name,
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web',
+  offers: {
+    '@type': 'Offer',
+    price: pricing.tiers[0].pricePerBed,
+    priceCurrency: 'INR',
+    description: `From ${pricing.tiers[0].priceLabel} per bed / month`,
+  },
+  description: home.meta.description,
+};
+---
+
+<Base
+  title={home.meta.title}
+  description={home.meta.description}
+  path="/"
+  ogSlug="home"
+  jsonLd={[softwareApp]}
+>
+  <!-- ── Hero — left-aligned, screenshot bleeds off the right ─────────── -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <h1>{home.hero.headline}</h1>
+        <p class="lede measure">{home.hero.sub}</p>
+        <div class="hero-cta">
+          <a class="btn btn--primary" href="/demo">Book a demo</a>
+          <a class="btn btn--ghost" href={waLink()} rel="noopener">
+            <Icon name="chat" /> WhatsApp us
+          </a>
+        </div>
+        <p class="proofline">{home.hero.proofLine}</p>
+      </div>
+      <div class="hero-art" aria-hidden="false">
+        <PhoneShot name="owner-home" eager={true} class="hero-phone" sizes="(max-width:900px) 70vw, 360px" />
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Proof strip — dense, tabular ─────────────────────────────────── -->
+  <section class="wrap">
+    <dl class="proofstrip">
+      {
+        heroStats.map((s) => (
+          <div class="ps-item">
+            <dt class="stat">{s.display}</dt>
+            <dd>{s.label}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </section>
+
+  <!-- ── The problem — text moment, no icons ──────────────────────────── -->
+  <section class="problem">
+    <div class="wrap">
+      <p class="eyebrow">{home.problem.kicker}</p>
+      <h2 class="prob-h">{home.problem.heading}</h2>
+      <p class="lede measure">{home.problem.lead}</p>
+      <div class="fails">
+        {
+          home.problem.failures.map((f, i) => (
+            <div class="fail">
+              <span class="fn">{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <p class="ft">{f.t}</p>
+                <p class="fd">{f.d}</p>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Three jobs, alternating ──────────────────────────────────────── -->
+  {
+    home.jobs.map((job, i) => (
+      <section class="job" data-flip={i % 2 === 1}>
+        <div class="wrap job-grid">
+          <div class="job-art">
+            <PhoneShot name={job.shot} sizes="(max-width:900px) 70vw, 320px" />
+          </div>
+          <div class="job-copy">
+            <p class="eyebrow">{job.kicker}</p>
+            <h2>{job.heading}</h2>
+            <p class="lede measure">{job.body}</p>
+            <ul class="points">
+              {job.points.map((p) => (
+                <li>
+                  <Icon name="check" /> {p}
+                </li>
+              ))}
+            </ul>
+            <a class="jlink" href={job.link.href}>
+              {job.link.label} <Icon name="chevR" />
+            </a>
+          </div>
+        </div>
+      </section>
+    ))
+  }
+
+  <!-- ── Resident side — tighter ──────────────────────────────────────── -->
+  <section class="resident">
+    <div class="wrap res-grid">
+      <div class="res-copy">
+        <p class="eyebrow" style="color:var(--ondark);opacity:.7">{home.resident.kicker}</p>
+        <h2>{home.resident.heading}</h2>
+        <p class="lede measure">{home.resident.body}</p>
+        <ul class="points points--dark">
+          {home.resident.points.map((p) => (
+            <li>
+              <Icon name="check" /> {p}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div class="res-art">
+        <PhoneShot name="resident-home" sizes="(max-width:900px) 55vw, 280px" class="res-a" />
+        <PhoneShot name="resident-payments" sizes="(max-width:900px) 55vw, 280px" class="res-b" />
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Origin — prose on sage, nothing else ─────────────────────────── -->
+  <section class="origin">
+    <div class="wrap">
+      <p class="eyebrow">{home.origin.kicker}</p>
+      <div class="origin-prose">
+        {home.origin.paras.map((p) => <p>{p}</p>)}
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Pricing teaser ───────────────────────────────────────────────── -->
+  <section class="wrap price-teaser">
+    <div class="pt-inner card">
+      <div class="pt-copy">
+        <h2>Priced per bed, from {pricing.tiers[0].priceLabel} a month.</h2>
+        <p class="lede">
+          {pricing.trialNote} {pricing.migrationNote} Move the slider on the pricing page to see
+          your own number.
+        </p>
+        <div class="pt-cta">
+          <a class="btn btn--primary" href="/pricing">See pricing & the calculator</a>
+        </div>
+      </div>
+      <ul class="pt-tiers">
+        {
+          pricing.tiers.map((t) => (
+            <li>
+              <span class="tn">{t.name}</span>
+              <span class="tp tnum">
+                {t.priceLabel}
+                <small>/bed/mo</small>
+              </span>
+              <span class="tf">{t.fits}</span>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <!-- ── Close — the form is the ending ───────────────────────────────── -->
+  <section class="close">
+    <div class="wrap close-grid">
+      <div class="close-copy">
+        <h2>{home.close.heading}</h2>
+        <p class="lede measure">{home.close.body}</p>
+        <p class="close-alt">
+          Rather type than fill a form?
+          <a href={waLink()} rel="noopener">Message us on WhatsApp <Icon name="chevR" /></a>
+        </p>
+      </div>
+      <div class="close-form card">
+        <DemoForm id="home-demo" />
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  /* ── Hero ─────────────────────────────────────────────────────────── */
+  .hero {
+    overflow: hidden;
+    padding-top: var(--s8);
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: var(--s6);
+    align-items: center;
+  }
+  .hero h1 {
+    font-size: clamp(2.6rem, 6vw, var(--t-5xl));
+    line-height: 1.02;
+    max-width: 15ch;
+  }
+  .lede {
+    color: var(--mut);
+    font-size: var(--t-md);
+    line-height: 1.55;
+  }
+  .hero .lede {
+    margin-top: var(--s5);
+  }
+  .hero-cta {
+    display: flex;
+    gap: var(--s3);
+    margin-top: var(--s6);
+    flex-wrap: wrap;
+  }
+  .proofline {
+    margin-top: var(--s5);
+    font-size: var(--t-sm);
+    color: var(--mut);
+    max-width: 52ch;
+    font-variant-numeric: tabular-nums;
+  }
+  .hero-art {
+    position: relative;
+    justify-self: end;
+  }
+  .hero-phone {
+    width: 360px;
+    max-width: 100%;
+    transform: translateY(18px);
+    filter: drop-shadow(0 30px 55px rgba(20, 50, 41, 0.28));
+  }
+
+  /* ── Proof strip ──────────────────────────────────────────────────── */
+  .proofstrip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--s4);
+    margin-top: var(--s7);
+    padding: var(--s5) var(--s5);
+    background: var(--sage2);
+    border: 1px solid var(--sageline);
+    border-radius: var(--r-card);
+  }
+  .ps-item {
+    text-align: center;
+  }
+  .ps-item .stat {
+    font-family: var(--font-display);
+    font-size: var(--t-3xl);
+    color: var(--forest);
+    line-height: 1;
+  }
+  .ps-item dd {
+    margin-top: 6px;
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+
+  /* ── Problem ──────────────────────────────────────────────────────── */
+  .problem {
+    padding-block: var(--s9);
+  }
+  .prob-h {
+    font-size: clamp(1.9rem, 4vw, var(--t-3xl));
+    margin-top: var(--s2);
+    max-width: 18ch;
+  }
+  .problem .lede {
+    margin-top: var(--s4);
+  }
+  .fails {
+    margin-top: var(--s7);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s5) var(--s7);
+  }
+  .fail {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--s3);
+    border-top: 1px solid var(--sageline);
+    padding-top: var(--s4);
+  }
+  .fn {
+    font-family: var(--font-display);
+    font-size: var(--t-lg);
+    /* apricot is graphic-only per the token rules; warm text uses apricot-ink */
+    color: var(--apricot-ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .ft {
+    font-weight: 700;
+    color: var(--ink);
+    font-size: var(--t-md);
+  }
+  .fd {
+    margin-top: 6px;
+    color: var(--mut);
+    font-size: var(--t-base);
+  }
+
+  /* ── Jobs ─────────────────────────────────────────────────────────── */
+  .job {
+    padding-block: var(--s8);
+  }
+  .job-grid {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: var(--s8);
+    align-items: center;
+  }
+  .job[data-flip='true'] .job-grid {
+    grid-template-columns: 1fr 340px;
+  }
+  .job[data-flip='true'] .job-art {
+    order: 2;
+  }
+  .job-art {
+    justify-self: center;
+  }
+  .job-art :global(.shot img) {
+    filter: drop-shadow(0 22px 44px rgba(20, 50, 41, 0.2));
+    max-width: 300px;
+    margin-inline: auto;
+  }
+  .job h2 {
+    font-size: clamp(1.6rem, 3.4vw, var(--t-2xl));
+    max-width: 20ch;
+  }
+  .job .lede {
+    margin-top: var(--s4);
+  }
+  .points {
+    margin-top: var(--s5);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s2) var(--s4);
+  }
+  .points li {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    font-size: var(--t-sm);
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .points li :global(.i) {
+    color: var(--accent);
+  }
+  .jlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: var(--s5);
+    font-weight: 700;
+    text-decoration: none;
+    color: var(--forest);
+  }
+  .jlink:hover {
+    gap: 10px;
+  }
+
+  /* ── Resident (dark) ──────────────────────────────────────────────── */
+  .resident {
+    background: var(--forest);
+    color: var(--ondark);
+    padding-block: var(--s9);
+    margin-top: var(--s6);
+  }
+  .res-grid {
+    display: grid;
+    grid-template-columns: 1fr 0.85fr;
+    gap: var(--s7);
+    align-items: center;
+  }
+  .resident h2 {
+    color: #fff;
+    font-size: clamp(1.7rem, 3.6vw, var(--t-2xl));
+    max-width: 20ch;
+  }
+  .resident .lede {
+    color: color-mix(in srgb, var(--ondark) 82%, transparent);
+    margin-top: var(--s4);
+  }
+  .points--dark li {
+    color: var(--ondark);
+  }
+  .points--dark li :global(.i) {
+    color: #7fb8a2;
+  }
+  .res-art {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    gap: var(--s3);
+  }
+  .res-art :global(.res-a) {
+    width: 210px;
+    transform: translateY(-10px);
+  }
+  .res-art :global(.res-b) {
+    width: 210px;
+    transform: translateY(24px);
+  }
+  .res-art :global(.shot img) {
+    box-shadow: 0 24px 50px rgba(0, 0, 0, 0.35);
+  }
+
+  /* ── Origin ───────────────────────────────────────────────────────── */
+  .origin {
+    padding-block: var(--s9);
+  }
+  .origin-prose {
+    margin-top: var(--s4);
+    max-width: 60ch;
+  }
+  .origin-prose p {
+    font-family: var(--font-display);
+    font-size: var(--t-xl);
+    line-height: 1.45;
+    color: var(--ink);
+    margin-top: var(--s4);
+  }
+
+  /* ── Pricing teaser ───────────────────────────────────────────────── */
+  .price-teaser {
+    padding-block: var(--s5);
+  }
+  .pt-inner {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: var(--s7);
+    padding: var(--s7);
+    align-items: center;
+  }
+  .pt-copy h2 {
+    font-size: var(--t-2xl);
+    max-width: 16ch;
+  }
+  .pt-copy .lede {
+    margin-top: var(--s3);
+    font-size: var(--t-base);
+  }
+  .pt-cta {
+    margin-top: var(--s5);
+  }
+  .pt-tiers {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+  .pt-tiers li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'name price' 'fits price';
+    gap: 0 var(--s3);
+    padding: var(--s3) var(--s4);
+    border: 1px solid var(--sageline);
+    border-radius: var(--r-tile);
+    background: var(--sage);
+  }
+  .pt-tiers .tn {
+    grid-area: name;
+    font-weight: 700;
+  }
+  .pt-tiers .tp {
+    grid-area: price;
+    align-self: center;
+    font-family: var(--font-display);
+    font-size: var(--t-lg);
+    color: var(--forest);
+    white-space: nowrap;
+  }
+  .pt-tiers .tp small {
+    font-family: var(--font-body);
+    font-size: 10px;
+    color: var(--mut);
+    margin-left: 2px;
+  }
+  .pt-tiers .tf {
+    grid-area: fits;
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+
+  /* ── Close ────────────────────────────────────────────────────────── */
+  .close {
+    padding-block: var(--s9) 0;
+  }
+  .close-grid {
+    display: grid;
+    grid-template-columns: 0.85fr 1.15fr;
+    gap: var(--s7);
+    align-items: start;
+  }
+  .close h2 {
+    font-size: var(--t-3xl);
+    max-width: 12ch;
+  }
+  .close .lede {
+    margin-top: var(--s4);
+  }
+  .close-alt {
+    margin-top: var(--s5);
+    font-size: var(--t-base);
+    color: var(--mut);
+  }
+  .close-alt a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 700;
+    margin-left: 6px;
+  }
+  .close-form {
+    padding: var(--s6);
+  }
+
+  /* ── Responsive ───────────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .hero-grid,
+    .job-grid,
+    .job[data-flip='true'] .job-grid,
+    .res-grid,
+    .pt-inner,
+    .close-grid {
+      grid-template-columns: 1fr;
+    }
+    .hero-art {
+      justify-self: center;
+      order: -1;
+    }
+    .hero-phone {
+      transform: none;
+      width: 280px;
+    }
+    .job-art,
+    .job[data-flip='true'] .job-art {
+      order: -1;
+    }
+    .res-grid {
+      text-align: left;
+    }
+  }
+  @media (max-width: 620px) {
+    .proofstrip {
+      grid-template-columns: 1fr 1fr;
+      gap: var(--s5) var(--s3);
+    }
+    .fails,
+    .points {
+      grid-template-columns: 1fr;
+    }
+    .ps-item .stat {
+      font-size: var(--t-2xl);
+    }
+  }
+</style>

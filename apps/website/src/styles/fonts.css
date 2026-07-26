@@ -1,0 +1,17 @@
+/* Self-hosted, latin-subset variable fonts. font-display: swap.
+   Only the display face (Newsreader) is preloaded — it renders the hero H1,
+   the largest paint. Public Sans falls back to system-ui until swapped. */
+@font-face {
+  font-family: 'Public Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('/fonts/public-sans-latin.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'Newsreader Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('/fonts/newsreader-latin.woff2') format('woff2-variations');
+}

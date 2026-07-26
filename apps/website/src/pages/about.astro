@@ -1,0 +1,123 @@
+---
+import Base from '@/layouts/Base.astro';
+import { about } from '@/content/copy';
+import proof from '@/content/proof.json';
+import { site } from '@/content/site';
+
+const stat = (k: string) => proof.stats.find((s) => s.key === k)!;
+---
+
+<Base
+  title={about.meta.title}
+  description={about.meta.description}
+  path="/about"
+  ogSlug="about"
+>
+  <article class="wrap prose">
+    <p class="eyebrow">About</p>
+    <h1>{about.h1}</h1>
+
+    <p class="dek">
+      PGManage was not designed in a product meeting, and there is no founding story about
+      spotting a market. There was a building, and the rent had to come in.
+    </p>
+
+    <p>
+      The building is {site.origin.descriptor}. Seven floors, {stat('rooms').display} rooms,
+      {stat('beds').display} beds, and on any given day around {stat('residents').display} people
+      living in it. Someone has to collect from all of them, every month, and that someone spent
+      the first stretch of it doing what everyone in this business does: a notebook, an Excel
+      sheet, and a phone with a hundred WhatsApp threads open.
+    </p>
+
+    <h2>What we tried first</h2>
+    <p>
+      Excel went first, because Excel always goes first. It is fine until the month you have a
+      partial payment, a late fee, a deposit adjustment and a resident who left on the 9th, and
+      then it is four tabs that disagree with each other. We tried a generic property tool next —
+      one built for landlords with a handful of flats. It did not know what a bed was. It had no
+      concept of a sharing, or a notice period, or a staff member walking around with four days of
+      cash in his pocket. So the real work kept happening in WhatsApp and the notebook, and the
+      software just held a copy that was already out of date.
+    </p>
+    <p>
+      The thing that broke us was not any single feature. It was the reconciliation. At the end of
+      a month you could not say, with a straight face, how much cash had actually come in versus
+      how much had been recorded, because the person recording it was the person holding it, and
+      the tool had no opinion about that gap. That gap is where the money goes. Everyone in this
+      business knows it, and almost nobody has closed it.
+    </p>
+
+    <h2>So we wrote the thing we needed</h2>
+    <p>
+      Not a platform. A tool to collect the rent in two taps and put a name against the cash. Then,
+      because the month kept asking for them, the rest arrived one at a time: the ageing buckets
+      when the overdue list got long, the vacancy view the month a whole room sat empty because
+      nobody logged a notice, the ROI screen the day we argued about whether the three-sharings were
+      really carrying the place. Every feature in PGManage is there because a real month made us need
+      it. That is the whole design philosophy, and it is the reason the screens look like the job
+      and not like a dashboard.
+    </p>
+    <p>
+      We still run the building on it. The numbers on this site —
+      {stat('collection').display} of rent collected, {stat('dso').display} to collect,
+      {stat('waDelivery').display} of WhatsApp reminders delivered — are that building’s numbers,
+      not a demo’s. We do not name it, because it is not a customer and this is not a testimonial.
+      It is just where the software comes from, and why it knows what it knows.
+    </p>
+
+    <h2>Why we are selling it</h2>
+    <p>
+      Because every PG owner we have met is fighting the same four fires with the same notebook,
+      and it is a genuinely solvable problem that nobody bothered to solve properly for them.
+      Software for this business was either built for big student-housing chains and priced for
+      them, or it was a landlord app that never heard of a bed. We are neither. We are the operator
+      who got tired of the leak and built the plug, and we would like to sell you the plug.
+    </p>
+
+    <div class="cta">
+      <a class="btn btn--primary" href="/demo">Book a demo on your building</a>
+      <a class="btn btn--ghost" href="/product">See what it does</a>
+    </div>
+  </article>
+</Base>
+
+<style>
+  .prose {
+    max-width: 720px;
+    padding-block: var(--s7) var(--s9);
+  }
+  .prose h1 {
+    font-size: clamp(2.2rem, 5.5vw, var(--t-4xl));
+    margin-top: var(--s2);
+    max-width: 18ch;
+  }
+  .dek {
+    font-family: var(--font-display);
+    font-size: var(--t-xl);
+    line-height: 1.45;
+    color: var(--ink);
+    margin-top: var(--s5);
+    max-width: 40ch;
+  }
+  .prose h2 {
+    font-size: var(--t-lg);
+    margin-top: var(--s7);
+    margin-bottom: var(--s3);
+  }
+  .prose p {
+    color: var(--mut);
+    line-height: 1.68;
+    margin-top: var(--s4);
+    font-size: var(--t-md);
+  }
+  .prose .dek + p {
+    margin-top: var(--s5);
+  }
+  .cta {
+    display: flex;
+    gap: var(--s3);
+    margin-top: var(--s8);
+    flex-wrap: wrap;
+  }
+</style>

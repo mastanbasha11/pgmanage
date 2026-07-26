@@ -1,0 +1,147 @@
+---
+import { site, waLink } from '@/content/site';
+const year = 2026; // Date.* is avoided in this build; bump at release.
+---
+
+<footer class="ft">
+  <div class="wrap">
+    <div class="grid">
+      <div class="brandcol">
+        <a class="brand" href="/" aria-label={`${site.name} home`}>
+          <span class="mark" aria-hidden="true">P</span>
+          <span class="wordmark">{site.name}</span>
+        </a>
+        <p class="tag">{site.tagline}</p>
+        <p class="built">
+          Built in {site.origin.descriptor}, and run on it every day.
+        </p>
+      </div>
+
+      {
+        site.footerNav.map((col) => (
+          <nav class="col" aria-label={col.heading}>
+            <h2 class="h">{col.heading}</h2>
+            <ul>
+              {col.links.map((l) => (
+                <li>
+                  <a href={l.href}>{l.label}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))
+      }
+
+      <div class="col">
+        <h2 class="h">Talk to us</h2>
+        <ul>
+          <li><a href={waLink()} rel="noopener">WhatsApp {site.contact.whatsappDisplay}</a></li>
+          <li><a href={`mailto:${site.contact.email}`}>{site.contact.email}</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="base">
+      <p>© {year} {site.name}. All prices exclude 18% GST.</p>
+      <p class="fine">
+        {site.name} is used to run a co-living property in Hyderabad; that property is not
+        named here and is not a customer.
+      </p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .ft {
+    margin-top: var(--s10);
+    background: var(--forest);
+    color: var(--ondark);
+    padding-block: var(--s8) var(--s6);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(4, 1fr);
+    gap: var(--s6) var(--s5);
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    text-decoration: none;
+    color: #fff;
+  }
+  .mark {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: #fff;
+    color: var(--forest);
+    font-family: var(--font-body);
+    font-weight: 800;
+  }
+  .wordmark {
+    font-family: var(--font-body);
+    font-weight: 800;
+    font-size: 1.0625rem;
+    letter-spacing: -0.02em;
+  }
+  .tag {
+    margin-top: var(--s3);
+    color: color-mix(in srgb, var(--ondark) 82%, transparent);
+    max-width: 34ch;
+  }
+  .built {
+    margin-top: var(--s3);
+    font-size: var(--t-sm);
+    color: color-mix(in srgb, var(--ondark) 62%, transparent);
+    max-width: 34ch;
+  }
+  .h {
+    font-family: var(--font-body);
+    font-size: var(--t-xs);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--ondark) 60%, transparent);
+    margin-bottom: var(--s3);
+  }
+  .col ul {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+  .col a {
+    color: color-mix(in srgb, var(--ondark) 88%, transparent);
+    text-decoration: none;
+    font-size: var(--t-base);
+  }
+  .col a:hover {
+    color: #fff;
+    text-decoration: underline;
+  }
+  .base {
+    margin-top: var(--s7);
+    padding-top: var(--s4);
+    border-top: 1px solid color-mix(in srgb, var(--ondark) 16%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: var(--t-sm);
+    color: color-mix(in srgb, var(--ondark) 60%, transparent);
+  }
+  @media (max-width: 860px) {
+    .grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .brandcol {
+      grid-column: 1 / -1;
+    }
+  }
+  @media (max-width: 520px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

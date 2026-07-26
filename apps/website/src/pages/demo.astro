@@ -1,0 +1,128 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import DemoForm from '@/components/DemoForm.astro';
+import { demo } from '@/content/copy';
+import { site, waLink } from '@/content/site';
+
+const hasError = Astro.url.searchParams.has('error');
+---
+
+<Base title={demo.meta.title} description={demo.meta.description} path="/demo" ogSlug="demo">
+  <section class="wrap demo-grid">
+    <div class="left">
+      <p class="eyebrow">Book a demo</p>
+      <h1>{demo.h1}</h1>
+      <ul class="reassure">
+        {
+          demo.reassure.map((r) => (
+            <li>
+              <Icon name="check" /> {r}
+            </li>
+          ))
+        }
+      </ul>
+      <div class="alt card">
+        <Icon name="chat" class="alt-ic" />
+        <div>
+          <p class="alt-h">Prefer to type?</p>
+          <p class="alt-p">
+            Message us on WhatsApp and a person answers.
+            <a href={waLink()} rel="noopener">{site.contact.whatsappDisplay}</a>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="right card">
+      {
+        hasError && (
+          <p class="err" role="alert">
+            <Icon name="alert" /> Something in the form needs a look — please check your mobile
+            number is a 10-digit Indian number and try again.
+          </p>
+        )
+      }
+      <DemoForm id="demo-page" />
+    </div>
+  </section>
+</Base>
+
+<style>
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 0.85fr 1.15fr;
+    gap: var(--s7);
+    align-items: start;
+    padding-block: var(--s8) var(--s9);
+  }
+  .left h1 {
+    font-size: clamp(2.1rem, 5vw, var(--t-4xl));
+    margin-top: var(--s2);
+    max-width: 14ch;
+  }
+  .reassure {
+    margin-top: var(--s6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+  }
+  .reassure li {
+    display: flex;
+    gap: var(--s2);
+    align-items: flex-start;
+    color: var(--ink);
+  }
+  .reassure li :global(.i) {
+    color: var(--accent);
+    margin-top: 3px;
+    flex: none;
+  }
+  .alt {
+    margin-top: var(--s6);
+    padding: var(--s4);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--s3);
+    align-items: center;
+  }
+  .alt :global(.alt-ic) {
+    font-size: 24px;
+    color: var(--accent);
+  }
+  .alt-h {
+    font-weight: 700;
+  }
+  .alt-p {
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+  .alt-p a {
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .right {
+    padding: var(--s6);
+  }
+  .err {
+    display: flex;
+    gap: var(--s2);
+    align-items: flex-start;
+    background: var(--alert-bg);
+    border: 1px solid var(--alert-line);
+    color: var(--alert);
+    padding: var(--s3) var(--s4);
+    border-radius: var(--r-btn);
+    font-size: var(--t-sm);
+    margin-bottom: var(--s5);
+  }
+  .err :global(.i) {
+    flex: none;
+    margin-top: 2px;
+  }
+  @media (max-width: 860px) {
+    .demo-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

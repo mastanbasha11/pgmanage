@@ -1,0 +1,694 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import { inr, waLink } from '@/content/site';
+import pricing from '@/content/pricing.json';
+import faq from '@/content/faq.json';
+
+const c = pricing.calc;
+// Server-rendered default so the numbers are real with JavaScript disabled.
+const defBeds = c.defaultBeds;
+const tierFor = (beds: number) =>
+  beds <= 75 ? pricing.tiers[0] : beds <= 300 ? pricing.tiers[1] : pricing.tiers[2];
+const defTier = tierFor(defBeds);
+const defMonthly = Math.max(defBeds * defTier.pricePerBed, pricing.minMonthly);
+const defAnnual = defMonthly * 10;
+const defLocked = Math.round((c.defaultBeds * c.defaultRent * c.defaultDaysOverdue) / 30);
+
+const faqLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faq.items.map((f) => ({
+    '@type': 'Question',
+    name: f.q,
+    acceptedAnswer: { '@type': 'Answer', text: f.a },
+  })),
+};
+---
+
+<Base
+  title="Pricing — PGManage, from ₹25 per bed / month"
+  description="PGManage is priced per bed: Starter ₹25, Standard ₹40, Portfolio from ₹35. 30-day free trial, no card, free Excel migration, two months free on annual. Move the slider to see your number."
+  path="/pricing"
+  ogSlug="pricing"
+  jsonLd={[faqLd]}
+>
+  <section class="wrap head">
+    <p class="eyebrow">Pricing</p>
+    <h1>Priced per bed. You already count in beds.</h1>
+    <p class="lede measure">
+      {pricing.trialNote} {pricing.annualNote} And {pricing.migrationNote.charAt(0).toLowerCase() + pricing.migrationNote.slice(1)}
+    </p>
+  </section>
+
+  <!-- ── The bed-count calculator — the interactive centrepiece ───────── -->
+  <section class="wrap calc-wrap">
+    <div class="calc card" data-min={c.minBeds} data-max={c.maxBeds} data-min-monthly={pricing.minMonthly}>
+      <div class="calc-controls">
+        <div class="calc-head">
+          <label for="beds">How many beds?</label>
+          <div class="beds-out">
+            <input
+              id="beds-num"
+              type="number"
+              min={c.minBeds}
+              max={c.maxBeds}
+              value={defBeds}
+              aria-label="Number of beds"
+              inputmode="numeric"
+            />
+            <span class="beds-unit">beds</span>
+          </div>
+        </div>
+        <input
+          id="beds"
+          type="range"
+          min={c.minBeds}
+          max={c.maxBeds}
+          value={defBeds}
+          step="1"
+          aria-label="Number of beds"
+        />
+        <div class="calc-scale" aria-hidden="true">
+          <span>{c.minBeds}</span><span>{c.maxBeds}</span>
+        </div>
+      </div>
+
+      <div class="calc-out">
+        <div class="co-tier">
+          <span class="co-label">Your plan</span>
+          <span class="co-tier-name" id="out-tier">{defTier.name}</span>
+        </div>
+        <div class="co-row">
+          <div class="co-cell">
+            <span class="co-label">Per month</span>
+            <span class="co-big stat" id="out-monthly">{inr(defMonthly)}</span>
+          </div>
+          <div class="co-cell">
+            <span class="co-label">Per year <small>(2 months free)</small></span>
+            <span class="co-big stat" id="out-annual">{inr(defAnnual)}</span>
+          </div>
+        </div>
+        <p class="co-gst">
+          <span id="out-perbed" class="tnum">{defTier.priceLabel}</span> per bed / month · plus 18% GST ·
+          minimum {inr(pricing.minMonthly)}/mo
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Tiers ────────────────────────────────────────────────────────── -->
+  <section class="wrap tiers">
+    {
+      pricing.tiers.map((t) => (
+        <article class:list={['tier card', { pop: t.popular }]}>
+          {t.popular && <span class="badge">Most take this</span>}
+          <h2>{t.name}</h2>
+          <p class="tier-for">{t.for}</p>
+          <p class="tier-price tnum">
+            {t.priceLabel}
+            <span class="unit"> / bed / month</span>
+          </p>
+          <p class="tier-fits">{t.fits}</p>
+          <a class:list={['btn', t.popular ? 'btn--primary' : 'btn--ghost']} href="/demo">
+            {t.custom ? 'Talk to us' : 'Start free'}
+          </a>
+          <ul class="tier-inc">
+            {t.includes.map((inc) => (
+              <li>
+                <Icon name="check" /> {inc}
+              </li>
+            ))}
+          </ul>
+        </article>
+      ))
+    }
+  </section>
+
+  <section class="wrap terms-row">
+    {
+      [
+        [pricing.trialNote, 'hourglass'],
+        ['Two months free on annual billing.', 'gift'],
+        ['Free migration from Excel — we set it up.', 'swap'],
+        ['Export your data any time, including the day you leave.', 'download'],
+      ].map(([txt, ic]) => (
+        <div class="term">
+          <Icon name={ic as any} />
+          <span>{txt}</span>
+        </div>
+      ))
+    }
+  </section>
+
+  <!-- ── The locked-up-rent calculator — the pitch number ─────────────── -->
+  <section class="locked">
+    <div class="wrap locked-grid">
+      <div class="locked-copy">
+        <p class="eyebrow">The number that pays for it</p>
+        <h2>How much rent is sitting in overdue right now?</h2>
+        <p class="lede">
+          At {defBeds} beds, {inr(c.defaultRent)} average rent and {c.defaultDaysOverdue} days
+          to collect, roughly this much of your rent is out on the street at any moment. Pulling
+          your DSO down to four days is what puts it back in your account.
+        </p>
+        <div class="locked-inputs" data-avg-rent={c.defaultRent}>
+          <div class="li">
+            <label for="lk-beds">Beds</label>
+            <input id="lk-beds" type="number" min="1" max="5000" value={defBeds} inputmode="numeric" />
+          </div>
+          <div class="li">
+            <label for="lk-rent">Avg rent</label>
+            <input id="lk-rent" type="number" min="1000" max="100000" step="500" value={c.defaultRent} inputmode="numeric" />
+          </div>
+          <div class="li">
+            <label for="lk-days">Days overdue</label>
+            <input id="lk-days" type="number" min="0" max="90" value={c.defaultDaysOverdue} inputmode="numeric" />
+          </div>
+        </div>
+      </div>
+      <div class="locked-out card">
+        <span class="co-label">Locked up in late rent</span>
+        <span class="locked-big stat" id="out-locked">{inr(defLocked)}</span>
+        <span class="locked-sub">at any given moment, on today's inputs</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── WhatsApp cost ────────────────────────────────────────────────── -->
+  <section class="wrap wa-note">
+    <div class="wa-inner card">
+      <Icon name="chat" class="wa-ic" />
+      <div>
+        <h2>{pricing.whatsapp.headline}</h2>
+        <p>
+          A rent reminder or receipt is a {pricing.whatsapp.category}, about
+          <b class="tnum"> {pricing.whatsapp.rateDisplay}</b> each — {pricing.whatsapp.asOf}.
+          {pricing.whatsapp.freeWindow}
+        </p>
+        <p class="wa-fine">{pricing.whatsapp.changes}</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FAQ ──────────────────────────────────────────────────────────── -->
+  <section class="wrap faq">
+    <h2 class="faq-h">The questions you actually asked</h2>
+    <div class="faq-list">
+      {
+        faq.items.map((f) => (
+          <details class="q">
+            <summary>
+              <span>{f.q}</span>
+              <Icon name="chevD" class="q-chev" />
+            </summary>
+            <p>{f.a}</p>
+          </details>
+        ))
+      }
+    </div>
+    <p class="faq-more">
+      Another question? <a href={waLink('Hi PGManage — a pricing question:')} rel="noopener">Ask on WhatsApp</a>
+      or <a href="/demo">book a demo</a>.
+    </p>
+  </section>
+</Base>
+
+<script>
+  // Pricing calculators — vanilla, keyboard-first, reduced-motion aware.
+  const fmt = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
+  const inr = (n: number) => '₹' + fmt.format(Math.round(n));
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function animate(el: HTMLElement, to: number, render: (v: number) => string) {
+    const from = Number(el.dataset.v ?? to);
+    el.dataset.v = String(to);
+    if (reduce || from === to) {
+      el.textContent = render(to);
+      return;
+    }
+    const t0 = performance.now();
+    const dur = 320;
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      el.textContent = render(from + (to - from) * e);
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  // ── Bed-count calculator ──────────────────────────────────────────────
+  const calc = document.querySelector<HTMLElement>('.calc');
+  if (calc) {
+    const min = +calc.dataset.min!,
+      max = +calc.dataset.max!,
+      minMonthly = +calc.dataset.minMonthly!;
+    const range = calc.querySelector<HTMLInputElement>('#beds')!;
+    const num = calc.querySelector<HTMLInputElement>('#beds-num')!;
+    const outTier = calc.querySelector<HTMLElement>('#out-tier')!;
+    const outMonthly = calc.querySelector<HTMLElement>('#out-monthly')!;
+    const outAnnual = calc.querySelector<HTMLElement>('#out-annual')!;
+    const outPerBed = calc.querySelector<HTMLElement>('#out-perbed')!;
+    const tiers = [
+      { name: 'Starter', rate: 25, label: '₹25', cap: 75 },
+      { name: 'Standard', rate: 40, label: '₹40', cap: 300 },
+      { name: 'Portfolio', rate: 35, label: 'from ₹35', cap: Infinity },
+    ];
+    const update = (beds: number) => {
+      beds = Math.max(min, Math.min(max, Math.round(beds || min)));
+      const t = tiers.find((x) => beds <= x.cap)!;
+      const monthly = Math.max(beds * t.rate, minMonthly);
+      outTier.textContent = t.name;
+      outPerBed.textContent = t.label;
+      animate(outMonthly, monthly, inr);
+      animate(outAnnual, monthly * 10, inr);
+    };
+    range.addEventListener('input', () => {
+      num.value = range.value;
+      update(+range.value);
+    });
+    num.addEventListener('input', () => {
+      const v = Math.max(min, Math.min(max, +num.value || min));
+      range.value = String(v);
+      update(v);
+    });
+  }
+
+  // ── Locked-up-rent calculator ─────────────────────────────────────────
+  const lk = document.querySelector<HTMLElement>('.locked-inputs');
+  if (lk) {
+    const beds = document.querySelector<HTMLInputElement>('#lk-beds')!;
+    const rent = document.querySelector<HTMLInputElement>('#lk-rent')!;
+    const days = document.querySelector<HTMLInputElement>('#lk-days')!;
+    const out = document.querySelector<HTMLElement>('#out-locked')!;
+    const recompute = () => {
+      const v = ((+beds.value || 0) * (+rent.value || 0) * (+days.value || 0)) / 30;
+      animate(out, v, inr);
+    };
+    [beds, rent, days].forEach((i) => i.addEventListener('input', recompute));
+  }
+</script>
+
+<style>
+  .head {
+    padding-block: var(--s7) var(--s4);
+  }
+  .head h1 {
+    font-size: clamp(2.2rem, 5vw, var(--t-4xl));
+    margin-top: var(--s2);
+    max-width: 16ch;
+  }
+  .head .lede {
+    margin-top: var(--s4);
+    color: var(--mut);
+    font-size: var(--t-md);
+  }
+
+  /* Calculator */
+  .calc-wrap {
+    padding-top: var(--s5);
+  }
+  .calc {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: var(--s7);
+    padding: var(--s7);
+    align-items: center;
+  }
+  .calc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--s3);
+  }
+  .calc-head label {
+    font-family: var(--font-display);
+    font-size: var(--t-xl);
+  }
+  .beds-out {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  #beds-num {
+    width: 5ch;
+    font: inherit;
+    font-family: var(--font-display);
+    font-size: var(--t-2xl);
+    color: var(--forest);
+    text-align: right;
+    border: 0;
+    border-bottom: 2px solid var(--sageline);
+    background: transparent;
+    font-variant-numeric: tabular-nums;
+    padding: 0 2px;
+  }
+  #beds-num:focus-visible {
+    outline: none;
+    border-bottom-color: var(--forest);
+  }
+  .beds-unit {
+    color: var(--mut);
+    font-size: var(--t-sm);
+    font-weight: 700;
+  }
+  input[type='range'] {
+    width: 100%;
+    margin-top: var(--s5);
+    accent-color: var(--forest);
+    height: 28px;
+  }
+  .calc-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--t-xs);
+    color: var(--mut);
+    font-variant-numeric: tabular-nums;
+  }
+  .calc-out {
+    border-left: 1px solid var(--sageline);
+    padding-left: var(--s7);
+  }
+  .co-label {
+    display: block;
+    font-size: var(--t-xs);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--mut);
+  }
+  .co-label small {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+  }
+  .co-tier-name {
+    font-family: var(--font-display);
+    font-size: var(--t-xl);
+    color: var(--forest);
+  }
+  .co-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s4);
+    margin-top: var(--s4);
+  }
+  .co-big {
+    display: block;
+    font-family: var(--font-display);
+    font-size: var(--t-3xl);
+    color: var(--ink);
+    line-height: 1.05;
+    margin-top: 4px;
+  }
+  .co-gst {
+    margin-top: var(--s4);
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+
+  /* Tiers */
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--s4);
+    padding-top: var(--s8);
+  }
+  .tier {
+    padding: var(--s6);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .tier.pop {
+    border-color: var(--forest);
+    border-width: 1.5px;
+  }
+  .badge {
+    position: absolute;
+    top: -11px;
+    left: var(--s6);
+    background: var(--forest);
+    color: var(--ondark);
+    font-size: var(--t-xs);
+    font-weight: 800;
+    padding: 3px 10px;
+    border-radius: var(--r-pill);
+  }
+  .tier h2 {
+    font-family: var(--font-display);
+    font-size: var(--t-xl);
+  }
+  .tier-for {
+    margin-top: var(--s2);
+    color: var(--mut);
+    font-size: var(--t-sm);
+    min-height: 3em;
+  }
+  .tier-price {
+    font-family: var(--font-display);
+    font-size: var(--t-3xl);
+    color: var(--forest);
+    margin-top: var(--s3);
+  }
+  .tier-price .unit {
+    font-family: var(--font-body);
+    font-size: var(--t-sm);
+    color: var(--mut);
+    font-weight: 600;
+  }
+  .tier-fits {
+    font-size: var(--t-sm);
+    color: var(--mut);
+    margin: var(--s2) 0 var(--s5);
+  }
+  .tier .btn {
+    width: 100%;
+  }
+  .tier-inc {
+    margin-top: var(--s5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+  .tier-inc li {
+    display: flex;
+    gap: var(--s2);
+    align-items: flex-start;
+    font-size: var(--t-sm);
+    color: var(--ink);
+  }
+  .tier-inc li :global(.i) {
+    color: var(--accent);
+    margin-top: 2px;
+    flex: none;
+  }
+
+  .terms-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--s4);
+    padding-top: var(--s7);
+  }
+  .term {
+    display: flex;
+    gap: var(--s2);
+    align-items: flex-start;
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+  .term :global(.i) {
+    color: var(--forest);
+    flex: none;
+    margin-top: 1px;
+  }
+
+  /* Locked calculator */
+  .locked {
+    margin-top: var(--s9);
+    background: var(--forest);
+    color: var(--ondark);
+    padding-block: var(--s8);
+  }
+  .locked-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: var(--s7);
+    align-items: center;
+  }
+  .locked .eyebrow {
+    color: var(--ondark);
+    opacity: 0.72;
+  }
+  .locked h2 {
+    color: #fff;
+    font-size: var(--t-2xl);
+    max-width: 20ch;
+  }
+  .locked .lede {
+    color: color-mix(in srgb, var(--ondark) 82%, transparent);
+    margin-top: var(--s3);
+  }
+  .locked-inputs {
+    display: flex;
+    gap: var(--s4);
+    margin-top: var(--s5);
+    flex-wrap: wrap;
+  }
+  .li {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .li label {
+    font-size: var(--t-xs);
+    font-weight: 700;
+    color: color-mix(in srgb, var(--ondark) 70%, transparent);
+  }
+  .li input {
+    width: 8ch;
+    font: inherit;
+    min-height: 44px;
+    padding: 0 10px;
+    border-radius: var(--r-btn);
+    border: 1px solid color-mix(in srgb, var(--ondark) 26%, transparent);
+    background: color-mix(in srgb, var(--forest-d) 60%, transparent);
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+  .li input:focus-visible {
+    outline: 2px solid var(--ondark);
+    outline-offset: 1px;
+  }
+  .locked-out {
+    background: color-mix(in srgb, var(--forest-d) 55%, transparent);
+    border-color: color-mix(in srgb, var(--ondark) 20%, transparent);
+    padding: var(--s6);
+    text-align: center;
+  }
+  .locked-out .co-label {
+    color: color-mix(in srgb, var(--ondark) 66%, transparent);
+  }
+  .locked-big {
+    display: block;
+    font-family: var(--font-display);
+    font-size: clamp(2.6rem, 7vw, 4.2rem);
+    color: #fff;
+    line-height: 1;
+    margin: var(--s2) 0;
+  }
+  .locked-sub {
+    font-size: var(--t-sm);
+    color: color-mix(in srgb, var(--ondark) 60%, transparent);
+  }
+
+  /* WhatsApp note */
+  .wa-note {
+    padding-top: var(--s8);
+  }
+  .wa-inner {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--s5);
+    padding: var(--s6);
+    align-items: start;
+  }
+  .wa-inner :global(.wa-ic) {
+    font-size: 30px;
+    color: var(--accent);
+  }
+  .wa-inner h2 {
+    font-family: var(--font-body);
+    font-size: var(--t-md);
+    font-weight: 800;
+  }
+  .wa-inner p {
+    margin-top: var(--s2);
+    color: var(--mut);
+    font-size: var(--t-base);
+  }
+  .wa-fine {
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+
+  /* FAQ */
+  .faq {
+    padding-block: var(--s9);
+  }
+  .faq-h {
+    font-size: var(--t-2xl);
+    max-width: 20ch;
+  }
+  .faq-list {
+    margin-top: var(--s6);
+    max-width: 760px;
+  }
+  .q {
+    border-top: 1px solid var(--sageline);
+  }
+  .q summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--s4);
+    padding: var(--s4) 0;
+    cursor: pointer;
+    list-style: none;
+    font-weight: 700;
+    font-size: var(--t-md);
+    color: var(--ink);
+    min-height: 44px;
+  }
+  .q summary::-webkit-details-marker {
+    display: none;
+  }
+  .q :global(.q-chev) {
+    color: var(--mut);
+    flex: none;
+    transition: transform 0.2s ease;
+  }
+  .q[open] :global(.q-chev) {
+    transform: rotate(180deg);
+  }
+  .q p {
+    padding-bottom: var(--s5);
+    color: var(--mut);
+    max-width: 68ch;
+  }
+  .faq-more {
+    margin-top: var(--s6);
+    color: var(--mut);
+  }
+  .faq-more a {
+    font-weight: 700;
+  }
+
+  @media (max-width: 860px) {
+    .calc,
+    .tiers,
+    .terms-row,
+    .locked-grid,
+    .co-row {
+      grid-template-columns: 1fr;
+    }
+    .calc-out {
+      border-left: 0;
+      border-top: 1px solid var(--sageline);
+      padding-left: 0;
+      padding-top: var(--s5);
+    }
+    .tiers {
+      gap: var(--s6);
+    }
+    .terms-row {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  @media (max-width: 520px) {
+    .co-row {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+</style>

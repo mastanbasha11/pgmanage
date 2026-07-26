@@ -1,0 +1,161 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import { security } from '@/content/copy';
+import { site } from '@/content/site';
+
+// Accurate as of the current architecture. Where a detail is a policy the
+// owner must confirm before publishing, it is marked TODO in a comment and the
+// copy stays truthful rather than aspirational.
+const items = [
+  {
+    icon: 'bank',
+    h: 'Your data stays in India',
+    p: 'PGManage runs in Amazon Web Services’ Mumbai region (ap-south-1). Resident records, KYC and payment data are stored and processed in India — they do not leave the country in normal operation.',
+  },
+  {
+    icon: 'lock',
+    h: 'Encrypted in transit and at rest',
+    p: 'Every connection is HTTPS with HSTS enforced — there is no unencrypted way in. The database volume is encrypted at rest, and application secrets (payment keys, the WhatsApp token) live in AWS Secrets Manager, write-only over the API, never shown back after they are set.',
+  },
+  {
+    icon: 'grid',
+    h: 'One property’s data cannot touch another’s',
+    p: 'Each organisation’s data lives in its own isolated database schema. A request is pinned to one organisation for its entire life, so there is no query path from your account into anyone else’s — the separation is structural, not a filter someone could forget to apply.',
+  },
+  {
+    icon: 'key',
+    h: 'Role-based access, scoped to the property',
+    p: 'Owners, managers and collection staff each see only what their role allows. A staff member is limited to the properties you assign them; financial screens are gated to the roles that should see money. Access is a login per person, not a shared password.',
+  },
+  {
+    icon: 'ledger',
+    h: 'Every action is logged, before and after',
+    p: 'The audit log records who did what, with the value before and after, and flags sensitive actions. A recorded payment cannot be silently edited, and a deleted record can be restored. If something looks wrong, there is a trail to check it against.',
+  },
+  {
+    icon: 'download',
+    h: 'Your data is yours to take',
+    p: 'You can export residents, ledgers, payments and expenses as spreadsheets at any time — including the day you decide to leave. After cancellation we retain your data for a short grace period in case you return, then delete it.',
+  },
+];
+---
+
+<Base
+  title={security.meta.title}
+  description={security.meta.description}
+  path="/security"
+  ogSlug="security"
+>
+  <section class="wrap head">
+    <p class="eyebrow">Security</p>
+    <h1>{security.h1}</h1>
+    <p class="lede measure">{security.lead}</p>
+  </section>
+
+  <section class="wrap grid">
+    {
+      items.map((it) => (
+        <article class="card sc">
+          <span class="sc-ic">
+            <Icon name={it.icon as any} />
+          </span>
+          <h2>{it.h}</h2>
+          <p>{it.p}</p>
+        </article>
+      ))
+    }
+  </section>
+
+  <section class="wrap note">
+    <div class="note-inner card">
+      <h2>What we will not pretend</h2>
+      <p>
+        We are an operator who built a tool, not a security vendor with a wall of badges. We do not
+        claim certifications we do not hold. If you need something specific — a signed data
+        processing agreement, a penetration-test summary, a defined backup schedule in writing —
+        ask us directly and we will tell you plainly where we are, including where we are not there
+        yet.
+      </p>
+      <!-- TODO(owner): before publishing, confirm and, where true, state on this
+           page: (1) automated DB backup cadence + retention window, (2) whether a
+           third-party penetration test has been done, (3) the DPA availability,
+           (4) the internal-access policy (who at PGManage can view org data and
+           under what controls). Do not assert any of these until verified. -->
+      <p class="ct">
+        Security questions go to
+        <a href={`mailto:${site.contact.email}`}>{site.contact.email}</a>.
+      </p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head {
+    padding-block: var(--s7) var(--s6);
+    max-width: 760px;
+  }
+  .head h1 {
+    font-size: clamp(2.1rem, 5vw, var(--t-4xl));
+    margin-top: var(--s2);
+    max-width: 18ch;
+  }
+  .head .lede {
+    margin-top: var(--s4);
+    color: var(--mut);
+    font-size: var(--t-md);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--s4);
+  }
+  .sc {
+    padding: var(--s5);
+  }
+  .sc-ic {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--r-tile);
+    background: var(--sage2);
+    color: var(--forest);
+    font-size: 20px;
+  }
+  .sc h2 {
+    font-family: var(--font-body);
+    font-size: var(--t-md);
+    font-weight: 800;
+    margin-top: var(--s3);
+  }
+  .sc p {
+    margin-top: var(--s2);
+    color: var(--mut);
+    font-size: var(--t-sm);
+    line-height: 1.6;
+  }
+  .note {
+    padding-block: var(--s7) var(--s9);
+  }
+  .note-inner {
+    padding: var(--s7);
+    max-width: 760px;
+  }
+  .note-inner h2 {
+    font-size: var(--t-xl);
+  }
+  .note-inner p {
+    margin-top: var(--s3);
+    color: var(--mut);
+    line-height: 1.65;
+  }
+  .ct a {
+    font-weight: 700;
+  }
+  @media (max-width: 860px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

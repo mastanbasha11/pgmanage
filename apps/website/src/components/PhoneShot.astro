@@ -1,0 +1,50 @@
+---
+// Product imagery. Renders a generated phone screenshot as AVIF → WebP → PNG
+// with explicit intrinsic width/height (CLS defence). Every source comes from
+// scripts/shoot.mjs — this component reads its manifest for dims + alt text.
+import manifest from '../../public/media/manifest.json';
+
+interface Props {
+  name: string; // slug, e.g. "owner-collect-rent"
+  eager?: boolean; // hero image only
+  alt?: string; // override the manifest caption
+  class?: string;
+  sizes?: string;
+}
+
+const { name, eager = false, alt, class: cls = '', sizes = '(max-width: 640px) 60vw, 326px' } =
+  Astro.props;
+
+const meta = (manifest as Record<string, { w: number; h: number; alt: string }>)[name];
+if (!meta) {
+  throw new Error(
+    `PhoneShot: no screenshot named "${name}". Run \`npm run shoot\` and check the slug against public/media/manifest.json.`,
+  );
+}
+const altText = alt ?? meta.alt;
+---
+
+<picture class:list={['shot', cls]}>
+  <source srcset={`/media/${name}.avif`} type="image/avif" sizes={sizes} />
+  <source srcset={`/media/${name}.webp`} type="image/webp" sizes={sizes} />
+  <img
+    src={`/media/${name}.png`}
+    width={meta.w}
+    height={meta.h}
+    alt={altText}
+    loading={eager ? 'eager' : 'lazy'}
+    fetchpriority={eager ? 'high' : undefined}
+    decoding="async"
+  />
+</picture>
+
+<style>
+  .shot {
+    display: block;
+  }
+  .shot img {
+    width: 100%;
+    height: auto;
+    border-radius: 30px;
+  }
+</style>

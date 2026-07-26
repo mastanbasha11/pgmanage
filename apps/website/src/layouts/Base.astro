@@ -1,0 +1,99 @@
+---
+import '@/styles/tokens.css';
+import '@/styles/fonts.css';
+import '@/styles/base.css';
+import Header from '@/components/Header.astro';
+import Footer from '@/components/Footer.astro';
+import { site } from '@/content/site';
+
+interface Props {
+  title: string;
+  description: string;
+  path?: string; // route path for canonical + OG url
+  ogSlug?: string; // /og/<slug>.png ; defaults to 'default'
+  noindex?: boolean;
+  jsonLd?: Record<string, unknown>[];
+}
+
+const { title, description, path = Astro.url.pathname, ogSlug = 'default', noindex = false, jsonLd = [] } =
+  Astro.props;
+
+const canonical = new URL(path, site.url).href;
+const ogImage = new URL(`/og/${ogSlug}.png`, site.url).href;
+
+// Organization is on every page; other schemas are passed in per page.
+const organization = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: site.name,
+  url: site.url,
+  description: site.tagline,
+  email: site.contact.email,
+  areaServed: 'IN',
+};
+const schemas = [organization, ...jsonLd];
+---
+
+<!doctype html>
+<html lang="en-IN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+
+    <link
+      rel="preload"
+      href="/fonts/newsreader-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={site.name} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <meta name="theme-color" content="#1C443A" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    {
+      schemas.map((s) => (
+        <script type="application/ld+json" set:html={JSON.stringify(s)} />
+      ))
+    }
+
+    <!-- Plausible: privacy-first, no cookie banner. Off until an analytics
+         host is configured — set PUBLIC_PLAUSIBLE_SRC (and optionally
+         PUBLIC_PLAUSIBLE_DOMAIN) in the build env to enable. Keeping it gated
+         means no external request (and no console error) until it's real. -->
+    {
+      import.meta.env.PUBLIC_PLAUSIBLE_SRC && (
+        <script
+          defer
+          data-domain={import.meta.env.PUBLIC_PLAUSIBLE_DOMAIN ?? site.domain}
+          src={import.meta.env.PUBLIC_PLAUSIBLE_SRC}
+        />
+      )
+    }
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <Header />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

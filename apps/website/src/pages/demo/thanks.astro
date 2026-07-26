@@ -1,0 +1,70 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import { site, waLink } from '@/content/site';
+---
+
+<Base
+  title="Thanks — we’ll be in touch | PGManage"
+  description="Your demo request reached us."
+  path="/demo/thanks"
+  noindex={true}
+>
+  <section class="wrap ty">
+    <span class="tick"><Icon name="check" /></span>
+    <h1>Got it. We’ll message you.</h1>
+    <p class="lede">
+      Your request reached us. We’ll reach out on WhatsApp shortly to set a time — and if you send
+      your resident list first, we’ll have your property loaded before we talk.
+    </p>
+    <div class="cta">
+      <a class="btn btn--primary" href={waLink('Hi PGManage — I just booked a demo.')} rel="noopener">
+        <Icon name="chat" /> Message us now
+      </a>
+      <a class="btn btn--ghost" href="/">Back to home</a>
+    </div>
+    <p class="fine">Or email <a href={`mailto:${site.contact.email}`}>{site.contact.email}</a>.</p>
+  </section>
+</Base>
+
+<style>
+  .ty {
+    max-width: 620px;
+    padding-block: var(--s10) var(--s9);
+    text-align: center;
+  }
+  .tick {
+    display: inline-grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border-radius: var(--r-pill);
+    background: var(--ok-bg);
+    color: var(--ok);
+    font-size: 26px;
+    border: 1px solid var(--ok-line);
+  }
+  .ty h1 {
+    font-size: var(--t-3xl);
+    margin-top: var(--s5);
+  }
+  .ty .lede {
+    margin-top: var(--s4);
+    color: var(--mut);
+  }
+  .cta {
+    display: flex;
+    gap: var(--s3);
+    justify-content: center;
+    margin-top: var(--s6);
+    flex-wrap: wrap;
+  }
+  .fine {
+    margin-top: var(--s5);
+    font-size: var(--t-sm);
+    color: var(--mut);
+  }
+  .fine a {
+    font-weight: 700;
+  }
+</style>

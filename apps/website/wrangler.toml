@@ -1,0 +1,6 @@
+# Cloudflare Pages config. The site is static (dist/) plus one Pages Function
+# (functions/api/demo.ts) that backs the demo form. `wrangler pages deploy`
+# picks up the functions/ directory automatically from the project root.
+name = "pgmanage-site"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-07-01"
