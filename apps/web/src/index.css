@@ -2,44 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Plus Jakarta Sans (self-hosted, from the owner-portal mock) ─────────────
+   Extracted to /public/fonts so there's no external request (prod CSP + offline
+   safe). Weights 400/600/700/800, latin + latin-ext ranges. */
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:400;font-display:swap;src:url('/fonts/plus-jakarta-sans-400-latin.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:400;font-display:swap;src:url('/fonts/plus-jakarta-sans-400-latinext.woff2') format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;}
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:600;font-display:swap;src:url('/fonts/plus-jakarta-sans-600-latin.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:600;font-display:swap;src:url('/fonts/plus-jakarta-sans-600-latinext.woff2') format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;}
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:700;font-display:swap;src:url('/fonts/plus-jakarta-sans-700-latin.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:700;font-display:swap;src:url('/fonts/plus-jakarta-sans-700-latinext.woff2') format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;}
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:800;font-display:swap;src:url('/fonts/plus-jakarta-sans-800-latin.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:800;font-display:swap;src:url('/fonts/plus-jakarta-sans-800-latinext.woff2') format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;}
+
 @layer base {
   :root {
-    /* Redesign palette (mock: pgmanageredesign.html)
-       canvas #f3f5fa · ink #141a26 · hairline #e0e6ef · teal #0e9384 */
-    --background: 223 41% 97%;               /* #f3f5fa slate canvas */
-    --foreground: 220 30% 11%;               /* #141a26 ink */
+    /* Owner-app palette · "Forest & Sage" (mock: pgmanageownerportal.html).
+       Same identity as the resident portal: forest chrome on cream/sage
+       surfaces, green for money/ok, apricot for "needs attention", desaturated
+       hairline borders. Retargeting these shadcn vars re-skins every component
+       and semantic utility across all screens with no markup churn. */
+    --background: 90 22% 96%;                /* cream #F6F8F4 */
+    --foreground: 154 24% 11%;               /* ink #16241E */
 
     --card: 0 0% 100%;
-    --card-foreground: 220 30% 11%;
+    --card-foreground: 154 24% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 30% 11%;
+    --popover-foreground: 154 24% 11%;
 
-    --primary: 221 27% 12%;                  /* #161b26 — dark active states */
-    --primary-foreground: 210 40% 98%;
+    --primary: 160 44% 20%;                  /* forest #1D4A3B — chrome, sidebar, primary btns */
+    --primary-foreground: 135 18% 96%;       /* ondark #F2F6F3 */
 
-    --secondary: 220 29% 95%;                /* #eef1f6 slate-bg */
-    --secondary-foreground: 220 30% 11%;
+    --secondary: 144 16% 94%;                /* sage-bg #EDF2EF */
+    --secondary-foreground: 154 24% 11%;
 
-    --muted: 220 29% 95%;
-    --muted-foreground: 220 12% 46%;         /* #667085 */
+    --muted: 144 16% 94%;
+    --muted-foreground: 150 10% 41%;         /* muted #5E7268 */
 
-    --accent: 173 82% 32%;                   /* #0e9384 redesign teal */
+    --accent: 159 39% 30%;                   /* green #2F6A55 — interactive accent / active nav */
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 72% 51%;                /* #dc2626 */
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 8 51% 41%;                /* bad #9E4133 */
+    --destructive-foreground: 0 0% 100%;
 
-    --success: 145 72% 29%;                  /* #15803d */
+    --success: 159 39% 30%;                  /* ok #2F6A55 */
     --success-foreground: 0 0% 100%;
 
-    --warning: 28 92% 37%;                   /* #b45309 */
+    --warning: 39 49% 36%;                   /* warn #8A6A2F */
     --warning-foreground: 0 0% 100%;
 
-    --border: 218 33% 91%;                   /* #e0e6ef hairline */
-    --input: 218 33% 91%;
-    --ring: 173 82% 32%;                     /* teal focus ring */
-    --radius: 0.75rem;                       /* mock uses 11-15px rounded corners */
+    --border: 133 13% 87%;                   /* line #D9E2DB hairline */
+    --input: 133 13% 87%;
+    --ring: 159 39% 30%;                     /* green focus ring */
+    --radius: 0.75rem;                       /* mock uses 9-14px rounded corners */
   }
 
   .dark {
@@ -116,8 +131,12 @@
        app to standard dashboard density in one place. */
     font-size: 14px;
     font-family:
-      'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
-      'Helvetica Neue', Arial, sans-serif;
+      'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+      Roboto, 'Helvetica Neue', Arial, sans-serif;
+    /* ss01 = the mock's stylistic set; slight negative tracking gives Jakarta the
+       mock's dense heading feel without touching any per-screen font sizes. */
+    font-feature-settings: 'ss01' 1;
+    letter-spacing: -0.011em;
   }
 }
 
@@ -194,3 +213,155 @@
 .tenant-forest .bg-slate-100,
 .tenant-forest .bg-slate-50 { background-color:#ECF1EE !important }
 .tenant-forest .ring-slate-200 { --tw-ring-color:#DFE7E2 !important }
+
+
+/* ── Owner app · desaturate hardcoded palette classes to "Forest & Sage" ──────
+   The owner screens use ~140 literal Tailwind palette classes (emerald/amber/
+   rose/violet/sky/slate/orange/…) for status chips, KPI deltas and the
+   occupancy grid. Rather than edit every JSX site, remap them to the reference's
+   desaturated status families — hue is preserved (green=ok, amber=warn,
+   orange=attention, red=overdue, blue=scheduled, violet=note, slate=neutral) so
+   the signal survives, only the loudness drops. Global + !important; the resident
+   portal's `.tenant-forest` rules are more specific, so the portal is untouched. */
+.from-violet-50 { --tw-gradient-from:#EFEDF4 !important }
+.ring-red-400 { --tw-ring-color:#B5483C !important }
+.ring-emerald-200,
+.ring-teal-200 { --tw-ring-color:#C8DCD1 !important }
+.ring-blue-200,
+.ring-blue-300,
+.ring-sky-200 { --tw-ring-color:#CFDFE6 !important }
+.ring-violet-200 { --tw-ring-color:#D9D4E2 !important }
+.ring-slate-200 { --tw-ring-color:#DDE7E1 !important }
+.ring-amber-200 { --tw-ring-color:#E4D6B8 !important }
+.ring-orange-200 { --tw-ring-color:#E8D3C2 !important }
+.ring-red-100,
+.ring-red-200,
+.ring-rose-200 { --tw-ring-color:#EBD2CB !important }
+.bg-slate-900,
+.bg-slate-950 { background-color:#16241E !important }
+.bg-emerald-500,
+.bg-emerald-600,
+.bg-green-500 { background-color:#2F6A55 !important }
+.bg-blue-500,
+.bg-blue-600 { background-color:#3E5F72 !important }
+.bg-emerald-400 { background-color:#3E7D66 !important }
+.bg-sky-300 { background-color:#4A6E86 !important }
+.bg-violet-500,
+.bg-violet-600,
+.bg-violet-700 { background-color:#5B5470 !important }
+.bg-slate-400 { background-color:#8AA093 !important }
+.bg-red-500,
+.bg-rose-600,
+.bg-rose-700 { background-color:#9E4133 !important }
+.bg-orange-300,
+.bg-orange-400,
+.bg-orange-500 { background-color:#B0673A !important }
+.bg-amber-500 { background-color:#B08A3A !important }
+.bg-sky-200 { background-color:#CFDFE6 !important }
+.bg-blue-100,
+.bg-sky-100 { background-color:#DCE8EE !important }
+.bg-emerald-100,
+.bg-teal-100 { background-color:#DCEBE3 !important }
+.bg-slate-200 { background-color:#DDE7E1 !important }
+.bg-violet-100 { background-color:#E7E3EF !important }
+.bg-slate-100 { background-color:#E7EDE9 !important }
+.bg-cyan-50,
+.bg-emerald-50,
+.bg-emerald-50\/30,
+.bg-emerald-50\/40,
+.bg-emerald-50\/50,
+.bg-emerald-50\/60,
+.bg-teal-50,
+.bg-teal-50\/50,
+.bg-teal-50\/70 { background-color:#E9F1EC !important }
+.bg-blue-50,
+.bg-blue-50\/60,
+.bg-sky-50 { background-color:#EAF1F4 !important }
+.bg-slate-50\/50,
+.bg-slate-50\/60 { background-color:#EDF2EF !important }
+.bg-indigo-50,
+.bg-pink-50,
+.bg-purple-50,
+.bg-violet-50 { background-color:#EFEDF4 !important }
+.bg-orange-100 { background-color:#F0DCCB !important }
+.bg-amber-100,
+.bg-amber-100\/60 { background-color:#F1E7CC !important }
+.bg-red-100,
+.bg-rose-100 { background-color:#F4DED8 !important }
+.bg-orange-50,
+.bg-orange-50\/70 { background-color:#F7ECE2 !important }
+.bg-amber-50,
+.bg-amber-50\/40,
+.bg-amber-50\/60 { background-color:#F8F2E3 !important }
+.bg-red-50,
+.bg-rose-50,
+.bg-rose-50\/50 { background-color:#FAEEEB !important }
+.border-emerald-500 { border-color:#3E7D66 !important }
+.border-slate-900 { border-color:#5E7268 !important }
+.border-slate-400 { border-color:#8AA093 !important }
+.border-amber-400 { border-color:#9A7C45 !important }
+.border-orange-400,
+.border-orange-500 { border-color:#B0673A !important }
+.border-emerald-200,
+.border-teal-200,
+.border-teal-300 { border-color:#C8DCD1 !important }
+.border-blue-200,
+.border-sky-200 { border-color:#CFDFE6 !important }
+.border-violet-200 { border-color:#D9D4E2 !important }
+.border-slate-200,
+.border-slate-300,
+.divide-slate-200 { border-color:#DDE7E1 !important }
+.border-amber-200,
+.border-amber-300 { border-color:#E4D6B8 !important }
+.border-orange-200,
+.border-orange-300 { border-color:#E8D3C2 !important }
+.border-rose-200,
+.border-rose-300 { border-color:#EBD2CB !important }
+.text-emerald-900,
+.text-teal-900 { color:#1E4A3B !important }
+.text-cyan-600,
+.text-emerald-600,
+.text-emerald-700,
+.text-emerald-800,
+.text-emerald-800\/80,
+.text-green-600,
+.text-teal-600,
+.text-teal-700,
+.text-teal-800 { color:#2F6A55 !important }
+.text-blue-600,
+.text-blue-700,
+.text-sky-500,
+.text-sky-600,
+.text-sky-700,
+.text-sky-800 { color:#3E5F72 !important }
+.text-indigo-600,
+.text-pink-700,
+.text-purple-600,
+.text-violet-700,
+.text-violet-800 { color:#5B5470 !important }
+.text-amber-900 { color:#5E4A20 !important }
+.text-slate-500,
+.text-slate-600,
+.text-slate-700 { color:#5E7268 !important }
+.text-rose-900 { color:#6E2C22 !important }
+.text-amber-500,
+.text-amber-600,
+.text-amber-700,
+.text-amber-800,
+.text-amber-800\/80 { color:#8A6A2F !important }
+.text-slate-100,
+.text-slate-400 { color:#8AA093 !important }
+.text-amber-400 { color:#9A7C45 !important }
+.text-orange-600,
+.text-orange-700,
+.text-orange-800 { color:#9C5A2B !important }
+.text-red-600,
+.text-red-700,
+.text-rose-500,
+.text-rose-600,
+.text-rose-700,
+.text-rose-800 { color:#9E4133 !important }
+.text-red-300,
+.text-red-50,
+.text-rose-200 { color:#B5483C !important }
+.fill-amber-400 { fill:#9A7C45 !important }

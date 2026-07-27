@@ -1,6 +1,6 @@
 # PGManage — Handoff
 
-_Last updated: 2026-07-26 · `main` @ `eff4319` (deployed)_
+_Last updated: 2026-07-28 · `main` @ `131cea9` (deployed)_
 
 Multi-tenant SaaS for Paying-Guest / hostel owners in India. Owners manage
 properties, beds, tenants, rent, expenses, bookings and leads; residents get a
@@ -23,8 +23,12 @@ Prod host `ubuntu@13.126.139.161`, repo at `/opt/pgmanage`, behind Caddy.
 
 ### Web (`apps/web`)
 - **Owner app** — dashboards default to the **current fiscal month** (settlement-aware: rolls to next month once a property's close day passes; honours `billing_periods` overrides; IST). Leads is a **priority worklist** (list/board/split, saved views, live CSV export, bulk WhatsApp, "Added" date filter, newest-first default, auto-close of leads idle 30+ days). Payments/settings/rent/bookings/expenses revamped earlier.
+- **UI polish pass (`131cea9`):** every emoji "icon" replaced with **lucide** line icons (dashboard/expenses/leads/payments); dashboard charts trimmed to a **3-colour palette** (teal · slate · amber — money-in one green family, money-out red-amber); auth pages moved to semantic tokens (login now matches the app); Add-Property dialog label spacing fixed (focus ring no longer collides with the label). **Occupancy grid** redesigned: adaptive columns (**≤8 rooms → one row, else 5/row**), colours **occupied=green / vacant=orange / held-blocked=light-blue**, and an **"Upcoming month" toggle** that dashes occupied beds with a move-out date on the books (disabled until any tenant has a vacate date). See `components/occupancy-grid/OccupancyGrid.tsx`.
 - **Resident portal** (`pages/tenant-portal/**`) — repainted to **Forest & Sage** via a *scoped* theme (`.tenant-forest`, see constraints) so the owner app is untouched. **Home is restructured** to the two-column `pgmanageresidentweb` reference (forest rent-anchor card, quick actions, open requests, notice + a room / food / deposit / Wi-Fi sidebar). **Other portal screens are recoloured but NOT yet restructured** — see Pending.
 - Online payments (Razorpay) shipped: owners connect their own account under Settings → Payments; residents pay rent/advance/deposit; webhook is source of truth.
+
+### Demo portal (`scripts/seed_demo.py`)
+- Self-contained **"Greenview Coliving"** demo org for showcasing both apps — rich, fictional data (**no real LOOP data**): 4 staff, ~21 beds, 16 tenants (first two phones `+919000000001/2` for resident login), 3 months of ledger + payments, expenses, 12 leads, complaints, announcements, bookings, a property team (2 owners 60/40 + capital, manager, collector) and ROI fields. `settlement_day=28` so dashboards land on a full current month. Login `demo@pgmanage.in` / `DemoView@2026`. Idempotent — drops+rebuilds only the demo org. Run: `PYTHONPATH=. poetry run python scripts/seed_demo.py` (local) or `docker cp` + `exec -T -w /app backend python seed_demo.py` (prod).
 
 ### Mobile (`apps/mobile`)
 - **Staff app** — repainted to Forest & Sage (token remap; Ionicons, not the mock SVGs).
