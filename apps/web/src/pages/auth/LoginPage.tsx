@@ -58,10 +58,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen items-center justify-center bg-slate-50 p-4">
+    <div className="flex flex-col min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white text-xl font-bold">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground text-xl font-bold">
             P
           </div>
           <CardTitle>Welcome back</CardTitle>

@@ -19,6 +19,11 @@ import {
   Search,
   Download,
   Plus,
+  Calendar,
+  List,
+  LayoutGrid,
+  Columns3,
+  Users,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -180,7 +185,7 @@ function FollowupCell({ lead }: { lead: WorklistLead }) {
   if (state === 'today') return <Pill tone="a">Today</Pill>;
   if (state === 'future')
     return (
-      <span className="text-[12px] text-muted-foreground">📅 {formatDate(lead.next_followup_at!)}</span>
+      <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground"><Calendar className="h-3 w-3" />{formatDate(lead.next_followup_at!)}</span>
     );
   return <span className="text-[11.5px] text-[#98a0ad]">no follow-up</span>;
 }
@@ -500,7 +505,7 @@ export default function LeadWorklist({
                 mode === m ? 'bg-foreground text-white' : 'text-[#4a5261] hover:text-foreground'
               }`}
             >
-              {m === 'LIST' ? '☰ List' : m === 'BOARD' ? '▦ Board' : '⊟ Split'}
+              {m === 'LIST' ? (<span className="inline-flex items-center gap-1"><List className="h-3.5 w-3.5" /> List</span>) : m === 'BOARD' ? (<span className="inline-flex items-center gap-1"><LayoutGrid className="h-3.5 w-3.5" /> Board</span>) : (<span className="inline-flex items-center gap-1"><Columns3 className="h-3.5 w-3.5" /> Split</span>)}
             </button>
           ))}
         </div>
@@ -1048,7 +1053,7 @@ function BulkAssign({
   return (
     <Select value="" onValueChange={onAssign} disabled={disabled || staff.length === 0}>
       <SelectTrigger className="h-7 w-auto gap-1.5 border-[#cfe0f6] bg-white text-[12px] font-bold text-[#1c5cab]">
-        👤 Assign
+        <Users className="h-3.5 w-3.5" /> Assign
       </SelectTrigger>
       <SelectContent>
         {staff.map((s) => (

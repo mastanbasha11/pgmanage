@@ -328,7 +328,12 @@ export default function PropertyDetailPage() {
               </Button>
             </div>
           ) : (
-            <OccupancyGrid floors={floors} />
+            <OccupancyGrid
+              floors={floors}
+              upcoming={(vacant?.items ?? [])
+                .filter((b) => b.status === 'UPCOMING')
+                .map((b) => ({ id: b.id, availableFrom: b.available_from }))}
+            />
           )}
         </TabsContent>
 
@@ -365,10 +370,10 @@ function StatCard({
 }) {
   const toneCls = {
     default: 'bg-muted text-muted-foreground',
-    occupied: 'bg-sky-100 text-sky-700',
-    vacant: 'bg-emerald-100 text-emerald-700',
-    reserved: 'bg-amber-100 text-amber-700',
-    maintenance: 'bg-rose-100 text-rose-700',
+    occupied: 'bg-emerald-100 text-emerald-700',
+    vacant: 'bg-orange-100 text-orange-700',
+    reserved: 'bg-sky-100 text-sky-700',
+    maintenance: 'bg-sky-100 text-sky-700',
   }[tone];
   return (
     <Card>

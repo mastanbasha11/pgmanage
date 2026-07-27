@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Phone, Globe, MessageCircle, Wallet } from 'lucide-react';
+import { Phone, Globe, MessageCircle, Wallet, Calendar } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext,
@@ -92,7 +92,7 @@ function FollowupPill({ iso }: { iso?: string }) {
   }
   return (
     <Pill tone="s" dot={false}>
-      📅 {formatDate(iso)}
+      <Calendar className="mr-1 inline h-3 w-3" />{formatDate(iso)}
     </Pill>
   );
 }

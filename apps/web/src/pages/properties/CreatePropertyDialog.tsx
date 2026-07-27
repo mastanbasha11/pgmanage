@@ -93,33 +93,33 @@ export default function CreatePropertyDialog({ open, onClose, onCreated }: Props
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <div>
-            <Label>Property Name *</Label>
+            <Label className="mb-1.5 block">Property Name *</Label>
             <Input {...register('name')} placeholder="Sri Balaji PG — Block A" />
             {errors.name && (
               <p className="text-xs text-destructive mt-1">{errors.name.message}</p>
             )}
           </div>
           <div>
-            <Label>Address *</Label>
+            <Label className="mb-1.5 block">Address *</Label>
             <Input {...register('address_line1')} placeholder="123, Main Road" />
             {errors.address_line1 && (
               <p className="text-xs text-destructive mt-1">{errors.address_line1.message}</p>
             )}
           </div>
           <div>
-            <Label>Address Line 2</Label>
+            <Label className="mb-1.5 block">Address Line 2</Label>
             <Input {...register('address_line2')} placeholder="Near landmark" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>City *</Label>
+              <Label className="mb-1.5 block">City *</Label>
               <Input {...register('city')} placeholder="Bangalore" />
               {errors.city && (
                 <p className="text-xs text-destructive mt-1">{errors.city.message}</p>
               )}
             </div>
             <div>
-              <Label>State *</Label>
+              <Label className="mb-1.5 block">State *</Label>
               <Input {...register('state')} placeholder="Karnataka" />
               {errors.state && (
                 <p className="text-xs text-destructive mt-1">{errors.state.message}</p>
@@ -127,14 +127,14 @@ export default function CreatePropertyDialog({ open, onClose, onCreated }: Props
             </div>
           </div>
           <div>
-            <Label>PIN Code *</Label>
+            <Label className="mb-1.5 block">PIN Code *</Label>
             <Input {...register('pincode')} placeholder="560001" />
             {errors.pincode && (
               <p className="text-xs text-destructive mt-1">{errors.pincode.message}</p>
             )}
           </div>
           <div>
-            <Label>Google Maps URL (optional)</Label>
+            <Label className="mb-1.5 block">Google Maps URL (optional)</Label>
             <Input {...register('google_maps_url')} placeholder="https://maps.google.com/..." />
             {errors.google_maps_url && (
               <p className="text-xs text-destructive mt-1">{errors.google_maps_url.message}</p>

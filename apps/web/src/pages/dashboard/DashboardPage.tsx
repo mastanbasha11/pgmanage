@@ -14,7 +14,7 @@
  */
 import { useFiscalMonthState } from '@/hooks/useFiscalMonth';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { Building2, Plus } from 'lucide-react';
+import { BarChart3, Building2, Plus, Receipt, TrendingUp, Users, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -45,7 +45,8 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
 const NOW_YEAR = new Date().getFullYear();
 const YEARS = [NOW_YEAR - 1, NOW_YEAR, NOW_YEAR + 1];
 
-const RANK_COLORS = ['#2a78d6', '#1baf7a', '#e87ba4', '#eda100', '#eb6834', '#98a0ad', '#c7ccd6'];
+// Calm 3-colour palette for every ranked bar chart (teal · slate · amber).
+const RANK_COLORS = ['#0e9384', '#5b7c99', '#d99a3a'];
 
 // ── sparkline ────────────────────────────────────────────────────────────────
 
@@ -217,31 +218,31 @@ export default function DashboardPage() {
       label: 'Rent',
       value: rentOnly,
       note: `of ${formatPaise(summary.expected_rent_paise ?? summary.gross_rent_expected_paise ?? 0)} billed`,
-      color: '#2a78d6',
+      color: '#0e9384',
     },
     {
       label: 'Advance received',
       value: summary.advance_received_paise ?? 0,
       note: 'deposits + advance bookings',
-      color: '#1baf7a',
+      color: '#39a394',
     },
     {
       label: 'Daily stays',
       value: summary.daily_stays_paise ?? 0,
       note: 'daily-stay bookings',
-      color: '#eda100',
+      color: '#63b5a8',
     },
     {
       label: 'Power meters',
       value: summary.power_received_paise ?? 0,
       note: 'prepaid recharges',
-      color: '#eb6834',
+      color: '#8fc9bf',
     },
     {
       label: 'Opening balance',
       value: summary.opening_balance_paise ?? 0,
       note: 'carry-forward',
-      color: '#98a0ad',
+      color: '#b9ddd6',
     },
   ];
 
@@ -256,7 +257,7 @@ export default function DashboardPage() {
       label: 'Refunds given',
       value: summary.refunds_given_paise ?? 0,
       note: 'security-deposit refunds',
-      color: '#eb6834',
+      color: '#e0894e',
     },
   ];
 
@@ -445,7 +446,7 @@ export default function DashboardPage() {
 
       {/* 3 · Operating metrics */}
       <SectionCard
-        title="📊 Operating metrics"
+        title={<><BarChart3 className="h-4 w-4 text-accent" /> Operating metrics</>}
         sub="Unit economics and cash health — hover any tile for how it's computed."
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -475,7 +476,7 @@ export default function DashboardPage() {
       <div className="grid gap-3.5 lg:grid-cols-2">
         {(summary.owner_profits?.length ?? 0) > 0 && (
           <SectionCard
-            title="👥 Owner profit split"
+            title={<><Users className="h-4 w-4 text-accent" /> Owner profit split</>}
             sub={`Net profit ${formatPaise(profit)} split by configured share %.`}
           >
             <RankBars
@@ -491,7 +492,7 @@ export default function DashboardPage() {
         )}
         {(summary.top_recurring_spikes?.length ?? 0) > 0 && (
           <SectionCard
-            title="📈 Recurring spend — up vs last month"
+            title={<><TrendingUp className="h-4 w-4 text-accent" /> Recurring spend — up vs last month</>}
             sub="Expense buckets up ≥₹500 and ≥50% vs the previous window."
           >
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -558,7 +559,7 @@ export default function DashboardPage() {
       <div className="grid gap-3.5 lg:grid-cols-2">
         {(summary.cash_in_by_person?.length ?? 0) > 0 && (
           <SectionCard
-            title="💰 Cash collected by person"
+            title={<><Wallet className="h-4 w-4 text-accent" /> Cash collected by person</>}
             sub="Rent, advance & booking payments — by who received the money."
           >
             <RankBars
@@ -574,7 +575,7 @@ export default function DashboardPage() {
         )}
         {(summary.expenses_by_person?.length ?? 0) > 0 && (
           <SectionCard
-            title="🧾 Expenses by person"
+            title={<><Receipt className="h-4 w-4 text-accent" /> Expenses by person</>}
             sub="Approved spend logged against each staff member."
           >
             <RankBars
@@ -583,9 +584,7 @@ export default function DashboardPage() {
                 sub: `${p.count} expense${p.count === 1 ? '' : 's'}`,
                 value: p.total_paise,
                 display: formatPaise(p.total_paise),
-                color: ['#dc2626', '#e34948', '#eb6834', '#eda100', '#e87ba4', '#98a0ad', '#c7ccd6'][
-                  i % 7
-                ],
+                color: RANK_COLORS[i % RANK_COLORS.length],
               }))}
             />
           </SectionCard>

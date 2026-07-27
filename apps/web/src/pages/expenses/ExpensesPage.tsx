@@ -11,6 +11,9 @@ import {
   Eye,
   Repeat,
   Search,
+  Receipt,
+  TrendingDown,
+  Users,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -845,7 +848,7 @@ export default function ExpensesPage() {
         <div className="grid gap-3.5 lg:grid-cols-2">
           {(summary?.items?.length ?? 0) > 0 && (
             <SectionCard
-              title="🧾 Where the money went"
+              title={<><Receipt className="h-4 w-4 text-accent" /> Where the money went</>}
               sub="By category · bars are share of this month's total · badges compare vs last month."
             >
               <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
@@ -899,7 +902,7 @@ export default function ExpensesPage() {
           )}
 
           <SectionCard
-            title="📉 Spend trend"
+            title={<><TrendingDown className="h-4 w-4 text-accent" /> Spend trend</>}
             sub="Total expenses per month · last 12 months."
           >
             {trendPoints.length > 1 ? (
@@ -914,7 +917,7 @@ export default function ExpensesPage() {
 
         {isOwnerOrPartner && (summary?.by_person?.length ?? 0) > 0 && (
           <SectionCard
-            title="👥 Spend by person"
+            title={<><Users className="h-4 w-4 text-accent" /> Spend by person</>}
             sub="Approved spend logged against each staff member this month."
           >
             <RankBars

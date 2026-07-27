@@ -95,7 +95,7 @@ export default function PaymentsPage() {
   async function toggleEnabled(next: boolean) {
     try {
       await update.mutateAsync({ payments_enabled: next });
-      toast({ title: next ? 'Online payments are ON 🎉' : 'Online payments paused' });
+      toast({ title: next ? 'Online payments are ON' : 'Online payments paused' });
     } catch (err) {
       toast({ title: 'Could not update', description: getApiError(err), variant: 'destructive' });
     }
@@ -129,7 +129,7 @@ export default function PaymentsPage() {
         }`}
       >
         {liveOn
-          ? '✅ Online payments are ON. Residents can pay you now.'
+          ? 'Online payments are ON. Residents can pay you now.'
           : '⏳ Not on yet. Finish the steps below, then turn it on in Step 4.'}
       </div>
 
