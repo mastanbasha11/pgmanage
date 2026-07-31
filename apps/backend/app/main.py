@@ -15,6 +15,7 @@ from app.api.platform import admin as platform_admin
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 from app.api.v1 import (
+    account,
     announcements,
     audit_logs,
     auth,
@@ -235,6 +236,7 @@ app.include_router(dashboard.router, prefix=V1, tags=["dashboard"])
 app.include_router(bookings.router, prefix=V1, tags=["bookings"])
 app.include_router(audit_logs.router, prefix=V1, tags=["audit-logs"])
 app.include_router(public_leads.router, prefix=V1, tags=["public-leads"])
+app.include_router(account.router, prefix=V1, tags=["account"])
 app.include_router(tenant_portal.router, prefix=V1, tags=["tenant-portal"])
 app.include_router(menu.router, prefix=V1, tags=["menu"])
 app.include_router(inbox.router, prefix=V1, tags=["inbox"])

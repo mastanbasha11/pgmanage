@@ -116,6 +116,8 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = ""
     ADMIN_NOTIFICATION_EMAIL: str = ""
+    # Where user-facing support requests (e.g. account-deletion) are routed.
+    SUPPORT_EMAIL: str = "pgmanage36@gmail.com"
 
     # Public origin used to build absolute URLs in emails (e.g. approval links)
     APP_BASE_URL: str = "https://pgmanage.in"

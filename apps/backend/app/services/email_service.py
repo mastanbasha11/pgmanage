@@ -360,3 +360,37 @@ def send_tenant_otp_email(*, to_email: str, code: str, expires_minutes: int) -> 
 </div>
 """.strip()
     return send_email(to=to_email, subject=subject, body_text=body_text, body_html=body_html)
+
+
+def send_account_deletion_request_email(
+    *,
+    to_email: str,
+    role: str,
+    requester_name: str,
+    requester_email: str,
+    requester_phone: str | None,
+    reason: str | None,
+    app: str,
+) -> bool:
+    """Notify support that a user has asked to delete their account and data.
+
+    Backs the public /account/deletion-request endpoint and the /delete-account
+    web page (the URL declared in Play Data safety). We record the intent by
+    emailing support so it can be actioned within the stated window; nothing is
+    deleted automatically.
+    """
+    subject = f"Account deletion request — {role} ({app})"
+    lines = [
+        "A user has requested deletion of their PGManage account and data.",
+        "",
+        f"Role:   {role}",
+        f"App:    {app}",
+        f"Name:   {requester_name}",
+        f"Email:  {requester_email}",
+        f"Phone:  {requester_phone or '—'}",
+        f"Reason: {reason or '—'}",
+        "",
+        "Action this within the window stated at https://pgmanage.in/delete-account.",
+    ]
+    body_text = "\n".join(lines)
+    return send_email(to=to_email, subject=subject, body_text=body_text)
