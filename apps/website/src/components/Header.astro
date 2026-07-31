@@ -1,6 +1,7 @@
 ---
 import { site, waLink } from '@/content/site';
 import Icon from '@/components/Icon.astro';
+import BrandMark from '@/components/BrandMark.astro';
 
 const nav = site.nav;
 const wa = waLink();
@@ -11,7 +12,7 @@ const isActive = (href: string) => current === href || current.startsWith(href +
 <header class="hd">
   <div class="wrap bar">
     <a class="brand" href="/" aria-label={`${site.name} home`}>
-      <span class="mark" aria-hidden="true">P</span>
+      <BrandMark size={30} class="mark" />
       <span class="wordmark">{site.name}</span>
     </a>
 
@@ -78,16 +79,8 @@ const isActive = (href: string) => current === href || current.startsWith(href +
     margin-right: auto;
   }
   .mark {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    background: var(--forest);
-    color: #fff;
-    font-family: var(--font-body);
-    font-weight: 800;
-    font-size: 15px;
+    display: block;
+    flex: none;
   }
   .wordmark {
     font-family: var(--font-body);

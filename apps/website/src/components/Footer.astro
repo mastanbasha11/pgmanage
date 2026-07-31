@@ -1,5 +1,6 @@
 ---
 import { site, waLink } from '@/content/site';
+import BrandMark from '@/components/BrandMark.astro';
 const year = 2026; // Date.* is avoided in this build; bump at release.
 ---
 
@@ -8,7 +9,7 @@ const year = 2026; // Date.* is avoided in this build; bump at release.
     <div class="grid">
       <div class="brandcol">
         <a class="brand" href="/" aria-label={`${site.name} home`}>
-          <span class="mark" aria-hidden="true">P</span>
+          <BrandMark size={30} reversed class="mark" />
           <span class="wordmark">{site.name}</span>
         </a>
         <p class="tag">{site.tagline}</p>
@@ -71,15 +72,9 @@ const year = 2026; // Date.* is avoided in this build; bump at release.
     color: #fff;
   }
   .mark {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    background: #fff;
-    color: var(--forest);
-    font-family: var(--font-body);
-    font-weight: 800;
+    display: block;
+    flex: none;
+    color: #fff;
   }
   .wordmark {
     font-family: var(--font-body);

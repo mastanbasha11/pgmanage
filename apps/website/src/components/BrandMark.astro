@@ -1,0 +1,57 @@
+---
+/**
+ * PGManage "ledger" mark (from the pgmanagelogo identity doc — the chosen
+ * direction). A 3×2 grid of beds with the top-right one as the accent (the
+ * "empty bed we find you"), over a ledger total bar.
+ *
+ * - default: forest fills + sage accent bed, for light grounds (header).
+ * - reversed: currentColor fills + an outlined accent bed, for dark grounds
+ *   (footer on forest) — inherits the surrounding text colour.
+ */
+interface Props {
+  size?: number;
+  reversed?: boolean;
+  class?: string;
+}
+const { size = 30, reversed = false, class: cls } = Astro.props;
+---
+
+{
+  reversed ? (
+    <svg
+      class={cls}
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      aria-hidden="true"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect x="5" y="5" width="9" height="11" rx="2.4" fill="currentColor" />
+      <rect x="19.5" y="5" width="9" height="11" rx="2.4" fill="currentColor" />
+      <rect x="35.3" y="6.3" width="6.4" height="8.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="2.6" />
+      <rect x="5" y="20" width="9" height="11" rx="2.4" fill="currentColor" />
+      <rect x="19.5" y="20" width="9" height="11" rx="2.4" fill="currentColor" />
+      <rect x="34" y="20" width="9" height="11" rx="2.4" fill="currentColor" />
+      <rect x="5" y="35" width="38" height="8" rx="2.6" fill="currentColor" />
+    </svg>
+  ) : (
+    <svg
+      class={cls}
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      aria-hidden="true"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect x="5" y="5" width="9" height="11" rx="2.4" fill="#1D4A3B" />
+      <rect x="19.5" y="5" width="9" height="11" rx="2.4" fill="#1D4A3B" />
+      <rect x="34" y="5" width="9" height="11" rx="2.4" fill="#7C9E8B" />
+      <rect x="5" y="20" width="9" height="11" rx="2.4" fill="#1D4A3B" />
+      <rect x="19.5" y="20" width="9" height="11" rx="2.4" fill="#1D4A3B" />
+      <rect x="34" y="20" width="9" height="11" rx="2.4" fill="#1D4A3B" />
+      <rect x="5" y="35" width="38" height="8" rx="2.6" fill="#1D4A3B" />
+    </svg>
+  )
+}

@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#1C443A"/>
-  <text x="16" y="22" font-family="Georgia, 'Times New Roman', serif" font-size="19" font-weight="700" fill="#F2F6F3" text-anchor="middle">P</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect width="48" height="48" rx="11" fill="#1D4A3B"/>
+  <g transform="translate(5.04 5.04) scale(0.79)">
+    <rect x="5" y="5" width="9" height="11" rx="2.4" fill="#FFFFFF"/>
+    <rect x="19.5" y="5" width="9" height="11" rx="2.4" fill="#FFFFFF"/>
+    <rect x="34" y="5" width="9" height="11" rx="2.4" fill="#A9C6B6"/>
+    <rect x="5" y="20" width="9" height="11" rx="2.4" fill="#FFFFFF"/>
+    <rect x="19.5" y="20" width="9" height="11" rx="2.4" fill="#FFFFFF"/>
+    <rect x="34" y="20" width="9" height="11" rx="2.4" fill="#FFFFFF"/>
+    <rect x="5" y="35" width="38" height="8" rx="2.6" fill="#FFFFFF"/>
+  </g>
 </svg>
