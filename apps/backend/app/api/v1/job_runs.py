@@ -51,6 +51,9 @@ def _serialize(row: Any) -> dict:
         "orgs_processed": row.orgs_processed,
         "messages_sent": row.messages_sent,
         "messages_failed": row.messages_failed,
+        # skipped lives in details only (no dedicated column) — it's the count of
+        # sends we didn't attempt because the org never connected WhatsApp.
+        "messages_skipped": (row.details or {}).get("messages_skipped", 0) if row.details else 0,
         "ledger_entries_created": row.ledger_entries_created,
         "error_count": len((row.details or {}).get("errors", [])) if row.details else 0,
     }
@@ -179,6 +182,8 @@ async def download_job_run_log(
             f"Orgs processed:   {row.orgs_processed}",
             f"Messages sent:    {row.messages_sent}",
             f"Messages failed:  {row.messages_failed}",
+            f"Messages skipped: {details.get('messages_skipped', 0)}"
+            "  (orgs with WhatsApp not connected)",
             f"Ledger created:   {row.ledger_entries_created}",
             "",
             "Per-org breakdown",
@@ -189,11 +194,17 @@ async def download_job_run_log(
                 f"- org {o.get('org_id')}: sent={o.get('sent', 0)} "
                 f"failed={o.get('failed', 0)}"
             )
+            if o.get("skipped"):
+                line += f" skipped={o['skipped']}"
             if "ledger_created" in o:
                 line += f" ledger={o.get('ledger_created', 0)}"
             if o.get("error"):
                 line += f"  ERROR: {o['error']}"
             lines.append(line)
+            # Why each send didn't go out (aggregated, no tenant PII), e.g.
+            #   · WhatsApp not configured for this org ×5
+            for reason, count in (o.get("reasons") or {}).items():
+                lines.append(f"    · {reason} ×{count}")
         errors = details.get("errors", [])
         if errors:
             lines += ["", "Errors", "-" * 40]

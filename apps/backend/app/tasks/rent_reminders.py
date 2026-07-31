@@ -23,10 +23,32 @@ def _print_summary(r: dict) -> None:
     print(
         f"[{r['job_name']}] orgs={r['orgs_processed']} "
         f"sent={r['messages_sent']} failed={r['messages_failed']} "
+        f"skipped={r.get('messages_skipped', 0)} "
         f"ledger={r.get('ledger_entries_created', 0)} "
         f"errors={len(r['errors'])}"
         + (f" FATAL={r['fatal_error']}" if r.get("fatal_error") else "")
     )
+
+
+def _record_send_failure(res: dict, results: dict, o: dict) -> None:
+    """Account for a send that returned success=False.
+
+    An org that simply never connected WhatsApp isn't a *failure* — the send
+    endpoint returns "WhatsApp not configured for this org" and there's nothing
+    to fix on our side, so we count it as **skipped** (keeps a run green and
+    stops unconfigured orgs from showing an alarming `failed=N`). Everything
+    else (Meta rejection, bad number, network) is a real failure. Either way we
+    aggregate the reason string with a count so the log says *what* happened
+    — without leaking any tenant PII across the org boundary."""
+    reason = (res.get("error") or "unknown error").strip()
+    if "not configured" in reason.lower():
+        results["messages_skipped"] += 1
+        o["skipped"] = o.get("skipped", 0) + 1
+    else:
+        results["messages_failed"] += 1
+        o["failed"] += 1
+    reasons = o.setdefault("reasons", {})
+    reasons[reason] = reasons.get(reason, 0) + 1
 
 
 async def _record_job_run(started_at: datetime, results: dict) -> None:
@@ -86,6 +108,7 @@ async def _generate_and_remind(event: dict, context) -> dict:
         "ledger_entries_created": 0,
         "messages_sent": 0,
         "messages_failed": 0,
+        "messages_skipped": 0,
         "errors": [],
         "orgs": [],
     }
@@ -170,8 +193,7 @@ async def _generate_and_remind(event: dict, context) -> dict:
                                 results["messages_sent"] += 1
                                 o["sent"] += 1
                             else:
-                                results["messages_failed"] += 1
-                                o["failed"] += 1
+                                _record_send_failure(res, results, o)
 
                     await db.commit()
                     results["orgs_processed"] += 1
@@ -246,6 +268,7 @@ async def _send_overdue_reminders(event: dict, context) -> dict:
         "orgs_processed": 0,
         "messages_sent": 0,
         "messages_failed": 0,
+        "messages_skipped": 0,
         "errors": [],
         "orgs": [],
     }
@@ -310,8 +333,7 @@ async def _send_overdue_reminders(event: dict, context) -> dict:
                             results["messages_sent"] += 1
                             o["sent"] += 1
                         else:
-                            results["messages_failed"] += 1
-                            o["failed"] += 1
+                            _record_send_failure(res, results, o)
 
                     await db.commit()
                     results["orgs_processed"] += 1

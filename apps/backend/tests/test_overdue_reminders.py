@@ -192,3 +192,41 @@ def test_repeat_throttle_default_is_daily() -> None:
         f"OVERDUE_REPEAT_DAYS should default to 1 (daily); got "
         f"{settings.OVERDUE_REPEAT_DAYS}"
     )
+
+
+def test_unconfigured_org_is_skipped_not_failed() -> None:
+    """An org that never connected WhatsApp must count as skipped, not failed.
+
+    This is what stopped a run showing an alarming `failed=5` for orgs that
+    simply hadn't set up WhatsApp — there's nothing to fix, so it shouldn't
+    flip the run to PARTIAL or look like a delivery failure.
+    """
+    from app.tasks.rent_reminders import _record_send_failure
+
+    results = {"messages_failed": 0, "messages_skipped": 0}
+    o: dict = {"sent": 0, "failed": 0}
+    _record_send_failure(
+        {"success": False, "error": "WhatsApp not configured for this org"}, results, o
+    )
+    assert results["messages_skipped"] == 1
+    assert results["messages_failed"] == 0
+    assert o["skipped"] == 1
+    assert o["failed"] == 0
+    # the reason is aggregated with a count, so the log can say *what* happened
+    assert o["reasons"]["WhatsApp not configured for this org"] == 1
+
+
+def test_real_send_error_counts_as_failed_with_reason() -> None:
+    """A genuine send error (Meta rejection, bad number, network) is a failure,
+    and its reason is aggregated so the downloadable log isn't a mystery."""
+    from app.tasks.rent_reminders import _record_send_failure
+
+    results = {"messages_failed": 0, "messages_skipped": 0}
+    o: dict = {"sent": 0, "failed": 0}
+    reason = "Meta 400 (code=132): template not approved"
+    _record_send_failure({"success": False, "error": reason}, results, o)
+    _record_send_failure({"success": False, "error": reason}, results, o)
+    assert results["messages_failed"] == 2
+    assert results["messages_skipped"] == 0
+    assert o["failed"] == 2
+    assert o["reasons"][reason] == 2
