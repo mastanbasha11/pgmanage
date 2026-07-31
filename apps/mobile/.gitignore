@@ -4,3 +4,5 @@
 
 expo-env.d.ts
 # @end expo-cli*.p8
+ios-creds/
+credentials.json

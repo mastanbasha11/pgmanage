@@ -38,7 +38,8 @@
         "buildType": "app-bundle"
       },
       "ios": {
-        "resourceClass": "m-medium"
+        "resourceClass": "m-medium",
+        "credentialsSource": "local"
       },
       "autoIncrement": true
     }

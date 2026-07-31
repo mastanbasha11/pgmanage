@@ -1,1 +1,3 @@
 *.p8
+ios-creds/
+credentials.json
