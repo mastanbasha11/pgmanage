@@ -1088,6 +1088,24 @@ async def update_whatsapp_settings(
     # org/property owns this phone_number_id.
     if body.whatsapp_phone_number_id:
         schema_name = get_org_schema_name(ctx.org_id)
+        # A Meta phone_number_id belongs to exactly one org. public.whatsapp_routing
+        # is a shared table, so guard the upsert: an owner must NOT be able to
+        # overwrite (hijack) another org's routing — that would divert that org's
+        # inbound WhatsApp webhooks into this org's schema.
+        claimed_by = (
+            await db.execute(
+                text(
+                    "SELECT org_id FROM public.whatsapp_routing "
+                    "WHERE phone_number_id = :pnid"
+                ),
+                {"pnid": body.whatsapp_phone_number_id},
+            )
+        ).scalar()
+        if claimed_by is not None and str(claimed_by) != str(ctx.org_id):
+            raise ConflictError(
+                "This WhatsApp phone number is already connected to another "
+                "organisation. Disconnect it there first, or contact support."
+            )
         await db.execute(
             text(
                 """
@@ -1100,6 +1118,9 @@ async def update_whatsapp_settings(
                     property_id = EXCLUDED.property_id,
                     whatsapp_number = COALESCE(EXCLUDED.whatsapp_number,
                                                public.whatsapp_routing.whatsapp_number)
+                -- Belt-and-suspenders against a race between the SELECT above and
+                -- this INSERT: only ever update a row this org already owns.
+                WHERE public.whatsapp_routing.org_id = EXCLUDED.org_id
                 """
             ),
             {

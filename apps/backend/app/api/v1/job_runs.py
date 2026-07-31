@@ -40,22 +40,51 @@ def _duration_seconds(row: Any) -> float | None:
     return None
 
 
-def _serialize(row: Any) -> dict:
+def _org_slice(details: dict | None, org_id: Any) -> dict | None:
+    """This org's entry from a run's per-org breakdown (None if not processed).
+
+    `public.job_runs` is a platform-wide table — the background jobs sweep every
+    org and store a per-org breakdown in `details.orgs`. An owner must only ever
+    see their own org's slice, never the aggregate or another org's row."""
+    for o in (details or {}).get("orgs", []):
+        if o.get("org_id") == str(org_id):
+            return o
+    return None
+
+
+def _org_status(details: dict | None, o: dict | None) -> str:
+    """Run status from THIS org's point of view.
+
+    Never surfaces that some *other* org failed: a run where the caller's org
+    was fine reads SUCCESS even if the platform-wide status was PARTIAL."""
+    if (details or {}).get("fatal_error") and o is None:
+        return "FAILED"
+    if o and (o.get("error") or o.get("failed")):
+        return "PARTIAL"
+    return "SUCCESS"
+
+
+def _serialize(row: Any, org_id: Any) -> dict:
+    """Owner-facing view of a run, scoped to the caller's org ONLY.
+
+    All counts/status/errors are derived from this org's slice; the cross-org
+    aggregate columns (orgs_processed, global messages_*) are deliberately
+    dropped so no other org's activity is exposed."""
+    details = row.details or {}
+    o = _org_slice(details, org_id)
     return {
         "id": str(row.id),
         "job_name": row.job_name,
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "duration_seconds": _duration_seconds(row),
-        "status": row.status,
-        "orgs_processed": row.orgs_processed,
-        "messages_sent": row.messages_sent,
-        "messages_failed": row.messages_failed,
-        # skipped lives in details only (no dedicated column) — it's the count of
-        # sends we didn't attempt because the org never connected WhatsApp.
-        "messages_skipped": (row.details or {}).get("messages_skipped", 0) if row.details else 0,
-        "ledger_entries_created": row.ledger_entries_created,
-        "error_count": len((row.details or {}).get("errors", [])) if row.details else 0,
+        "status": _org_status(details, o),
+        "messages_sent": (o or {}).get("sent", 0),
+        "messages_failed": (o or {}).get("failed", 0),
+        # sends skipped because THIS org hasn't connected WhatsApp.
+        "messages_skipped": (o or {}).get("skipped", 0),
+        "ledger_entries_created": (o or {}).get("ledger_created", 0),
+        "error_count": 1 if (o and o.get("error")) else 0,
     }
 
 
@@ -68,40 +97,38 @@ async def list_job_runs(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> dict:
-    where: list[str] = []
     params: dict[str, Any] = {}
+    where_sql = ""
     if job_name:
-        where.append("job_name = :job_name")
+        where_sql = "WHERE job_name = :job_name"
         params["job_name"] = job_name
-    if status:
-        where.append("status = :status")
-        params["status"] = status
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
-    total = (
-        await db.execute(
-            text(f"SELECT COUNT(*) FROM public.job_runs {where_sql}"), params
-        )
-    ).scalar() or 0
-
-    params["limit"] = page_size
-    params["offset"] = (page - 1) * page_size
+    # `status` can only be derived from each run's details JSON (it's the
+    # ORG-SCOPED status, not the platform-wide column), so we scope + filter +
+    # paginate in memory. job_runs is tiny (~2 rows/day); bound the scan to the
+    # most recent 1000 runs so this stays cheap.
     rows = (
         await db.execute(
             text(
                 f"SELECT {_COLUMNS} FROM public.job_runs {where_sql} "
-                "ORDER BY started_at DESC LIMIT :limit OFFSET :offset"
+                "ORDER BY started_at DESC LIMIT 1000"
             ),
             params,
         )
     ).fetchall()
 
+    items = [_serialize(r, ctx.org_id) for r in rows]
+    if status:
+        items = [i for i in items if i["status"] == status]
+
+    total = len(items)
+    start = (page - 1) * page_size
     return {
-        "items": [_serialize(r) for r in rows],
+        "items": items[start : start + page_size],
         "total": total,
         "page": page,
         "page_size": page_size,
-        "has_next": (page * page_size) < total,
+        "has_next": start + page_size < total,
     }
 
 
@@ -163,9 +190,23 @@ async def download_job_run_log(
             for m in msg_rows
         ]
 
+    # Scope EVERYTHING below to the caller's org. Never emit the full
+    # details.orgs array or details.errors (those carry other orgs' ids, counts
+    # and failure reasons). `messages` is already org-scoped via search_path.
+    my_org = _org_slice(details, ctx.org_id) or {}
+    my_reasons = my_org.get("reasons") or {}
+
     if fmt == "json":
+        scoped_details = {
+            "messages_sent": my_org.get("sent", 0),
+            "messages_failed": my_org.get("failed", 0),
+            "messages_skipped": my_org.get("skipped", 0),
+            "ledger_entries_created": my_org.get("ledger_created", 0),
+            "error": my_org.get("error"),
+            "reasons": my_reasons,
+        }
         body = json.dumps(
-            {**_serialize(row), "details": details, "messages": messages},
+            {**_serialize(row, ctx.org_id), "details": scoped_details, "messages": messages},
             indent=2, default=str,
         )
         media = "application/json"
@@ -178,39 +219,20 @@ async def download_job_run_log(
             f"Started:          {row.started_at}",
             f"Finished:         {row.finished_at}",
             f"Duration (s):     {_duration_seconds(row)}",
-            f"Status:           {row.status}",
-            f"Orgs processed:   {row.orgs_processed}",
-            f"Messages sent:    {row.messages_sent}",
-            f"Messages failed:  {row.messages_failed}",
-            f"Messages skipped: {details.get('messages_skipped', 0)}"
-            "  (orgs with WhatsApp not connected)",
-            f"Ledger created:   {row.ledger_entries_created}",
-            "",
-            "Per-org breakdown",
-            "-" * 40,
+            f"Status:           {_org_status(details, my_org or None)}",
+            f"Messages sent:    {my_org.get('sent', 0)}",
+            f"Messages failed:  {my_org.get('failed', 0)}",
+            f"Messages skipped: {my_org.get('skipped', 0)}"
+            "  (WhatsApp not connected)",
+            f"Ledger created:   {my_org.get('ledger_created', 0)}",
         ]
-        for o in details.get("orgs", []):
-            line = (
-                f"- org {o.get('org_id')}: sent={o.get('sent', 0)} "
-                f"failed={o.get('failed', 0)}"
-            )
-            if o.get("skipped"):
-                line += f" skipped={o['skipped']}"
-            if "ledger_created" in o:
-                line += f" ledger={o.get('ledger_created', 0)}"
-            if o.get("error"):
-                line += f"  ERROR: {o['error']}"
-            lines.append(line)
-            # Why each send didn't go out (aggregated, no tenant PII), e.g.
+        if my_org.get("error"):
+            lines += ["", f"Run error: {my_org['error']}"]
+        if my_reasons:
+            # Why sends didn't go out (aggregated, no tenant PII), e.g.
             #   · WhatsApp not configured for this org ×5
-            for reason, count in (o.get("reasons") or {}).items():
-                lines.append(f"    · {reason} ×{count}")
-        errors = details.get("errors", [])
-        if errors:
-            lines += ["", "Errors", "-" * 40]
-            lines += [f"- {e.get('org_id')}: {e.get('error')}" for e in errors]
-        if details.get("fatal_error"):
-            lines += ["", f"FATAL: {details['fatal_error']}"]
+            lines += ["", "Why messages didn't send", "-" * 40]
+            lines += [f"- {reason} ×{count}" for reason, count in my_reasons.items()]
 
         lines += ["", f"Messages sent this run ({len(messages)})", "=" * 40]
         for m in messages:

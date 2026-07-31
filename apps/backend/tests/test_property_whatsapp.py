@@ -137,8 +137,13 @@ def test_build_params_substitution_helper():
 async def test_patch_whatsapp_settings_persists_and_routes(
     client: AsyncClient, test_owner: dict, test_property: dict
 ):
+    # A Meta phone_number_id belongs to exactly one org (public.whatsapp_routing
+    # is a shared table). Derive a per-org id so repeat test runs don't collide
+    # with a prior run's leftover routing row — which the cross-org hijack guard
+    # in the endpoint now (correctly) rejects with 409.
+    pnid = str(test_owner["org_id"].int)[:15]
     payload = {
-        "whatsapp_phone_number_id": "111222333444555",
+        "whatsapp_phone_number_id": pnid,
         "whatsapp_number": "+919999900001",
         "whatsapp_access_token": "EAAFakeTokenForTests",
         "upi_vpa": "loopliving@okhdfc",
@@ -157,7 +162,7 @@ async def test_patch_whatsapp_settings_persists_and_routes(
     )
     assert r2.status_code == 200
     got = r2.json()
-    assert got["whatsapp_phone_number_id"] == "111222333444555"
+    assert got["whatsapp_phone_number_id"] == pnid
     assert got["whatsapp_number"] == "+919999900001"
     assert got["upi_vpa"] == "loopliving@okhdfc"
     assert got["has_access_token"] is True
@@ -179,12 +184,13 @@ async def test_patch_whatsapp_settings_rejects_supervisor(
 async def test_whatsapp_test_send_owner_ok_in_local(
     client: AsyncClient, test_owner: dict, test_property: dict
 ):
-    # Connect first so credentials resolve.
+    # Connect first so credentials resolve. Per-org phone_number_id so repeat
+    # runs don't trip the cross-org routing guard on a leftover row.
     await client.patch(
         f"/api/v1/properties/{test_property['property_id']}/whatsapp",
         headers=auth_headers(test_owner["token"]),
         json={
-            "whatsapp_phone_number_id": "111222333444555",
+            "whatsapp_phone_number_id": str(test_owner["org_id"].int)[:15],
             "whatsapp_access_token": "EAAFakeTokenForTests",
         },
     )
@@ -226,3 +232,56 @@ async def test_whatsapp_test_send_rejects_supervisor(
         json={"to_phone": "+919999988888"},
     )
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_patch_whatsapp_cannot_hijack_another_orgs_number(
+    client: AsyncClient, test_owner: dict, test_property: dict, db
+):
+    """A phone_number_id already routed to another org must NOT be claimable.
+
+    public.whatsapp_routing is shared across orgs; without the guard, an owner
+    could point another org's Meta number at their own schema and receive that
+    org's inbound WhatsApp webhooks. Expect a 409, and the routing row must be
+    left untouched (still pointing at the other org)."""
+    import uuid
+
+    from sqlalchemy import text
+
+    other_org = uuid.uuid4()
+    other_schema = f"org_{str(other_org).replace('-', '_')}"
+    pnid = str(uuid.uuid4().int)[:15]  # unique per run
+    await db.execute(
+        text("""
+            INSERT INTO public.whatsapp_routing
+                (phone_number_id, org_id, schema_name, property_id, whatsapp_number)
+            VALUES (:pnid, :org, :schema, :pid, '+910000000000')
+        """),
+        {"pnid": pnid, "org": str(other_org), "schema": other_schema,
+         "pid": str(uuid.uuid4())},
+    )
+    await db.commit()
+    try:
+        r = await client.patch(
+            f"/api/v1/properties/{test_property['property_id']}/whatsapp",
+            headers=auth_headers(test_owner["token"]),
+            json={"whatsapp_phone_number_id": pnid,
+                  "whatsapp_access_token": "EAAFakeTokenForTests"},
+        )
+        assert r.status_code == 409, r.text
+
+        # The other org's routing must be intact — not repointed to us.
+        still = (
+            await db.execute(
+                text("SELECT org_id FROM public.whatsapp_routing "
+                     "WHERE phone_number_id = :p"),
+                {"p": pnid},
+            )
+        ).scalar()
+        assert str(still) == str(other_org)
+    finally:
+        await db.execute(
+            text("DELETE FROM public.whatsapp_routing WHERE phone_number_id = :p"),
+            {"p": pnid},
+        )
+        await db.commit()

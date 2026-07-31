@@ -184,7 +184,7 @@ export default function JobMonitorPage() {
                 <div className="mt-3 grid grid-cols-4 gap-2 border-t pt-2">
                   <Stat label="Sent" value={run.messages_sent} />
                   <Stat label="Failed" value={run.messages_failed} danger />
-                  <Stat label="Orgs" value={run.orgs_processed} />
+                  <Stat label="Skipped" value={run.messages_skipped} />
                   <Stat label="Ledger" value={run.ledger_entries_created} />
                 </div>
               </div>

@@ -8,9 +8,9 @@ export interface JobRun {
   finished_at: string | null;
   duration_seconds: number | null;
   status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
-  orgs_processed: number;
   messages_sent: number;
   messages_failed: number;
+  messages_skipped: number;
   ledger_entries_created: number;
   error_count: number;
 }
