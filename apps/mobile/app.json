@@ -61,6 +61,16 @@
           "photosPermission": "PGManage needs access to your photos so you can attach expense receipts and tenant documents.",
           "cameraPermission": "PGManage needs camera access so you can photograph expense receipts and tenant documents."
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 24
+          }
+        }
       ]
     ],
     "experiments": {

@@ -20,6 +20,7 @@
     "axios": "^1.7.2",
     "date-fns": "^3.6.0",
     "expo": "~51.0.0",
+    "expo-build-properties": "~0.12.5",
     "expo-constants": "~16.0.0",
     "expo-linking": "~6.3.0",
     "expo-localization": "~15.0.3",
@@ -51,8 +52,13 @@
   },
   "jest": {
     "preset": "jest-expo",
-    "setupFiles": ["./jest.setup.ts"],
-    "testMatch": ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.test.tsx"],
+    "setupFiles": [
+      "./jest.setup.ts"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.test.ts",
+      "**/__tests__/**/*.test.tsx"
+    ],
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|i18n-js|axios))"
     ]
