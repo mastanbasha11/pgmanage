@@ -48,6 +48,7 @@ import {
   useRecheckin,
   useGiveNotice,
   useUpdateTenant,
+  useReviseRent,
   useRecordRefund,
   useUploadIdProof,
   useDeleteIdProof,
@@ -75,6 +76,7 @@ export default function TenantDetailPage() {
   const [showEdit, setShowEdit] = useState(false);
   const [showRefund, setShowRefund] = useState(false);
   const [showDepositEdit, setShowDepositEdit] = useState(false);
+  const [showRentEdit, setShowRentEdit] = useState(false);
   const [showRecheckin, setShowRecheckin] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
 
@@ -165,6 +167,15 @@ export default function TenantDetailPage() {
               <div className="flex items-center gap-2 text-sm">
                 <IndianRupee className="h-4 w-4 text-muted-foreground" />
                 <span>{formatPaise(tenant.monthly_rent_paise)}/month</span>
+                {isActive && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRentEdit(true)}
+                    className="ml-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent/10"
+                  >
+                    <Pencil className="h-3 w-3" /> Revise
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -499,6 +510,13 @@ export default function TenantDetailPage() {
       <DepositAdvanceDialog
         open={showDepositEdit}
         onClose={() => setShowDepositEdit(false)}
+        tenantId={tenant.id}
+        tenantName={tenant.name}
+        current={tenant.active_rent_plan ?? null}
+      />
+      <RentEditDialog
+        open={showRentEdit}
+        onClose={() => setShowRentEdit(false)}
         tenantId={tenant.id}
         tenantName={tenant.name}
         current={tenant.active_rent_plan ?? null}
@@ -900,6 +918,167 @@ function DepositAdvanceDialog({
           </Button>
           <Button onClick={submit} disabled={update.isPending}>
             {update.isPending ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RentEditDialog({
+  open,
+  onClose,
+  tenantId,
+  tenantName,
+  current,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantId: string;
+  tenantName: string;
+  current: {
+    monthly_rent_paise?: number;
+    food_included?: boolean;
+    food_charges_paise?: number;
+    discount_amount_paise?: number;
+    other_charges_json?: { amount_paise?: number }[] | null;
+  } | null;
+}) {
+  const revise = useReviseRent(tenantId);
+  const { toast } = useToast();
+  const toRupees = (paise: number | undefined) =>
+    paise != null && paise !== 0 ? String(paise / 100) : '';
+
+  const [rent, setRent] = useState(toRupees(current?.monthly_rent_paise));
+  const [food, setFood] = useState(toRupees(current?.food_charges_paise));
+  const [discount, setDiscount] = useState(toRupees(current?.discount_amount_paise));
+  const [applyNow, setApplyNow] = useState(true);
+
+  useEffect(() => {
+    if (open) {
+      setRent(toRupees(current?.monthly_rent_paise));
+      setFood(toRupees(current?.food_charges_paise));
+      setDiscount(toRupees(current?.discount_amount_paise));
+      setApplyNow(true);
+    }
+  }, [
+    open,
+    current?.monthly_rent_paise,
+    current?.food_charges_paise,
+    current?.discount_amount_paise,
+  ]);
+
+  // Live monthly total, matching the backend billing formula
+  // (rent + food + other charges − discount).
+  const otherPaise = (current?.other_charges_json ?? []).reduce(
+    (s, c) => s + (Number(c?.amount_paise) || 0),
+    0,
+  );
+  const newTotalPaise =
+    Math.round(Number(rent || 0) * 100) +
+    Math.round(Number(food || 0) * 100) +
+    otherPaise -
+    Math.round(Number(discount || 0) * 100);
+
+  async function submit() {
+    if (!rent || Number(rent) < 0) {
+      toast({ title: 'Enter a valid monthly rent', variant: 'destructive' });
+      return;
+    }
+    try {
+      const res = await revise.mutateAsync({
+        monthly_rent_paise: Math.round(Number(rent) * 100),
+        food_charges_paise: Math.round(Number(food || 0) * 100),
+        discount_amount_paise: Math.round(Number(discount || 0) * 100),
+        apply_to_current_bill: applyNow,
+      });
+      const n = (res as { bills_updated?: number })?.bills_updated ?? 0;
+      toast({
+        title: 'Rent revised',
+        description: applyNow
+          ? `${formatPaise(newTotalPaise)}/month · ${n} pending bill${n === 1 ? '' : 's'} updated`
+          : `${formatPaise(newTotalPaise)}/month · applies from next month`,
+      });
+      onClose();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data
+          ?.error?.message ?? 'Revision failed';
+      toast({ title: 'Failed', description: message, variant: 'destructive' });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Revise rent — {tenantName}</DialogTitle>
+          <DialogDescription>
+            Use this when rent is negotiated by demand — e.g. a single person in a
+            2-share room, or a suite. This keeps reminders and expected collection
+            correct.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label>Monthly rent (₹)</Label>
+            <Input
+              type="number"
+              value={rent}
+              onChange={(e) => setRent(e.target.value)}
+              placeholder="0"
+              autoFocus
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Food charges (₹)</Label>
+              <Input
+                type="number"
+                value={food}
+                onChange={(e) => setFood(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <Label>Discount (₹)</Label>
+              <Input
+                type="number"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+            <span className="text-sm text-muted-foreground">New monthly total</span>
+            <span className="text-base font-semibold tnum">{formatPaise(newTotalPaise)}</span>
+          </div>
+
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2">
+            <input
+              type="checkbox"
+              checked={applyNow}
+              onChange={(e) => setApplyNow(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-accent"
+            />
+            <span className="text-xs">
+              <span className="font-medium text-foreground">
+                Also update this month&apos;s pending bill
+              </span>
+              <br />
+              Corrects the current + future unpaid bills so expected collection adds
+              up now. Fully-paid months are never changed.
+            </span>
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={revise.isPending}>
+            {revise.isPending ? 'Saving…' : 'Save revision'}
           </Button>
         </DialogFooter>
       </DialogContent>

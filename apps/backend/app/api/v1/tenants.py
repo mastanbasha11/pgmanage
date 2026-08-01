@@ -6,7 +6,7 @@ import io
 import json
 import os
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -30,6 +30,10 @@ from app.services.tenant_identity_service import (
 
 
 _PHONE_RE = re.compile(r"[^\d]")
+
+# App timezone (Asia/Kolkata) — the "current billing month" boundary for rent
+# revisions is judged in IST, matching the reminder/ledger jobs.
+IST_TZ = timezone(timedelta(hours=5, minutes=30))
 
 
 def _normalise_phone(raw: str) -> str | None:
@@ -571,6 +575,131 @@ async def update_tenant(
     )
     await db.commit()
     return {"message": "Tenant updated"}
+
+
+class RentRevision(BaseModel):
+    """Revise a sitting tenant's monthly rent (and optionally food/discount).
+
+    Rent is per-tenant and negotiated by demand (a single person in a 2-share
+    room, a couple in a suite, etc.), so it must be editable after check-in —
+    otherwise the reminder and the expected-collection total both go stale."""
+
+    monthly_rent_paise: int
+    food_included: bool | None = None
+    food_charges_paise: int | None = None
+    discount_amount_paise: int | None = None
+    discount_reason: str | None = None
+    # Also correct the current month's pending bill (and any future unpaid ones)
+    # so expected collection adds up immediately. Fully-paid months are left
+    # untouched. Off = new rent applies from next month's reminder only.
+    apply_to_current_bill: bool = True
+
+    @field_validator("monthly_rent_paise")
+    @classmethod
+    def _non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("monthly_rent_paise cannot be negative")
+        return v
+
+
+@router.patch("/tenants/{tenant_id}/rent", summary="Revise a tenant's monthly rent")
+async def revise_tenant_rent(
+    tenant_id: UUID,
+    body: RentRevision,
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+):
+    # Only the rent-plan money fields; None = leave as-is.
+    plan_updates: dict[str, Any] = {"monthly_rent_paise": int(body.monthly_rent_paise)}
+    for k in ("food_included", "food_charges_paise", "discount_amount_paise", "discount_reason"):
+        v = getattr(body, k)
+        if v is not None:
+            plan_updates[k] = v
+
+    old_plan = (
+        await db.execute(
+            text(
+                "SELECT monthly_rent_paise, food_included, food_charges_paise, "
+                "discount_amount_paise, discount_reason "
+                "FROM rent_plans WHERE tenant_id = :tid AND is_active = true"
+            ),
+            {"tid": str(tenant_id)},
+        )
+    ).mappings().fetchone()
+    if not old_plan:
+        raise NotFoundError("Active rent plan", str(tenant_id))
+
+    set_clause = ", ".join(f"{k} = :{k}" for k in plan_updates)
+    await db.execute(
+        text(
+            f"UPDATE rent_plans SET {set_clause}, updated_at = NOW() "
+            f"WHERE tenant_id = :tid AND is_active = true"
+        ),
+        {**plan_updates, "tid": str(tenant_id)},
+    )
+
+    # New monthly total = rent + food + other charges − discount (same formula the
+    # reminder job bills on). Read it back so other_charges_json is included.
+    new_total = (
+        await db.execute(
+            text("""
+                SELECT monthly_rent_paise
+                     + COALESCE(food_charges_paise, 0)
+                     + COALESCE((SELECT SUM((c->>'amount_paise')::bigint)
+                                 FROM jsonb_array_elements(
+                                     COALESCE(other_charges_json, '[]'::jsonb)) c), 0)
+                     - COALESCE(discount_amount_paise, 0) AS total
+                FROM rent_plans WHERE tenant_id = :tid AND is_active = true
+            """),
+            {"tid": str(tenant_id)},
+        )
+    ).scalar() or 0
+
+    # Correct the current month's pending bill + any future unpaid rows so
+    # expected collection is right immediately. Never reopen a fully-PAID (or
+    # WAIVED) month. Status is recomputed from what's already been paid.
+    bills_updated = 0
+    if body.apply_to_current_bill:
+        now_ist = datetime.now(IST_TZ)
+        res = await db.execute(
+            text("""
+                UPDATE rent_ledger_entries
+                SET amount_due_paise = :total,
+                    status = CASE
+                        WHEN amount_paid_paise >= :total THEN 'PAID'::rent_status_enum
+                        WHEN amount_paid_paise > 0 THEN 'PARTIAL'::rent_status_enum
+                        ELSE 'UNPAID'::rent_status_enum
+                    END,
+                    updated_at = NOW()
+                WHERE tenant_id = :tid
+                  AND status IN ('UNPAID', 'PARTIAL')
+                  AND (year > :y OR (year = :y AND month >= :m))
+            """),
+            {"total": int(new_total), "tid": str(tenant_id),
+             "y": now_ist.year, "m": now_ist.month},
+        )
+        bills_updated = res.rowcount or 0
+
+    changes = diff_changes(dict(old_plan), plan_updates)
+    await log_event(
+        db,
+        Event.TENANT_RENT_REVISED,
+        description=f"{ctx.name} revised rent to ₹{new_total / 100:,.0f}/month",
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        tenant_id=tenant_id,
+        metadata={"changes": changes, "new_total_paise": int(new_total),
+                  "bills_updated": bills_updated},
+    )
+    await db.commit()
+    return {
+        "message": "Rent revised",
+        "new_total_paise": int(new_total),
+        "bills_updated": bills_updated,
+    }
 
 
 @router.get("/tenants/{tenant_id}", summary="Tenant full profile")

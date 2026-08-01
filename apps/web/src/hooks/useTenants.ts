@@ -144,6 +144,33 @@ export function useUpdateTenant(tenantId: string) {
   });
 }
 
+/** Matches backend `RentRevision` in tenants.py. Edits the active rent plan and
+ *  (by default) corrects the current + future unpaid ledger rows so expected
+ *  collection adds up immediately. */
+export interface ReviseRentPayload {
+  monthly_rent_paise: number;
+  food_included?: boolean;
+  food_charges_paise?: number;
+  discount_amount_paise?: number;
+  discount_reason?: string;
+  apply_to_current_bill?: boolean;
+}
+
+export function useReviseRent(tenantId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ReviseRentPayload) =>
+      api.patch(`/tenants/${tenantId}/rent`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenants'] });
+      qc.invalidateQueries({ queryKey: ['tenants', tenantId] });
+      qc.invalidateQueries({ queryKey: ['tenant-ledger', tenantId] });
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
 export interface RecordRefundPayload {
   refund_amount_paise: number;
   refund_paid_by?: string;

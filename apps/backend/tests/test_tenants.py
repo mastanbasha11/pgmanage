@@ -5,7 +5,7 @@ Covers check-in, listing, detail, checkout, and ledger.
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -13,7 +13,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import auth_headers
-
 
 # ── Check-in ───────────────────────────────────────────────────────────────────
 
@@ -211,6 +210,113 @@ async def test_checkin_supervisor_can_checkin(
         json=_checkin_payload(bed_id),
     )
     assert response.status_code == 201
+
+
+# ── Revise rent ────────────────────────────────────────────────────────────────
+
+def _now_ist():
+    return datetime.now(timezone(timedelta(hours=5, minutes=30)))
+
+
+async def _seed_ledger(db, schema, tenant_id, pid, month, year, due, paid, status):
+    """Seed a ledger row BEFORE any client call (reusing the fixture session
+    after an HTTP request trips a cross-event-loop error)."""
+    await db.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+    await db.execute(
+        text("""
+            INSERT INTO rent_ledger_entries
+                (tenant_id, property_id, month, year, amount_due_paise,
+                 amount_paid_paise, status, due_date)
+            VALUES (:tid, :pid, :m, :y, :due, :paid,
+                    CAST(:st AS rent_status_enum), :dd)
+            ON CONFLICT (tenant_id, month, year) DO UPDATE
+              SET amount_due_paise = EXCLUDED.amount_due_paise,
+                  amount_paid_paise = EXCLUDED.amount_paid_paise,
+                  status = EXCLUDED.status
+        """),
+        {"tid": str(tenant_id), "pid": str(pid), "m": month, "y": year,
+         "due": due, "paid": paid, "st": status, "dd": date(year, month, 1)},
+    )
+    await db.commit()
+
+
+def _entry(ledger: dict, month: int, year: int) -> dict | None:
+    return next(
+        (e for e in ledger["entries"] if e["month"] == month and e["year"] == year),
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_revise_rent_updates_plan_and_current_bill(
+    client: AsyncClient, test_owner: dict, test_tenant: dict, db: AsyncSession
+):
+    """PATCH /tenants/{id}/rent updates the active plan AND corrects the current
+    month's pending bill so expected collection adds up — without reopening a
+    fully-paid past month. All post-mutation checks go through the API (reusing
+    the db fixture after a client call crosses event loops)."""
+    schema, tid = test_tenant["schema_name"], test_tenant["tenant_id"]
+    pid = test_tenant["property_id"]
+    now = _now_ist()
+    # Current month: UNPAID at the old ₹7,000. Prior year: fully PAID (must not move).
+    await _seed_ledger(db, schema, tid, pid, now.month, now.year, 700000, 0, "UNPAID")
+    await _seed_ledger(db, schema, tid, pid, 1, now.year - 1, 700000, 700000, "PAID")
+
+    hdr = auth_headers(test_owner["token"])
+    r = await client.patch(
+        f"/api/v1/tenants/{tid}/rent",
+        headers=hdr,
+        json={"monthly_rent_paise": 2100000, "apply_to_current_bill": True},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["new_total_paise"] == 2100000
+    assert body["bills_updated"] == 1  # only the current-month unpaid row
+
+    # Plan is updated.
+    tenant = (await client.get(f"/api/v1/tenants/{tid}", headers=hdr)).json()
+    assert tenant["active_rent_plan"]["monthly_rent_paise"] == 2100000
+
+    ledger = (await client.get(f"/api/v1/tenants/{tid}/ledger", headers=hdr)).json()
+    cur = _entry(ledger, now.month, now.year)
+    assert cur["amount_due_paise"] == 2100000
+    assert cur["status"] == "UNPAID"
+    # The fully-paid prior-year bill is untouched.
+    old = _entry(ledger, 1, now.year - 1)
+    assert old["amount_due_paise"] == 700000
+    assert old["status"] == "PAID"
+
+
+@pytest.mark.asyncio
+async def test_revise_rent_future_only_leaves_current_bill(
+    client: AsyncClient, test_owner: dict, test_tenant: dict, db: AsyncSession
+):
+    """apply_to_current_bill=false revises the plan but leaves this month's bill."""
+    schema, tid = test_tenant["schema_name"], test_tenant["tenant_id"]
+    pid = test_tenant["property_id"]
+    now = _now_ist()
+    await _seed_ledger(db, schema, tid, pid, now.month, now.year, 700000, 0, "UNPAID")
+
+    hdr = auth_headers(test_owner["token"])
+    r = await client.patch(
+        f"/api/v1/tenants/{tid}/rent",
+        headers=hdr,
+        json={"monthly_rent_paise": 2100000, "apply_to_current_bill": False},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["bills_updated"] == 0
+
+    ledger = (await client.get(f"/api/v1/tenants/{tid}/ledger", headers=hdr)).json()
+    assert _entry(ledger, now.month, now.year)["amount_due_paise"] == 700000
+
+
+@pytest.mark.asyncio
+async def test_revise_rent_requires_auth(client: AsyncClient, test_tenant: dict):
+    r = await client.patch(
+        f"/api/v1/tenants/{test_tenant['tenant_id']}/rent",
+        json={"monthly_rent_paise": 2100000},
+    )
+    assert r.status_code == 401
 
 
 # ── List tenants ───────────────────────────────────────────────────────────────

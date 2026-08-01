@@ -39,6 +39,7 @@ class Event:
     TENANT_CHECKOUT = "tenant_checkout"
     TENANT_NOTICE_GIVEN = "tenant_notice_given"
     TENANT_PROFILE_UPDATED = "tenant_profile_updated"
+    TENANT_RENT_REVISED = "tenant_rent_revised"
     TENANT_ID_UPLOADED = "tenant_id_uploaded"
 
     # ── Payments ─────────────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ EVENT_CATEGORY: dict[str, str] = {
     Event.TENANT_CHECKOUT: Category.TENANT,
     Event.TENANT_NOTICE_GIVEN: Category.TENANT,
     Event.TENANT_PROFILE_UPDATED: Category.TENANT,
+    Event.TENANT_RENT_REVISED: Category.TENANT,
     Event.TENANT_ID_UPLOADED: Category.TENANT,
     Event.PAYMENT_RECORDED: Category.PAYMENT,
     Event.PAYMENT_DELETED: Category.PAYMENT,
