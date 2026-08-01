@@ -266,7 +266,7 @@ function sFood(){
 /* ---------- STAY ---------- */
 function sStay(){
   return sb()+`
-  <div class="appbar"><div class="top"><div style="flex:1"><h2>My stay</h2><div class="sub">Greenview House · Gachibowli</div></div><div class="ib">${I('doc')}</div></div></div>
+  <div class="appbar"><div class="top"><div style="flex:1"><h2>My stay</h2><div class="sub">Greenview House · North Campus</div></div><div class="ib">${I('doc')}</div></div></div>
   <div class="body scroll">
     <div class="card dark">
       <div class="between"><div><div style="font-size:15px;font-weight:800">Room 409 · Bed A</div><div style="font-size:11px;opacity:.75;margin-top:2px">Twin sharing · 2nd floor</div></div>
@@ -308,7 +308,7 @@ function sHelp(){
 
 /* ---------- MY REQUESTS ---------- */
 function sReq(){
-  const t=[['AC not cooling','in progress · Ramesh assigned',60,''],
+  const t=[['AC not cooling','in progress · Kiran assigned',60,''],
     ['Washroom tap leaking','resolved 20 Jan',100,'rate'],
     ['Room deep clean','received · 2h ago',15,'']];
   return sb()+`
@@ -354,12 +354,12 @@ function sRefer(){
       <div style="font-size:24px">${I('gift')}</div>
       <div class="b" style="font-size:15px;margin-top:7px">Bring a friend home</div>
       <div style="font-size:11.5px;opacity:.75;margin-top:3px">They get ₹1,500 off first rent · you get ₹1,500 credit</div>
-      <div style="background:#ffffff17;border-radius:11px;padding:10px;margin-top:13px;font-weight:800;letter-spacing:2.5px">HARISH409</div>
+      <div style="background:#ffffff17;border-radius:11px;padding:10px;margin-top:13px;font-weight:800;letter-spacing:2.5px">AARAV409</div>
       <div class="btn sp8" style="background:#fff;border-color:#fff;color:var(--forest)">Share on WhatsApp</div>
     </div>
     <div class="cap">YOUR REFERRALS</div>
     <div class="card" style="padding:4px 15px">
-      ${[['Priya','moved in · credited','₹1,500'],['Sneha','visited · pending','—']].map(x=>
+      ${[['Diya','moved in · credited','₹1,500'],['Meera','visited · pending','—']].map(x=>
       `<div class="lr"><span class="avatar" style="width:32px;height:32px;font-size:12px">${x[0][0]}</span><div style="flex:1"><div class="b" style="font-size:12.5px">${x[0]}</div><div class="mut2">${x[1]}</div></div><span class="b tnum" style="font-size:12.5px;color:var(--accent)">${x[2]}</span></div>`).join('')}
     </div>
     <div class="mut2 sp" style="text-align:center">Credits apply to next month's rent automatically.</div>
@@ -372,11 +372,11 @@ function sMore(){
   <div class="appbar"><div class="top"><div style="flex:1"><h2>More</h2></div><div class="ib">${I('gear')}</div></div></div>
   <div class="body scroll">
     <div class="card" style="padding:13px 15px"><div class="row"><div class="avatar" style="width:44px;height:44px;font-size:15px">A</div>
-      <div style="flex:1"><div class="b" style="font-size:14px">Aarav</div><div class="mut2">26LIGBA049 · Greenview House · Room 409</div></div>
+      <div style="flex:1"><div class="b" style="font-size:14px">Aarav</div><div class="mut2">26GVH0049 · Greenview House · Room 409</div></div>
       <span class="pill">${I('check')} KYC</span></div></div>
     <div class="cap">PROFILE</div>
     <div class="card" style="padding:4px 15px">
-      ${[[I('user'),'Personal details','name · DOB · contact'],[I('phone'),'Emergency contact','Mom · +91 90•••'],[I('scooter'),'Vehicle details','Two-wheeler · TS09 EA 4321'],[I('bank'),'Bank details','for referral credits &amp; refunds'],[I('idcard'),'KYC documents','verified']].map(x=>
+      ${[[I('user'),'Personal details','name · DOB · contact'],[I('phone'),'Emergency contact','Mom · +91 90•••'],[I('scooter'),'Vehicle details','Two-wheeler · TS09 GV 2468'],[I('bank'),'Bank details','for referral credits &amp; refunds'],[I('idcard'),'KYC documents','verified']].map(x=>
         `<div class="lr"><span class="gl">${x[0]}</span><div style="flex:1"><div class="b" style="font-size:12.5px">${x[1]}</div><div class="mut2">${x[2]}</div></div><span class="mut2">${I('chevR')}</span></div>`).join('')}
     </div>
     <div class="cap">HOUSE</div>
@@ -399,7 +399,7 @@ function sVehicle(){
       ${[[I('ban'),'None',''],[I('scooter'),'Two-wheeler','on'],[I('car'),'Four-wheeler','']].map(v=>`<div class="amt ${v[2]}" style="padding:13px 4px"><div style="font-size:23px">${v[0]}</div><small style="font-size:10.5px;color:${v[2]?'var(--forest)':'var(--mut2)'};font-weight:700;margin-top:4px">${v[1]}</small></div>`).join('')}
     </div>
     <div class="cap">REGISTRATION NUMBER</div>
-    <div class="field" style="color:var(--ink);font-weight:800;letter-spacing:1px">TS 09 EA 4321</div>
+    <div class="field" style="color:var(--ink);font-weight:800;letter-spacing:1px">TS 09 GV 2468</div>
     <div class="btn dark sp">Save</div>
     <div class="mut2 sp8" style="text-align:center;line-height:1.6">Saved to your profile (self-serve via PATCH /me/kyc) · security sees it on the gate list.</div>
   </div>`;

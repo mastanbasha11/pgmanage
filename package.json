@@ -17,8 +17,7 @@
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "clean": "turbo run clean && rm -rf node_modules",
-    "postinstall": "patch-package"
+    "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
     "patch-package": "^8.0.1",
@@ -32,9 +31,6 @@
   },
   "packageManager": "npm@10.7.0",
   "overrides": {
-    "react-native": "0.74.5",
-    "metro": "~0.80.8",
-    "metro-resolver": "~0.80.8",
-    "metro-config": "~0.80.8"
+    "react-native": "0.86.2"
   }
 }

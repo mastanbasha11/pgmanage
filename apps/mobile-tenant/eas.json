@@ -33,7 +33,8 @@
       },
       "ios": {
         "resourceClass": "m-medium",
-        "credentialsSource": "local"
+        "credentialsSource": "local",
+        "image": "latest"
       },
       "autoIncrement": true
     }

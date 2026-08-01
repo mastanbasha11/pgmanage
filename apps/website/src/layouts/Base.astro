@@ -68,6 +68,20 @@ const schemas = [organization, ...jsonLd];
     <meta name="theme-color" content="#1C443A" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 
+    <!-- Evict the old staff-app PWA service worker that used to own this origin.
+         The marketing site registers no SW; this just unregisters any leftover
+         one and clears its caches so pgmanage.in stops serving the cached app. -->
+    <script is:inline>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (rs) {
+          rs.forEach(function (r) { r.unregister(); });
+        }).catch(function () {});
+        if (window.caches && caches.keys) {
+          caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }).catch(function () {});
+        }
+      }
+    </script>
+
     {
       schemas.map((s) => (
         <script type="application/ld+json" set:html={JSON.stringify(s)} />

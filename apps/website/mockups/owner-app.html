@@ -239,19 +239,19 @@ function sHome(){
   </div></div>
   <div class="body scroll">
     <div class="card" style="background:linear-gradient(150deg,#1C443A,#143229);border:0;color:#fff;border-radius:18px">
-      <div class="between"><span style="font-size:11px;font-weight:700;opacity:.9">NET PROFIT · JANUARY</span><span class="pill" style="background:#ffffff2e;border-color:transparent;color:#fff">${I('chevU')}12.4%</span></div>
-      <div style="font-size:32px;font-weight:800;letter-spacing:-.02em;margin-top:4px">₹4,46,823</div>
+      <div class="between"><span style="font-size:11px;font-weight:700;opacity:.9">NET PROFIT · JANUARY</span><span class="pill" style="background:#ffffff2e;border-color:transparent;color:#fff">${I('chevU')}18.6%</span></div>
+      <div style="font-size:32px;font-weight:800;letter-spacing:-.02em;margin-top:4px">₹5,12,340</div>
       <div class="row" style="margin-top:9px;gap:14px;font-size:11px;opacity:.95">
-        <span>Received <b>₹16.57L</b></span><span>·</span><span>Spent <b>₹12.11L</b></span><span>·</span><span>Margin <b>26.9%</b></span>
+        <span>Received <b>₹16.80L</b></span><span>·</span><span>Spent <b>₹11.68L</b></span><span>·</span><span>Margin <b>30.5%</b></span>
       </div>
     </div>
     <div class="grid2 sp">
-      <div class="kpi"><div class="l">Occupancy</div><div class="v">88%</div><div class="f">106/121 beds · 5 free</div></div>
-      <div class="kpi"><div class="l">Collection</div><div class="v">94%</div><div class="f">DSO 4.1d · on track</div></div>
+      <div class="kpi"><div class="l">Occupancy</div><div class="v">96%</div><div class="f">116/121 beds · 5 free</div></div>
+      <div class="kpi"><div class="l">Collection</div><div class="v">97%</div><div class="f">DSO 3.2d · on track</div></div>
     </div>
     <div class="card sp" style="border-color:var(--warn-line);background:#FCF8F1">
       <div class="h3" style="margin-bottom:8px">${I('bolt')}Today's tasks <span class="pill a" style="margin-left:auto"><span class="d"></span>6</span></div>
-      ${[['89 tenants overdue · ₹2.23L','Remind all','r'],['4 advance bookings need a bed','Assign','a'],['2 expenses need approval','Review','a'],['3 leads due for follow-up','Open','b']]
+      ${[['6 rents overdue · ₹38,000','Remind all','r'],['4 advance bookings need a bed','Assign','a'],['2 expenses need approval','Review','a'],['7 new leads to follow up','Open','b']]
         .map(t=>`<div class="listrow" style="padding:9px 2px"><span class="pill ${t[2]}" style="width:6px;height:6px;padding:0;border:0;background:${t[2]==='r'?'var(--alert)':t[2]==='a'?'var(--warn)':'var(--info)'}"></span>
           <span style="flex:1;font-size:12px;font-weight:600">${t[0]}</span><span class="btn sm">${t[1]}${I('chevR')}</span></div>`).join('')}
     </div>
@@ -298,19 +298,19 @@ function sRent(){
     ['105','B','Nikhil Rao',12500,7500,'a','₹5,000 left'],['308','A','Rahul Nair',9000,0,'s','Due 20 Jan'],
     ['101','A','Vikram Shah',9000,9000,'g','Paid · 05 Jan']];
   return status()+`
-  <div class="appbar"><div class="top"><div style="flex:1"><h2>Rent &amp; Payments</h2><div class="sub">January · 94% collected</div></div>
+  <div class="appbar"><div class="top"><div style="flex:1"><h2>Rent &amp; Payments</h2><div class="sub">January · 97% collected</div></div>
     <div class="iconbtn">${I('refresh')}</div><div class="iconbtn">${I('plus')}</div></div></div>
   <div class="body scroll">
     <div class="grid2">
-      <div class="kpi"><div class="l">Collected</div><div class="v tnum">₹11.73L</div><div class="track sp8"><i style="width:94%;background:var(--forest)"></i></div><div class="f">of ₹12.5L billed</div></div>
-      <div class="kpi"><div class="l">Outstanding</div><div class="v tnum" style="color:var(--alert)">₹2.23L</div><div class="f">89 tenants · aged</div></div>
+      <div class="kpi"><div class="l">Collected</div><div class="v tnum">₹12.12L</div><div class="track sp8"><i style="width:97%;background:var(--forest)"></i></div><div class="f">of ₹12.5L billed</div></div>
+      <div class="kpi"><div class="l">Outstanding</div><div class="v tnum" style="color:var(--alert)">₹38,000</div><div class="f">6 tenants · aged</div></div>
     </div>
     <div class="card sp"><div class="h3">${I('hourglass')}Aging</div>
       ${[['0–15d',115000,52,'#C98A3C'],['16–30d',58000,24,'#C2714F'],['31–60d',32000,9,'#C05A4C'],['60+d',18000,4,'#9A3B30']].map(a=>
         `<div class="row" style="margin-bottom:7px;font-size:11px"><span style="width:44px;font-weight:700">${a[0]}</span>
          <span class="track" style="flex:1"><i style="width:${a[1]/115000*100}%;background:${a[3]}"></i></span>
          <span class="tnum b" style="width:70px;text-align:right">${money(a[1])}</span><span class="mut2" style="width:20px">·${a[2]}</span></div>`).join('')}
-      <div class="btn sm teal sp8" style="width:100%">${I('envelope')}Remind all 89 via WhatsApp</div>
+      <div class="btn sm teal sp8" style="width:100%">${I('envelope')}Remind all 6 via WhatsApp</div>
     </div>
     <div class="chips sp">${['Overdue 10','Partial 4','Due 9','Paid 82','All 105'].map((c,i)=>`<span class="chip ${i===0?'on':''}">${c}</span>`).join('')}</div>
     <div class="sp8">${rows.map(r=>`<div class="listrow">
@@ -352,7 +352,7 @@ function sTenant(){
 
 /* ---------------- VACANCIES ---------------- */
 function sVac(){
-  const fl=[['4F','405','2-Share · AC',['A','B'],2,12000,'Kabir, Priya'],['4F','406','2-Share · AC',['B'],2,12000,'Karthik'],
+  const fl=[['4F','405','2-Share · AC',['A','B'],2,12000,'Kabir, Ishaani'],['4F','406','2-Share · AC',['B'],2,12000,'Karthik'],
     ['2F','205','2-Share · AC',['A','B'],2,12000,'Deepak, Sameer'],['7F','703','Suite · AC',['A'],1,26000,'—']];
   return status()+`
   <div class="appbar"><div class="top"><div style="flex:1"><h2>Vacancies</h2><div class="sub">15 beds freeing by 31 Jan</div></div>
@@ -375,7 +375,7 @@ function sVac(){
 
 /* ---------------- BOOKINGS ---------------- */
 function sBookings(){
-  const adv=[['Varun Iyer','01 Feb','102 ·C',4500,'ready'],['Rohan Gupta','01 Feb','',4500,'tbd'],['Ananya','01 Feb','',2000,'tbd'],['Sneha','01 Feb','703 ·A',2000,'ready']];
+  const adv=[['Varun Iyer','01 Feb','102 ·C',4500,'ready'],['Rohan Gupta','01 Feb','',4500,'tbd'],['Ananya','01 Feb','',2000,'tbd'],['Tanvi','01 Feb','703 ·A',2000,'ready']];
   return status()+`
   <div class="appbar"><div class="top"><div style="flex:1"><h2>Bookings</h2><div class="sub">daily stays &amp; advances</div></div><div class="iconbtn">${I('plus')}</div></div></div>
   <div class="body scroll">
@@ -558,7 +558,7 @@ function sMore(){
   <div class="body scroll">
     <div class="card" style="background:linear-gradient(150deg,#1C443A,#143229);border:0;color:#fff">
       <div class="between"><div><div style="font-size:11px;opacity:.9;font-weight:700">GREENVIEW COLIVING PG</div>
-        <div class="b" style="font-size:15px;margin-top:2px">88% occupied · 106/121</div></div><span class="pill" style="background:#ffffff2e;border:0;color:#fff">Owner</span></div>
+        <div class="b" style="font-size:15px;margin-top:2px">96% occupied · 116/121</div></div><span class="pill" style="background:#ffffff2e;border:0;color:#fff">Owner</span></div>
     </div>
     <div class="grid2 sp" style="grid-template-columns:1fr 1fr 1fr;gap:9px">
       ${items.map(i=>`<div class="card" style="padding:13px 8px;text-align:center"><div style="font-size:22px">${i[0]}</div><div style="font-size:10.5px;font-weight:700;margin-top:6px">${i[1]}</div></div>`).join('')}

@@ -1,0 +1,247 @@
+---
+import Base from '@/layouts/Base.astro';
+import { site } from '@/content/site';
+
+// The public account-deletion URL declared in Google Play Data safety for both
+// apps. Explains what is deleted, what is retained by law, and how long it
+// takes — and lets a user file the request without needing to sign in.
+const retained = [
+  'Rent, payment and refund records that we must keep to meet Indian tax and accounting law. These are kept for the statutory retention period and then deleted.',
+  'A minimal record that a deletion request was made and completed, for audit purposes.',
+];
+const deleted = [
+  'Your profile — name, phone, email and login.',
+  'Your tenancy details — room, bed, deposit, agreement and ID-proof documents.',
+  'Complaints, requests, referrals, vehicle details and emergency contacts you added.',
+  'Notification history and app preferences.',
+];
+---
+
+<Base
+  title="Delete your account | PGManage"
+  description="How to permanently delete your PGManage account and personal data, for residents and operators."
+  path="/delete-account"
+  noindex={true}
+>
+  <article class="wrap legal">
+    <h1>Delete your account &amp; data</h1>
+    <p class="lede">
+      This applies to both PGManage apps — the resident app and the owner/staff app.
+      You can ask us to delete your account and personal data at any time, and you do
+      not need to be able to sign in to do it.
+    </p>
+
+    <section>
+      <h2>Request deletion</h2>
+      <p>
+        Fill in the form below, or email
+        <a href={`mailto:${site.contact.email}?subject=Delete my account`}>{site.contact.email}</a>
+        from the address on your account. We confirm every request and complete the
+        deletion within 30 days.
+      </p>
+
+      <form id="del-form" class="card" novalidate>
+        <div class="row">
+          <label>Full name
+            <input name="name" required autocomplete="name" minlength="2" />
+          </label>
+          <label>Which app?
+            <select name="role">
+              <option value="resident">Resident app</option>
+              <option value="owner">Owner / staff app</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>Email on your account
+            <input name="email" type="email" required autocomplete="email" />
+          </label>
+          <label>Phone (optional)
+            <input name="phone" type="tel" autocomplete="tel" />
+          </label>
+        </div>
+        <label>Reason (optional)
+          <textarea name="reason" rows="3" maxlength="1000"></textarea>
+        </label>
+        <button type="submit">Request deletion</button>
+        <p class="note" id="del-note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section>
+      <h2>What gets deleted</h2>
+      <ul>{deleted.map((d) => <li>{d}</li>)}</ul>
+    </section>
+
+    <section>
+      <h2>What we keep, and why</h2>
+      <p>
+        Some records cannot be deleted immediately because Indian law requires us to
+        retain them. Nothing here is used for advertising or shared for marketing.
+      </p>
+      <ul>{retained.map((r) => <li>{r}</li>)}</ul>
+    </section>
+
+    <section>
+      <h2>A note for residents</h2>
+      <p>
+        PGManage is provided to you by the PG or co-living operator you stay with, who
+        is the primary holder of your data. Deleting your account removes your personal
+        data from our systems; your operator may separately retain their own records of
+        your tenancy as their business and legal obligations require.
+      </p>
+    </section>
+  </article>
+
+  <script is:inline>
+    (function () {
+      var f = document.getElementById('del-form');
+      var note = document.getElementById('del-note');
+      if (!f) return;
+      f.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (!f.reportValidity()) return;
+        var btn = f.querySelector('button');
+        btn.disabled = true;
+        note.textContent = 'Sending…';
+        var fd = new FormData(f);
+        fetch('/api/v1/account/deletion-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: fd.get('name'),
+            email: fd.get('email'),
+            phone: fd.get('phone') || null,
+            role: fd.get('role'),
+            reason: fd.get('reason') || null,
+          }),
+        })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (res.ok && res.j && res.j.success) {
+              f.reset();
+              note.className = 'note ok';
+              note.textContent = res.j.message ||
+                'Request received. We will delete your data within 30 days.';
+            } else {
+              throw new Error('failed');
+            }
+          })
+          .catch(function () {
+            note.className = 'note err';
+            note.innerHTML =
+              'Could not submit. Please email ' +
+              '<a href="mailto:pgmanage36@gmail.com?subject=Delete my account">pgmanage36@gmail.com</a> instead.';
+            btn.disabled = false;
+          });
+      });
+    })();
+  </script>
+</Base>
+
+<style>
+  .legal {
+    max-width: 740px;
+    padding-block: var(--s6) var(--s9);
+  }
+  .legal h1 {
+    font-size: var(--t-3xl);
+  }
+  .lede {
+    color: var(--mut);
+    line-height: 1.65;
+    margin-top: var(--s3);
+    max-width: 60ch;
+  }
+  .legal h2 {
+    font-size: var(--t-lg);
+    margin-top: var(--s7);
+    margin-bottom: var(--s2);
+  }
+  .legal p {
+    color: var(--mut);
+    line-height: 1.65;
+    margin-top: var(--s2);
+  }
+  .legal ul {
+    margin-top: var(--s2);
+    padding-left: 1.1em;
+  }
+  .legal li {
+    color: var(--mut);
+    line-height: 1.6;
+    margin-top: 6px;
+  }
+  .card {
+    margin-top: var(--s4);
+    padding: var(--s5);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--sage);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s3);
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: var(--t-sm);
+    font-weight: 600;
+    color: var(--ink);
+  }
+  input,
+  select,
+  textarea {
+    font: inherit;
+    font-weight: 400;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-btn);
+    background: #fff;
+    color: var(--ink);
+  }
+  input:focus,
+  select:focus,
+  textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  button {
+    align-self: flex-start;
+    margin-top: var(--s2);
+    padding: 11px 20px;
+    border: 0;
+    border-radius: var(--r-btn);
+    background: var(--forest);
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .note {
+    font-size: var(--t-sm);
+    margin: 0;
+  }
+  .note.ok {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .note.err {
+    color: var(--apricot-ink);
+    font-weight: 600;
+  }
+  @media (max-width: 520px) {
+    .row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
