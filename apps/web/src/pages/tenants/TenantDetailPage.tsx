@@ -163,21 +163,29 @@ export default function TenantDetailPage() {
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <span>Moved in {formatDate(tenant.move_in_date)}</span>
             </div>
-            {tenant.monthly_rent_paise !== undefined && (
-              <div className="flex items-center gap-2 text-sm">
-                <IndianRupee className="h-4 w-4 text-muted-foreground" />
-                <span>{formatPaise(tenant.monthly_rent_paise)}/month</span>
-                {isActive && (
-                  <button
-                    type="button"
-                    onClick={() => setShowRentEdit(true)}
-                    className="ml-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent/10"
-                  >
-                    <Pencil className="h-3 w-3" /> Revise
-                  </button>
-                )}
-              </div>
-            )}
+            {(() => {
+              // monthly_rent_paise lives on the rent_plan, not the tenants row —
+              // read it from active_rent_plan (falling back to a denormalised
+              // top-level field if a list payload ever supplies one).
+              const rentPaise =
+                tenant.active_rent_plan?.monthly_rent_paise ?? tenant.monthly_rent_paise;
+              if (rentPaise == null && !isActive) return null;
+              return (
+                <div className="flex items-center gap-2 text-sm">
+                  <IndianRupee className="h-4 w-4 text-muted-foreground" />
+                  <span>{formatPaise(rentPaise ?? 0)}/month</span>
+                  {isActive && (
+                    <button
+                      type="button"
+                      onClick={() => setShowRentEdit(true)}
+                      className="ml-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent/10"
+                    >
+                      <Pencil className="h-3 w-3" /> Revise
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
