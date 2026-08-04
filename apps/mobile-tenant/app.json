@@ -22,7 +22,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "in.pgmanage.resident",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -46,8 +46,8 @@
         "expo-build-properties",
         {
           "android": {
-            "compileSdkVersion": 35,
-            "targetSdkVersion": 35,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
             "minSdkVersion": 24
           }
         }
