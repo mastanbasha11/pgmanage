@@ -22,7 +22,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.pgmanage.app",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -33,7 +33,7 @@
         "backgroundColor": "#F6F8F4"
       },
       "package": "com.pgmanage.app",
-      "versionCode": 5,
+      "versionCode": 6,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.READ_EXTERNAL_STORAGE",

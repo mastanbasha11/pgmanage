@@ -22,7 +22,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "in.pgmanage.resident",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -33,7 +33,7 @@
         "backgroundColor": "#F6F8F4"
       },
       "package": "in.pgmanage.resident",
-      "versionCode": 3,
+      "versionCode": 4,
       "permissions": [
         "android.permission.INTERNET"
       ]
