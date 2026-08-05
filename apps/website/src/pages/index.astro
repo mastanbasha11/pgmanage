@@ -15,8 +15,13 @@ const softwareApp = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
   name: site.name,
+  alternateName: 'PG Management Software',
   applicationCategory: 'BusinessApplication',
-  operatingSystem: 'Web',
+  applicationSubCategory: 'PG & Hostel Management Software',
+  operatingSystem: 'Web, Android',
+  url: site.url,
+  keywords:
+    'PG management software, PG management app, paying guest management software, hostel management software, PG rent collection app, PG billing software India',
   offers: {
     '@type': 'Offer',
     price: pricing.tiers[0].pricePerBed,
@@ -38,6 +43,7 @@ const softwareApp = {
   <section class="hero">
     <div class="wrap hero-grid">
       <div class="hero-copy">
+        <p class="eyebrow" style="margin-bottom:12px;color:var(--forest)">{home.hero.kicker}</p>
         <h1>{home.hero.headline}</h1>
         <p class="lede measure">{home.hero.sub}</p>
         <div class="hero-cta">

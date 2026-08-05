@@ -5,13 +5,16 @@
 
 export const home = {
   meta: {
-    title: 'PGManage — rent, beds and leads for your PG, on one screen',
+    // Keyword-led title for search (PG management software / app), brand kept.
+    title: 'PGManage — PG Management Software & App for PG & Hostel Owners',
     description:
-      'PGManage collects the rent on WhatsApp, keeps a name against every rupee of cash, fills empty beds and shows which rooms make money. Built in a 121-bed co-living property in Hyderabad.',
+      'PGManage is PG & hostel management software for paying-guest owners in India. Collect rent on WhatsApp, track every rupee of cash by staff, fill empty beds and see which rooms make money. Book a free demo.',
   },
   hero: {
+    // Visible eyebrow puts the primary keyword in the H1 region of the page.
+    kicker: 'PG Management Software',
     headline: 'Collect the rent. Fill the beds. Know the money.',
-    sub: 'PGManage runs the rent, the beds and the leads for your PG. Reminders go out on WhatsApp, every rupee of cash has a staff name against it, and you can finally see which rooms make money and which ones just look busy.',
+    sub: 'PGManage is the PG management software that runs the rent, the beds and the leads for your paying-guest or hostel. Reminders go out on WhatsApp, every rupee of cash has a staff name against it, and you can finally see which rooms make money and which ones just look busy.',
     proofLine:
       'Built in a 121-bed co-living property in Hyderabad — 94% collected, 4.1 days to collect, 98% of WhatsApp reminders delivered.',
   },

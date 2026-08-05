@@ -21,17 +21,27 @@ const { title, description, path = Astro.url.pathname, ogSlug = 'default', noind
 const canonical = new URL(path, site.url).href;
 const ogImage = new URL(`/og/${ogSlug}.png`, site.url).href;
 
-// Organization is on every page; other schemas are passed in per page.
+// Organization + WebSite are on every page; other schemas are passed in per page.
 const organization = {
   '@context': 'https://schema.org',
   '@type': 'Organization',
   name: site.name,
+  alternateName: ['PG Manage', 'PGManage Software'],
   url: site.url,
+  logo: new URL('/favicon.svg', site.url).href,
   description: site.tagline,
   email: site.contact.email,
   areaServed: 'IN',
 };
-const schemas = [organization, ...jsonLd];
+const website = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: site.name,
+  alternateName: 'PG Management Software',
+  url: site.url,
+  inLanguage: 'en-IN',
+};
+const schemas = [organization, website, ...jsonLd];
 ---
 
 <!doctype html>
@@ -53,7 +63,13 @@ const schemas = [organization, ...jsonLd];
     />
 
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_IN" />
     <meta property="og:site_name" content={site.name} />
+    {
+      import.meta.env.PUBLIC_GSC_VERIFICATION && (
+        <meta name="google-site-verification" content={import.meta.env.PUBLIC_GSC_VERIFICATION} />
+      )
+    }
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
