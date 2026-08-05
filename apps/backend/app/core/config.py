@@ -84,11 +84,11 @@ class Settings(BaseSettings):
     # Grace: don't send an overdue notice until this many days AFTER the
     # ledger due_date (so tenants aren't chased the moment rent is generated).
     # Repeat: minimum days between two overdue notices to the same tenant,
-    # counted by IST calendar day. 3 = chase every 3rd day while they owe
-    # (e.g. overdue on the 4th → next on the 7th, 10th, …). Set 1 for daily,
-    # 7 for weekly.
+    # counted by IST calendar day. 2 = chase every alternate day while they owe
+    # (e.g. overdue on the 4th → next on the 6th, 8th, 10th, …). Set 1 for daily,
+    # 3 for every 3rd day, 7 for weekly.
     OVERDUE_GRACE_DAYS: int = 3
-    OVERDUE_REPEAT_DAYS: int = 3
+    OVERDUE_REPEAT_DAYS: int = 2
     # Fills the {{manager_phone}} placeholder in the overdue template. Meta
     # rejects empty template params, so the job falls back to the org's
     # WhatsApp number and finally this literal if both are unset.

@@ -180,14 +180,13 @@ async def test_paid_row_not_selected(
     ), rows
 
 
-def test_repeat_throttle_default_is_every_3_days() -> None:
-    """Overdue chasing is every 3 days by default (softened from daily after
-    tenants complained about the frequency). Guards against a config regression
-    silently changing the cadence."""
+def test_repeat_throttle_default_is_alternate_day() -> None:
+    """Overdue chasing is every alternate day by default (2 = 4th, 6th, 8th …).
+    Guards against a config regression silently changing the cadence."""
     from app.core.config import settings
 
-    assert settings.OVERDUE_REPEAT_DAYS == 3, (
-        f"OVERDUE_REPEAT_DAYS should default to 3 (every 3 days); got "
+    assert settings.OVERDUE_REPEAT_DAYS == 2, (
+        f"OVERDUE_REPEAT_DAYS should default to 2 (alternate day); got "
         f"{settings.OVERDUE_REPEAT_DAYS}"
     )
 
