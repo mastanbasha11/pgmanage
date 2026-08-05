@@ -180,18 +180,76 @@ async def test_paid_row_not_selected(
     ), rows
 
 
-def test_repeat_throttle_default_is_daily() -> None:
-    """The daily overdue job must actually be daily by default.
-
-    Guards against a config regression that would silently drop cadence
-    back to every-3-days without anyone noticing.
-    """
+def test_repeat_throttle_default_is_every_3_days() -> None:
+    """Overdue chasing is every 3 days by default (softened from daily after
+    tenants complained about the frequency). Guards against a config regression
+    silently changing the cadence."""
     from app.core.config import settings
 
-    assert settings.OVERDUE_REPEAT_DAYS == 1, (
-        f"OVERDUE_REPEAT_DAYS should default to 1 (daily); got "
+    assert settings.OVERDUE_REPEAT_DAYS == 3, (
+        f"OVERDUE_REPEAT_DAYS should default to 3 (every 3 days); got "
         f"{settings.OVERDUE_REPEAT_DAYS}"
     )
+
+
+async def _insert_overdue_sent(
+    db: AsyncSession, org_id: uuid.UUID, tenant_id: uuid.UUID, days_ago: int
+) -> None:
+    """Log a rent_overdue WhatsApp SENT `days_ago` days back (IST)."""
+    await db.execute(
+        text("""
+            INSERT INTO notification_log
+                (org_id, recipient_type, recipient_id, channel, template_name,
+                 message_body, status, sent_at)
+            VALUES (:org, CAST('TENANT' AS notif_recipient_type_enum), :tid,
+                    CAST('WHATSAPP' AS notif_channel_enum), 'rent_overdue', 'x',
+                    CAST('SENT' AS notif_status_enum),
+                    NOW() - make_interval(days => :d))
+        """),
+        {"org": str(org_id), "tid": str(tenant_id), "d": days_ago},
+    )
+
+
+@pytest.mark.asyncio
+async def test_repeat_throttle_counts_by_calendar_day(
+    db: AsyncSession, test_tenant: dict
+) -> None:
+    """A tenant reminded yesterday is still throttled under repeat_days=3, but
+    one reminded exactly 3 days ago is due again — proving the throttle counts
+    IST calendar days (not a rolling 24h window that drifts to every-other-day)."""
+    schema = test_tenant["schema_name"]
+    await _set_schema(db, schema)
+    today = date.today()
+    await _insert_ledger_row(
+        db,
+        tenant_id=test_tenant["tenant_id"],
+        property_id=test_tenant["property_id"],
+        month=today.month, year=today.year,
+        due_date=today - timedelta(days=10),  # past grace → otherwise eligible
+    )
+
+    # Reminded 1 day ago → still within the 3-day window → NOT selected.
+    await _insert_overdue_sent(db, test_tenant["org_id"], test_tenant["tenant_id"], 1)
+    rows = (await db.execute(
+        OVERDUE_SELECT,
+        {"month": today.month, "year": today.year, "grace_days": 3, "repeat_days": 3},
+    )).mappings().fetchall()
+    assert not any(str(r["id"]) == str(test_tenant["tenant_id"]) for r in rows), \
+        "tenant reminded 1 day ago must be throttled at repeat_days=3"
+
+    # Move that send to 3 days ago → due again → selected.
+    await db.execute(
+        text("UPDATE notification_log SET sent_at = NOW() - make_interval(days => 3) "
+             "WHERE recipient_id = :tid AND template_name = 'rent_overdue'"),
+        {"tid": str(test_tenant["tenant_id"])},
+    )
+    rows = (await db.execute(
+        OVERDUE_SELECT,
+        {"month": today.month, "year": today.year, "grace_days": 3, "repeat_days": 3},
+    )).mappings().fetchall()
+    await db.commit()
+    assert any(str(r["id"]) == str(test_tenant["tenant_id"]) for r in rows), \
+        "tenant reminded exactly 3 days ago must be due again at repeat_days=3"
 
 
 def test_unconfigured_org_is_skipped_not_failed() -> None:

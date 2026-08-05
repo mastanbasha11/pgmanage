@@ -247,7 +247,16 @@ OVERDUE_SELECT_SQL = """
                 AND nl.channel = 'WHATSAPP'
                 AND nl.template_name = 'rent_overdue'
                 AND nl.status = 'SENT'
-                AND nl.sent_at >= NOW() - (:repeat_days * INTERVAL '1 day')
+                -- Throttle by CALENDAR DAY (IST), not a rolling 24h window. The
+                -- job fires at the same time daily, so a rolling
+                -- `NOW() - N days` window always just-barely covers the previous
+                -- same-time run and suppressed it — making a repeat_days=1 job
+                -- fire every *other* day. Comparing IST dates makes the cadence
+                -- exactly repeat_days: skip only if the last send's IST date is
+                -- newer than (today - repeat_days).
+                AND (nl.sent_at AT TIME ZONE 'Asia/Kolkata')::date
+                    > (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+                      - CAST(:repeat_days AS INTEGER)
         )
 """
 
