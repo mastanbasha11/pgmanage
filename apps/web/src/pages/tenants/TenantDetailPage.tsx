@@ -69,6 +69,13 @@ import {
 import { useToast } from '@/hooks/useToast';
 import TenantTimeline from '@/components/tenants/TenantTimeline';
 
+/** 1 → "1st", 2 → "2nd", 7 → "7th", 21 → "21st" */
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
 export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -186,6 +193,15 @@ export default function TenantDetailPage() {
                 </div>
               );
             })()}
+            {tenant.active_rent_plan?.billing_day != null && (
+              <div className="flex items-center gap-2 text-sm">
+                <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                <span>
+                  Rent due on the {ordinal(tenant.active_rent_plan.billing_day)}
+                  <span className="text-muted-foreground"> · overdue after a 3-day grace</span>
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
