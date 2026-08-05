@@ -589,6 +589,9 @@ class RentRevision(BaseModel):
     food_charges_paise: int | None = None
     discount_amount_paise: int | None = None
     discount_reason: str | None = None
+    # Day of month rent is due (the tenant's "payment date"). Drives the bill's
+    # due_date and therefore when overdue chasing starts. None = leave unchanged.
+    billing_day: int | None = None
     # Also correct the current month's pending bill (and any future unpaid ones)
     # so expected collection adds up immediately. Fully-paid months are left
     # untouched. Off = new rent applies from next month's reminder only.
@@ -601,6 +604,13 @@ class RentRevision(BaseModel):
             raise ValueError("monthly_rent_paise cannot be negative")
         return v
 
+    @field_validator("billing_day")
+    @classmethod
+    def _valid_day(cls, v: int | None) -> int | None:
+        if v is not None and not (1 <= v <= 31):
+            raise ValueError("billing_day must be between 1 and 31")
+        return v
+
 
 @router.patch("/tenants/{tenant_id}/rent", summary="Revise a tenant's monthly rent")
 async def revise_tenant_rent(
@@ -609,9 +619,10 @@ async def revise_tenant_rent(
     ctx: OrgContext = Depends(get_org_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Only the rent-plan money fields; None = leave as-is.
+    # Only the rent-plan fields; None = leave as-is.
     plan_updates: dict[str, Any] = {"monthly_rent_paise": int(body.monthly_rent_paise)}
-    for k in ("food_included", "food_charges_paise", "discount_amount_paise", "discount_reason"):
+    for k in ("food_included", "food_charges_paise", "discount_amount_paise",
+              "discount_reason", "billing_day"):
         v = getattr(body, k)
         if v is not None:
             plan_updates[k] = v
@@ -620,7 +631,7 @@ async def revise_tenant_rent(
         await db.execute(
             text(
                 "SELECT monthly_rent_paise, food_included, food_charges_paise, "
-                "discount_amount_paise, discount_reason "
+                "discount_amount_paise, discount_reason, billing_day "
                 "FROM rent_plans WHERE tenant_id = :tid AND is_active = true"
             ),
             {"tid": str(tenant_id)},
@@ -661,22 +672,30 @@ async def revise_tenant_rent(
     bills_updated = 0
     if body.apply_to_current_bill:
         now_ist = datetime.now(IST_TZ)
+        params = {"total": int(new_total), "tid": str(tenant_id),
+                  "y": now_ist.year, "m": now_ist.month}
+        # If the payment date moved, re-date the current + future bills too — else
+        # the overdue chaser keeps firing off the old due_date (day clamped to 28
+        # to stay valid in short months, matching the reminder job).
+        due_date_set = ""
+        if body.billing_day is not None:
+            due_date_set = ", due_date = make_date(year, month, LEAST(:bday, 28))"
+            params["bday"] = int(body.billing_day)
         res = await db.execute(
-            text("""
+            text(f"""
                 UPDATE rent_ledger_entries
                 SET amount_due_paise = :total,
                     status = CASE
                         WHEN amount_paid_paise >= :total THEN 'PAID'::rent_status_enum
                         WHEN amount_paid_paise > 0 THEN 'PARTIAL'::rent_status_enum
                         ELSE 'UNPAID'::rent_status_enum
-                    END,
+                    END{due_date_set},
                     updated_at = NOW()
                 WHERE tenant_id = :tid
                   AND status IN ('UNPAID', 'PARTIAL')
                   AND (year > :y OR (year = :y AND month >= :m))
             """),
-            {"total": int(new_total), "tid": str(tenant_id),
-             "y": now_ist.year, "m": now_ist.month},
+            params,
         )
         bills_updated = res.rowcount or 0
 

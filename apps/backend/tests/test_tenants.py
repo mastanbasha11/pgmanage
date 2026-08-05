@@ -311,6 +311,47 @@ async def test_revise_rent_future_only_leaves_current_bill(
 
 
 @pytest.mark.asyncio
+async def test_revise_rent_billing_day_redates_current_bill(
+    client: AsyncClient, test_owner: dict, test_tenant: dict, db: AsyncSession
+):
+    """Changing the payment date re-dates the current unpaid bill's due_date, so
+    the overdue chaser respects it (a tenant due on the 9th isn't chased early)."""
+    schema, tid = test_tenant["schema_name"], test_tenant["tenant_id"]
+    pid = test_tenant["property_id"]
+    now = _now_ist()
+    # Seed this month's bill due on the 1st.
+    await _seed_ledger(db, schema, tid, pid, now.month, now.year, 700000, 0, "UNPAID")
+
+    hdr = auth_headers(test_owner["token"])
+    r = await client.patch(
+        f"/api/v1/tenants/{tid}/rent",
+        headers=hdr,
+        json={"monthly_rent_paise": 700000, "billing_day": 9,
+              "apply_to_current_bill": True},
+    )
+    assert r.status_code == 200, r.text
+
+    ledger = (await client.get(f"/api/v1/tenants/{tid}/ledger", headers=hdr)).json()
+    cur = _entry(ledger, now.month, now.year)
+    assert cur["due_date"].endswith("-09")  # re-dated to the 9th
+
+    tenant = (await client.get(f"/api/v1/tenants/{tid}", headers=hdr)).json()
+    assert tenant["active_rent_plan"]["billing_day"] == 9
+
+
+@pytest.mark.asyncio
+async def test_revise_rent_rejects_bad_billing_day(
+    client: AsyncClient, test_owner: dict, test_tenant: dict
+):
+    r = await client.patch(
+        f"/api/v1/tenants/{test_tenant['tenant_id']}/rent",
+        headers=auth_headers(test_owner["token"]),
+        json={"monthly_rent_paise": 700000, "billing_day": 40},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_revise_rent_requires_auth(client: AsyncClient, test_tenant: dict):
     r = await client.patch(
         f"/api/v1/tenants/{test_tenant['tenant_id']}/rent",

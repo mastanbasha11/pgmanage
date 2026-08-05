@@ -949,6 +949,7 @@ function RentEditDialog({
     food_included?: boolean;
     food_charges_paise?: number;
     discount_amount_paise?: number;
+    billing_day?: number;
     other_charges_json?: { amount_paise?: number }[] | null;
   } | null;
 }) {
@@ -960,6 +961,7 @@ function RentEditDialog({
   const [rent, setRent] = useState(toRupees(current?.monthly_rent_paise));
   const [food, setFood] = useState(toRupees(current?.food_charges_paise));
   const [discount, setDiscount] = useState(toRupees(current?.discount_amount_paise));
+  const [billingDay, setBillingDay] = useState(String(current?.billing_day ?? 1));
   const [applyNow, setApplyNow] = useState(true);
 
   useEffect(() => {
@@ -967,6 +969,7 @@ function RentEditDialog({
       setRent(toRupees(current?.monthly_rent_paise));
       setFood(toRupees(current?.food_charges_paise));
       setDiscount(toRupees(current?.discount_amount_paise));
+      setBillingDay(String(current?.billing_day ?? 1));
       setApplyNow(true);
     }
   }, [
@@ -974,6 +977,7 @@ function RentEditDialog({
     current?.monthly_rent_paise,
     current?.food_charges_paise,
     current?.discount_amount_paise,
+    current?.billing_day,
   ]);
 
   // Live monthly total, matching the backend billing formula
@@ -993,11 +997,17 @@ function RentEditDialog({
       toast({ title: 'Enter a valid monthly rent', variant: 'destructive' });
       return;
     }
+    const day = Number(billingDay);
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      toast({ title: 'Payment date must be a day between 1 and 31', variant: 'destructive' });
+      return;
+    }
     try {
       const res = await revise.mutateAsync({
         monthly_rent_paise: Math.round(Number(rent) * 100),
         food_charges_paise: Math.round(Number(food || 0) * 100),
         discount_amount_paise: Math.round(Number(discount || 0) * 100),
+        billing_day: day,
         apply_to_current_bill: applyNow,
       });
       const n = (res as { bills_updated?: number })?.bills_updated ?? 0;
@@ -1057,6 +1067,22 @@ function RentEditDialog({
                 placeholder="0"
               />
             </div>
+          </div>
+
+          <div>
+            <Label>Payment date (day of month)</Label>
+            <Input
+              type="number"
+              min={1}
+              max={31}
+              value={billingDay}
+              onChange={(e) => setBillingDay(e.target.value)}
+              placeholder="1"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Rent is due on this day. Overdue reminders only start after it (plus a
+              short grace) — so a tenant due on the 9th isn&apos;t chased on the 1st.
+            </p>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">

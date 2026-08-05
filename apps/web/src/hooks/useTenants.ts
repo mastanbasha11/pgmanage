@@ -153,6 +153,8 @@ export interface ReviseRentPayload {
   food_charges_paise?: number;
   discount_amount_paise?: number;
   discount_reason?: string;
+  /** Day of month rent is due (1–31). Drives due date + when overdue starts. */
+  billing_day?: number;
   apply_to_current_bill?: boolean;
 }
 
