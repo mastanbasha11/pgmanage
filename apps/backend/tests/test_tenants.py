@@ -351,6 +351,53 @@ async def test_revise_rent_rejects_bad_billing_day(
     assert r.status_code == 422
 
 
+# ── Check-in bills the current month if the ledger was already generated ─────────
+
+@pytest.mark.asyncio
+async def test_checkin_bills_current_month_when_already_generated(
+    client: AsyncClient, test_owner: dict, test_tenant: dict, db: AsyncSession
+):
+    """A tenant who joins after this month's ledger was generated must still get
+    a bill — otherwise they're silently missing from Expected and never chased."""
+    schema, pid = test_tenant["schema_name"], test_tenant["property_id"]
+    now = _now_ist()
+    # Existing tenant already has a current-month bill → "the batch has run".
+    await _seed_ledger(db, schema, test_tenant["tenant_id"], pid, now.month, now.year,
+                       700000, 0, "UNPAID")
+
+    hdr = auth_headers(test_owner["token"])
+    bed_b = test_tenant["bed_ids"][1]  # vacant
+    resp = await client.post(
+        "/api/v1/tenants", headers=hdr,
+        json=_checkin_payload(bed_b, phone="+919876543777"),
+    )
+    assert resp.status_code == 201, resp.text
+    new_tid = resp.json()["tenant_id"]
+
+    ledger = (await client.get(f"/api/v1/tenants/{new_tid}/ledger", headers=hdr)).json()
+    assert _entry(ledger, now.month, now.year) is not None, \
+        "joiner should be billed for the current month when the ledger exists"
+
+
+@pytest.mark.asyncio
+async def test_checkin_no_bill_when_month_not_generated(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """If the month's ledger hasn't been generated yet, check-in does NOT create
+    a stray bill — the monthly job will bill everyone together."""
+    now = _now_ist()
+    hdr = auth_headers(test_owner["token"])
+    resp = await client.post(
+        "/api/v1/tenants", headers=hdr,
+        json=_checkin_payload(test_property["bed_ids"][0], phone="+919876543778"),
+    )
+    assert resp.status_code == 201, resp.text
+    new_tid = resp.json()["tenant_id"]
+
+    ledger = (await client.get(f"/api/v1/tenants/{new_tid}/ledger", headers=hdr)).json()
+    assert _entry(ledger, now.month, now.year) is None
+
+
 @pytest.mark.asyncio
 async def test_revise_rent_requires_auth(client: AsyncClient, test_tenant: dict):
     r = await client.patch(

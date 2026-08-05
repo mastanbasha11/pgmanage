@@ -243,6 +243,37 @@ async def checkin_tenant(
         },
     )
 
+    # Bill the joiner for the CURRENT month if this property's ledger for that
+    # month has already been generated. The monthly job runs once (on the 1st),
+    # so anyone who checks in afterwards would otherwise be silently unbilled —
+    # missing from Expected and never chased. Only fires when a bill for the
+    # month already exists for the property (i.e. the batch ran), never for a
+    # future-dated move-in, and is a no-op if a row somehow already exists.
+    now_ist = datetime.now(IST_TZ)
+    if body.move_in_date <= now_ist.date():
+        other_total = sum(getattr(c, "amount_paise", 0) for c in rp.other_charges)
+        total_due = (
+            rp.monthly_rent_paise + rp.food_charges_paise + other_total
+            - rp.discount_amount_paise
+        )
+        await db.execute(
+            text("""
+                INSERT INTO rent_ledger_entries
+                    (tenant_id, property_id, month, year, amount_due_paise, due_date, status)
+                SELECT :tid, :pid, :m, :y, :due, :dd, 'UNPAID'::rent_status_enum
+                WHERE EXISTS (
+                    SELECT 1 FROM rent_ledger_entries
+                    WHERE property_id = :pid AND month = :m AND year = :y
+                )
+                ON CONFLICT (tenant_id, month, year) DO NOTHING
+            """),
+            {
+                "tid": str(tenant_id), "pid": str(property_id),
+                "m": now_ist.month, "y": now_ist.year, "due": total_due,
+                "dd": date(now_ist.year, now_ist.month, min(rp.billing_day, 28)),
+            },
+        )
+
     # Mark bed as occupied
     await db.execute(
         text("UPDATE beds SET status = 'OCCUPIED'::bed_status_enum, updated_at = NOW() WHERE id = :id"),
