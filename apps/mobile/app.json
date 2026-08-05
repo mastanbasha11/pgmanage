@@ -30,7 +30,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#161b26"
+        "backgroundColor": "#F6F8F4"
       },
       "package": "com.pgmanage.app",
       "versionCode": 5,
