@@ -8,6 +8,10 @@ export const site = {
   // The owner/staff app + resident portal live on their own subdomains.
   appUrl: 'https://app.pgmanage.in',
   portalUrl: 'https://my.pgmanage.in',
+  // Google Search Console HTML-tag verification token. Paste the value from the
+  // `content="..."` GSC gives you (or leave empty and verify via a DNS TXT
+  // record instead — no site change needed).
+  gscVerification: '',
   // One line, used as the default meta description base and OG fallback.
   tagline: 'Rent, beds and leads for a PG — on one screen.',
 
@@ -42,6 +46,13 @@ export const site = {
         { href: '/product/occupancy', label: 'Beds & leads' },
         { href: '/product/money', label: 'Money & control' },
         { href: '/pricing', label: 'Pricing' },
+      ],
+    },
+    {
+      heading: 'Solutions',
+      links: [
+        { href: '/pg-management-software', label: 'PG management software' },
+        { href: '/hostel-management-software', label: 'Hostel management software' },
       ],
     },
     {

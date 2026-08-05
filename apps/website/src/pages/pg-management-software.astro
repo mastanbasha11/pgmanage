@@ -1,0 +1,112 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import { site, waLink } from '@/content/site';
+import pricing from '@/content/pricing.json';
+
+const meta = {
+  title: 'PG Management Software in India — Rent, Beds & Money | PGManage',
+  description:
+    'PGManage is PG management software for paying-guest owners in India. Collect rent on WhatsApp, put a staff name against every rupee of cash, fill empty beds and see which rooms make money. From ₹25 per bed / month.',
+};
+
+const softwareApp = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: site.name,
+  alternateName: 'PG Management Software',
+  applicationCategory: 'BusinessApplication',
+  applicationSubCategory: 'PG & Hostel Management Software',
+  operatingSystem: 'Web, Android',
+  url: new URL('/pg-management-software', site.url).href,
+  keywords:
+    'PG management software, PG management app, paying guest management software, PG rent collection software, PG billing software India',
+  offers: {
+    '@type': 'Offer',
+    price: pricing.tiers[0].pricePerBed,
+    priceCurrency: 'INR',
+    description: `From ${pricing.tiers[0].priceLabel} per bed / month`,
+  },
+  description: meta.description,
+};
+---
+
+<Base title={meta.title} description={meta.description} path="/pg-management-software" ogSlug="home" jsonLd={[softwareApp]}>
+  <article class="wrap prose">
+    <p class="eyebrow" style="color:var(--forest)">PG Management Software</p>
+    <h1>PG management software, built inside a real PG.</h1>
+
+    <p class="dek">
+      PGManage is PG management software for paying-guest, co-living and hostel owners in India. It
+      collects the rent on WhatsApp, keeps a staff name against every rupee of cash, fills empty
+      beds before they cost you a month, and shows which rooms actually make money. It was built to
+      run {site.origin.descriptor} — not designed in a product meeting.
+    </p>
+
+    <div class="hero-cta" style="margin:24px 0 8px">
+      <a class="btn btn--primary" href="/demo">Book a demo</a>
+      <a class="btn btn--ghost" href={waLink()} rel="noopener"><Icon name="chat" /> WhatsApp us</a>
+    </div>
+
+    <h2>What PG management software should actually do</h2>
+    <p>
+      Most tools sold to PG owners are generic property software that has never met a bed, a
+      two-sharing, a notice period, or a manager walking around with four days of cash in his
+      pocket. PG management software has to speak the language of the month you actually run:
+    </p>
+    <ul>
+      <li>
+        <strong>Collect the rent without chasing it by hand.</strong> Reminders go out on WhatsApp
+        with a UPI link; the overdue list sorts itself into 0–15, 16–30, 31–60 and 60-plus days, so
+        the nudge reaches the fourteen people who owe, not a blast of a hundred.
+        <a href="/product/rent-collection">See how rent collection works →</a>
+      </li>
+      <li>
+        <strong>Put a name against every rupee.</strong> Each payment records who collected it —
+        UPI, cash or bank — and adds cash to that staff member’s running balance until they hand it
+        over. A recorded payment can’t be quietly edited; a correction is a new entry with a full
+        audit trail. That reconciliation gap is where cash goes missing, so we closed it.
+      </li>
+      <li>
+        <strong>Fill beds before they empty.</strong> Notice-to-vacate is logged the day it’s
+        given, so a bed freeing on the 12th shows up weeks early, and waiting leads are matched to
+        the beds about to open by room type and move-in date.
+        <a href="/product/occupancy">See how occupancy works →</a>
+      </li>
+      <li>
+        <strong>Know which rooms make money.</strong> Per-room ROI and expense tracking tell you
+        whether the three-sharings really carry the building — so you price the next property on a
+        number, not a hunch.
+        <a href="/product/money">See money &amp; control →</a>
+      </li>
+    </ul>
+
+    <h2>Who it’s for</h2>
+    <p>
+      PGManage is built for owners and managers of <strong>paying-guest accommodations, co-living
+      spaces and hostels</strong> across India — from a single 20-bed PG to a portfolio of
+      properties. If you run beds, chase rent every month, and hand cash collection to staff, this
+      is PG management software shaped like your job. Your manager needs only a ₹7,000 Android
+      phone; there’s nothing to install from an app store, and residents pay from a WhatsApp link
+      without downloading anything.
+    </p>
+
+    <h2>Simple, per-bed pricing</h2>
+    <p>
+      PGManage is priced per bed, filled or empty, from {pricing.tiers[0].priceLabel} a month with a
+      small monthly minimum — so the month a bed sits empty is the month the vacancy tools work
+      hardest for you. No setup fee; we load your rooms, beds and residents from your existing Excel
+      in a day or two. <a href="/pricing">See full pricing →</a>
+    </p>
+
+    <h2>See it on your own building</h2>
+    <p>
+      The fastest way to judge PG management software is on your own numbers. Book a 20-minute demo
+      and we’ll load your property first, so you see your beds — not a sample.
+    </p>
+    <div class="hero-cta" style="margin-top:16px">
+      <a class="btn btn--primary" href="/demo">Book a demo</a>
+      <a class="btn btn--ghost" href={waLink()} rel="noopener"><Icon name="chat" /> Message us on WhatsApp</a>
+    </div>
+  </article>
+</Base>

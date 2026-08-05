@@ -66,8 +66,8 @@ const schemas = [organization, website, ...jsonLd];
     <meta property="og:locale" content="en_IN" />
     <meta property="og:site_name" content={site.name} />
     {
-      import.meta.env.PUBLIC_GSC_VERIFICATION && (
-        <meta name="google-site-verification" content={import.meta.env.PUBLIC_GSC_VERIFICATION} />
+      site.gscVerification && (
+        <meta name="google-site-verification" content={site.gscVerification} />
       )
     }
     <meta property="og:title" content={title} />

@@ -1,0 +1,101 @@
+---
+import Base from '@/layouts/Base.astro';
+import Icon from '@/components/Icon.astro';
+import { site, waLink } from '@/content/site';
+import pricing from '@/content/pricing.json';
+
+const meta = {
+  title: 'Hostel Management Software in India — Beds, Rent & Cash | PGManage',
+  description:
+    'PGManage is hostel management software for owners of working, student and co-living hostels in India. Track every bed, collect rent on WhatsApp, keep a staff name against the cash and cut vacancy between stays. From ₹25 per bed / month.',
+};
+
+const softwareApp = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: site.name,
+  alternateName: 'Hostel Management Software',
+  applicationCategory: 'BusinessApplication',
+  applicationSubCategory: 'Hostel & PG Management Software',
+  operatingSystem: 'Web, Android',
+  url: new URL('/hostel-management-software', site.url).href,
+  keywords:
+    'hostel management software, hostel management app, hostel management system India, hostel rent collection software, bed management software',
+  offers: {
+    '@type': 'Offer',
+    price: pricing.tiers[0].pricePerBed,
+    priceCurrency: 'INR',
+    description: `From ${pricing.tiers[0].priceLabel} per bed / month`,
+  },
+  description: meta.description,
+};
+---
+
+<Base title={meta.title} description={meta.description} path="/hostel-management-software" ogSlug="home" jsonLd={[softwareApp]}>
+  <article class="wrap prose">
+    <p class="eyebrow" style="color:var(--forest)">Hostel Management Software</p>
+    <h1>Hostel management software that thinks in beds.</h1>
+
+    <p class="dek">
+      A hostel doesn’t rent flats — it rents beds, and they turn over. PGManage is hostel management
+      software built for that: every bed in every room tracked by status, rent collected on
+      WhatsApp, a staff name against every rupee of cash, and vacancy caught before an empty bed
+      quietly eats a month of rent. It runs {site.origin.descriptor}.
+    </p>
+
+    <div class="hero-cta" style="margin:24px 0 8px">
+      <a class="btn btn--primary" href="/demo">Book a demo</a>
+      <a class="btn btn--ghost" href={waLink()} rel="noopener"><Icon name="chat" /> WhatsApp us</a>
+    </div>
+
+    <h2>Why hostels need bed-level software, not flat-level</h2>
+    <p>
+      Property tools built for landlords manage units. A hostel manages <strong>beds</strong> — a
+      two-, three- or four-sharing where each bed has its own resident, its own rent and its own
+      move-out date. Higher churn means the difference between a full hostel and a leaky one is how
+      fast an empty bed gets filled. PGManage is shaped around exactly that:
+    </p>
+    <ul>
+      <li>
+        <strong>Every bed by status.</strong> Occupied, vacant, on-notice or under maintenance —
+        the whole hostel on one grid, with a two-sharing that has both beds free read as one whole
+        room, not two loose beds. <a href="/product/occupancy">See occupancy →</a>
+      </li>
+      <li>
+        <strong>Rent collected on WhatsApp.</strong> Reminders with a UPI link, ageing buckets, and
+        receipts dropped into the resident’s chat — so collection doesn’t depend on one person
+        remembering who owes. <a href="/product/rent-collection">See rent collection →</a>
+      </li>
+      <li>
+        <strong>A cash trail for every collector.</strong> Each payment carries the staff name and
+        adds to their cash-in-hand until handover; recorded payments can’t be quietly edited. The
+        reconciliation gap is where hostel cash leaks — this closes it.
+      </li>
+      <li>
+        <strong>Vacancy caught early.</strong> Notice logged the day it’s given surfaces a bed
+        freeing weeks ahead, and waiting leads are matched to it by bed type and move-in date, so
+        the gap between one resident leaving and the next arriving shrinks.
+      </li>
+    </ul>
+
+    <h2>For working, student and co-living hostels</h2>
+    <p>
+      Whether you run a working-men’s or working-women’s hostel, a student hostel near a campus, or
+      a co-living space, PGManage handles the operator’s month: beds, rent, cash, leads and
+      room-level profit. Staff run it from a plain Android phone; residents pay from a WhatsApp link
+      with nothing to install.
+    </p>
+
+    <h2>Per-bed pricing that fits a hostel</h2>
+    <p>
+      Priced per bed from {pricing.tiers[0].priceLabel} a month — filled or empty — with a small
+      monthly minimum and no setup fee. We load your rooms, beds and residents from your current
+      Excel in a day or two. <a href="/pricing">See pricing →</a>
+    </p>
+
+    <div class="hero-cta" style="margin-top:16px">
+      <a class="btn btn--primary" href="/demo">Book a demo</a>
+      <a class="btn btn--ghost" href={waLink()} rel="noopener"><Icon name="chat" /> Message us on WhatsApp</a>
+    </div>
+  </article>
+</Base>
