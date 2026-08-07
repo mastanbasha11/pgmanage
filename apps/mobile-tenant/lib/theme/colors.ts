@@ -64,45 +64,49 @@ export interface ColorTokens {
   celebrationBg: string;
 }
 
+// "Forest & Sage" — palette lifted verbatim from the resident-app mockup
+// (apps/website/mockups/resident-app.html :root). Forest #1C443A on sage
+// #F4F7F5; muted green #3F7763 reserved for money/positive; apricot #C4743F
+// for "needs attention" only. Every value here is a mockup token.
 export const lightColors: ColorTokens = {
-  bg: palette.slate[50],                  // off-white so white cards feel elevated
-  surface: palette.white,
-  surfaceElevated: palette.white,
-  surfaceMuted: palette.slate[100],
-  overlay: 'rgba(15, 23, 42, 0.55)',      // slate-900 @ 55%
+  bg: '#F4F7F5',                          // sage — app background
+  surface: '#FFFFFF',
+  surfaceElevated: '#FFFFFF',
+  surfaceMuted: '#ECF1EE',                // sage2 — card tint / icon tiles
+  overlay: 'rgba(30, 43, 38, 0.55)',      // ink @ 55%
 
-  text: palette.slate[900],
-  textMuted: palette.slate[600],
-  textDim: palette.slate[400],
-  textInverse: palette.white,
+  text: '#1E2B26',                        // ink
+  textMuted: '#5A6A63',                   // mut
+  textDim: '#6B7A74',                     // mut2
+  textInverse: '#F2F6F3',                 // ondark
 
-  border: palette.slate[200],
-  borderStrong: palette.slate[300],
+  border: '#DFE7E2',                      // sageline
+  borderStrong: '#CBD8D1',
 
-  accent: palette.brand[600],
-  accentSoft: palette.brand[50],
-  accentBorder: palette.brand[200],
-  accentHover: palette.brand[700],
-  onAccent: palette.white,
+  accent: '#1C443A',                      // forest — primary action / chrome
+  accentSoft: '#ECF1EE',                  // sage2 tint behind icons
+  accentBorder: '#DFE7E2',
+  accentHover: '#2A5A4D',                 // forest2
+  onAccent: '#F2F6F3',                    // ondark
 
-  successFg: palette.green[600],
-  successBg: palette.green[50],
-  successBorder: palette.green[100],
+  successFg: '#3F7763',                   // muted green — money & positive only
+  successBg: '#ECF1EE',
+  successBorder: '#DFE7E2',
 
-  warningFg: palette.amber[600],
-  warningBg: palette.amber[50],
-  warningBorder: palette.amber[100],
+  warningFg: '#9C5A2B',                   // apricot-ink — readable on warm tint
+  warningBg: '#FAF0E7',                   // apricot-t
+  warningBorder: '#F0DCCB',               // apricot-l
 
   dangerFg: palette.red[600],
   dangerBg: palette.red[50],
   dangerBorder: palette.red[100],
 
-  infoFg: palette.blue[600],
-  infoBg: palette.blue[50],
-  infoBorder: palette.blue[100],
+  infoFg: '#3F7763',
+  infoBg: '#ECF1EE',
+  infoBorder: '#DFE7E2',
 
-  celebrationFg: palette.violet[600],
-  celebrationBg: palette.violet[50],
+  celebrationFg: '#C4743F',               // apricot — referral warmth
+  celebrationBg: '#FAF0E7',
 };
 
 export const darkColors: ColorTokens = {
