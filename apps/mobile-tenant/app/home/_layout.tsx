@@ -41,16 +41,16 @@ export default function HomeTabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+            <Ionicons name="home-outline" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="pay"
         options={{
-          title: 'Pay',
+          title: 'Payments',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="card" size={size} color={color} />
+            <Ionicons name="wallet-outline" size={size} color={color} />
           ),
         }}
       />
@@ -59,16 +59,16 @@ export default function HomeTabsLayout() {
         options={{
           title: 'Food',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="restaurant" size={size} color={color} />
+            <Ionicons name="restaurant-outline" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="services"
+        name="stay"
         options={{
-          title: 'Services',
+          title: 'Stay',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="construct" size={size} color={color} />
+            <Ionicons name="bed-outline" size={size} color={color} />
           ),
         }}
       />
@@ -77,10 +77,13 @@ export default function HomeTabsLayout() {
         options={{
           title: 'More',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid" size={size} color={color} />
+            <Ionicons name="ellipsis-horizontal" size={size} color={color} />
           ),
         }}
       />
+      {/* Services (raise complaints) is reached from the Home "Help" tile,
+          not a bottom-tab slot — kept routable, hidden from the bar. */}
+      <Tabs.Screen name="services" options={{ href: null }} />
     </Tabs>
   );
 }
