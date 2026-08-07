@@ -8,6 +8,7 @@
 import { Linking, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 
 import {
   Avatar,
@@ -204,6 +205,17 @@ export default function MoreScreen() {
               </Text>
             </View>
           </Pressable>
+        </View>
+
+        {/* Build version — lets testers confirm exactly which build they run */}
+        <View style={{ marginTop: space.lg, alignItems: 'center' }}>
+          <Text style={{ color: colors.textMuted, fontSize: fontSize.caption }}>
+            {`PGManage v${Constants.expoConfig?.version ?? '1.0.0'}${
+              Constants.expoConfig?.android?.versionCode
+                ? ` (${Constants.expoConfig.android.versionCode})`
+                : ''
+            }`}
+          </Text>
         </View>
       </ScrollView>
     </Screen>
