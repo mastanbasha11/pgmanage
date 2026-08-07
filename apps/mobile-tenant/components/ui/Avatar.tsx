@@ -21,7 +21,7 @@ const INITIALS_BG_PALETTE = [
   ['#DCFCE7', '#15803D'], // green
   ['#FEF3C7', '#B45309'], // amber
   ['#F3E8FF', '#6D28D9'], // violet
-  ['#CCFBF1', '#0F766E'], // teal
+  ['#D5E5DD', '#143229'], // forest
 ];
 
 function hash(str: string): number {

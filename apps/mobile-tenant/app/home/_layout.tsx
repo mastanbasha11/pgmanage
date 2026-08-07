@@ -7,11 +7,15 @@
  */
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../../lib/theme';
 
 export default function HomeTabsLayout() {
   const { colors, fontWeight, fontSize } = useTheme();
+  // Extend the bar into the bottom safe area so tab labels are never clipped
+  // by the Android system navigation bar (gesture or 3-button).
+  const insets = useSafeAreaInsets();
   return (
     <Tabs
       screenOptions={{
@@ -22,8 +26,8 @@ export default function HomeTabsLayout() {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
           paddingTop: 6,
-          paddingBottom: 8,
-          height: 64,
+          paddingBottom: 8 + insets.bottom,
+          height: 64 + insets.bottom,
         },
         tabBarLabelStyle: {
           fontSize: fontSize.caption,

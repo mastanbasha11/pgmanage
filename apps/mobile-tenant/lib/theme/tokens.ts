@@ -15,18 +15,19 @@
  */
 
 export const palette = {
-  // Brand teal ramp — picked to feel calm + premium, not loud.
+  // Brand forest ramp — "Forest & Sage", matched to the owner app + marketing
+  // site (owner accent = #1C443A). Anchored so brand[600] IS that forest.
   brand: {
-    50: '#F0FDFA',
-    100: '#CCFBF1',
-    200: '#99F6E4',
-    300: '#5EEAD4',
-    400: '#2DD4BF',
-    500: '#14B8A6',
-    600: '#0D9488', // primary action in light mode
-    700: '#0F766E',
-    800: '#115E59',
-    900: '#134E4A',
+    50: '#EEF4F1',
+    100: '#D5E5DD',
+    200: '#AEC9BC',
+    300: '#93BBA9',
+    400: '#6BA189', // dark-mode accent — kept light enough to read on dark
+    500: '#3E7361',
+    600: '#1C443A', // primary action in light mode (matches owner accent)
+    700: '#143229', // pressed / hover (owner "deep")
+    800: '#0F2820',
+    900: '#0A1C16',
   },
   // Neutral / slate ramp.
   slate: {

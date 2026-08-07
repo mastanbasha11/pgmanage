@@ -370,15 +370,20 @@ const styles = StyleSheet.create({
   label: { fontSize: fontSize.small, fontWeight: '700', color: colors.textMuted },
 
   langChip: {
-    paddingHorizontal: space.lg,
-    paddingVertical: space.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: space.md,
+    paddingVertical: 8,
+    minHeight: 36,
     borderRadius: radius.pill,
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
     borderColor: colors.border,
   },
   langChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
-  langChipText: { fontSize: fontSize.body, fontWeight: '700', color: colors.textMuted },
+  langChipText: { fontSize: fontSize.small, fontWeight: '700', color: colors.textMuted },
   langChipTextActive: { color: colors.white },
 
   divider: { height: 1, backgroundColor: colors.border, marginVertical: space.sm },

@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
   stack: { color: '#E5E7EB', fontFamily: 'monospace', fontSize: 12 },
   btn: {
     marginTop: 12,
-    backgroundColor: '#0D9488',
+    backgroundColor: '#1C443A',
     borderRadius: 8,
     padding: 14,
     alignItems: 'center',

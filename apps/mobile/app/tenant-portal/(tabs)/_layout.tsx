@@ -6,6 +6,7 @@
  */
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../../lib/theme';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -17,6 +18,8 @@ function icon(name: IoniconName) {
 }
 
 export default function TenantTabsLayout() {
+  // Keep the bar clear of the Android system nav bar (see tabs/_layout.tsx).
+  const insets = useSafeAreaInsets();
   return (
     <Tabs
       screenOptions={{
@@ -27,8 +30,8 @@ export default function TenantTabsLayout() {
           borderTopWidth: 1,
           borderTopColor: colors.borderSoft,
           backgroundColor: colors.surface,
-          height: 60,
-          paddingBottom: 6,
+          height: 60 + insets.bottom,
+          paddingBottom: 6 + insets.bottom,
           paddingTop: 6,
         },
         tabBarLabelStyle: { fontSize: 10, fontWeight: '700' },

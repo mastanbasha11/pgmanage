@@ -122,7 +122,7 @@ export const darkColors: ColorTokens = {
 
   // Brighter teal reads better on dark surfaces.
   accent: palette.brand[400],
-  accentSoft: 'rgba(45, 212, 191, 0.12)', // brand-400 @ 12%
+  accentSoft: 'rgba(107, 161, 137, 0.12)', // brand-400 (forest) @ 12%
   accentBorder: palette.brand[700],
   accentHover: palette.brand[300],
   onAccent: palette.slate[950],

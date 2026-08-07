@@ -37,7 +37,7 @@ const lightShadows: ShadowTokens = {
   },
   hero: {
     // Slightly tinted teal halo for the rent-due / referral hero cards.
-    shadowColor: '#0D9488',
+    shadowColor: '#1C443A',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.14,
     shadowRadius: 20,

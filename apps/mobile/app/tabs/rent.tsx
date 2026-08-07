@@ -442,27 +442,36 @@ function TransactionList({ items }: { items: RentLedgerTransaction[] }) {
 
 const styles = StyleSheet.create({
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+    paddingVertical: 8,
+    minHeight: 36,
+    minWidth: 52,
     borderRadius: radius.pill,
     backgroundColor: colors.surfaceMuted,
-    minWidth: 52,
-    alignItems: 'center',
   },
-  chipActive: { backgroundColor: colors.primary },
+  chipActive: { backgroundColor: colors.accent },
   chipText: { fontSize: fontSize.small, fontWeight: '700', color: colors.textMuted },
   chipTextActive: { color: colors.white },
 
   statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     paddingHorizontal: space.md,
-    paddingVertical: 6,
+    paddingVertical: 8,
+    minHeight: 36,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  statusChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  statusChipText: { fontSize: fontSize.caption, fontWeight: '700', color: colors.textMuted },
+  statusChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  statusChipText: { fontSize: fontSize.small, fontWeight: '700', color: colors.textMuted },
   statusChipTextActive: { color: colors.white },
 
   sectionTitle: {

@@ -11,6 +11,7 @@
  */
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { t } from '../../lib/i18n';
 import { colors, TOUCH_TARGET } from '../../lib/theme';
@@ -18,6 +19,11 @@ import { colors, TOUCH_TARGET } from '../../lib/theme';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 export default function TabsLayout() {
+  // The tab bar must sit ABOVE the Android system navigation bar (gesture or
+  // 3-button). Fold the bottom safe-area inset into the bar height + padding,
+  // otherwise the labels get clipped by the OS nav bar on most phones.
+  const insets = useSafeAreaInsets();
+
   const icon = (name: IoniconName) =>
     ({ color, size }: { color: string; size: number }) => (
       <Ionicons name={name} size={size} color={color} />
@@ -32,9 +38,9 @@ export default function TabsLayout() {
           borderTopWidth: 1,
           borderTopColor: colors.border,
           backgroundColor: colors.surface,
-          height: TOUCH_TARGET + 16,
+          height: TOUCH_TARGET + 16 + insets.bottom,
           paddingTop: 4,
-          paddingBottom: 8,
+          paddingBottom: 8 + insets.bottom,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
         headerShown: false,
