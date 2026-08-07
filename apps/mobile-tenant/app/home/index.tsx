@@ -392,24 +392,24 @@ export default function HomeScreen() {
           >
             Quick actions
           </Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md }}>
+          <View style={{ flexDirection: 'row', gap: space.sm }}>
             <QuickAction
-              label="Raise issue"
+              label="Help"
               iconName="construct"
               onPress={() => router.push('/home/services')}
             />
             <QuickAction
-              label="Invite guest"
+              label="Guest"
               iconName="people"
               onPress={() => router.push('/visitors')}
             />
             <QuickAction
-              label="View menu"
+              label="Menu"
               iconName="restaurant"
               onPress={() => router.push('/home/food')}
             />
             <QuickAction
-              label="Give notice"
+              label="Notice"
               iconName="exit"
               onPress={() => router.push('/notice')}
             />
@@ -738,43 +738,37 @@ function QuickAction({
   iconName: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
 }) {
-  const { colors, fontSize, fontWeight, radius, space } = useTheme();
+  const { colors, fontSize, fontWeight, radius } = useTheme();
   return (
     <Pressable
       onPress={onPress}
-      style={{
-        backgroundColor: colors.surface,
-        borderColor: colors.border,
-        borderWidth: 1,
-        borderRadius: radius.lg,
-        padding: space.md,
-        flexBasis: '47%',
-        flexGrow: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: space.md,
-      }}
+      style={{ flex: 1, alignItems: 'center', gap: 6 }}
       accessibilityRole="button"
       accessibilityLabel={label}
     >
+      {/* Square icon tile — width comes from flex:1 in the 4-across row,
+          aspectRatio keeps it square on any screen width. */}
       <View
         style={{
-          width: 40,
-          height: 40,
-          borderRadius: 20,
-          backgroundColor: colors.accentSoft,
+          width: '100%',
+          aspectRatio: 1,
+          borderRadius: radius.lg,
+          backgroundColor: colors.surface,
+          borderWidth: 1,
+          borderColor: colors.border,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <Ionicons name={iconName} size={20} color={colors.accent} />
+        <Ionicons name={iconName} size={24} color={colors.accent} />
       </View>
       <Text
+        numberOfLines={1}
         style={{
           color: colors.text,
-          fontSize: fontSize.body,
+          fontSize: fontSize.caption,
           fontWeight: fontWeight.semibold,
-          flex: 1,
+          textAlign: 'center',
         }}
       >
         {label}
