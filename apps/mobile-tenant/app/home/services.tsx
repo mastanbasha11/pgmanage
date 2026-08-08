@@ -67,21 +67,41 @@ export default function ServicesScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
-        <View style={{ marginTop: space.md, marginBottom: space.lg }}>
+        <View style={{ marginTop: space.md, marginBottom: space.md }}>
           <Text
             style={{
               color: colors.text,
-              fontSize: fontSize.h1,
-              lineHeight: lineHeight.h1,
+              fontSize: fontSize.h2,
               fontWeight: fontWeight.extrabold,
             }}
           >
-            Services
+            Get help
           </Text>
-          <Text style={{ color: colors.textMuted, fontSize: fontSize.body, marginTop: 2 }}>
-            Raise issues, track tickets
+          <Text style={{ color: colors.textMuted, fontSize: fontSize.small, marginTop: 2 }}>
+            most issues fixed within 24h
           </Text>
         </View>
+
+        {/* Freeform search → new ticket */}
+        <Pressable
+          onPress={() => router.push('/tickets/new')}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: space.sm,
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.surface,
+            borderRadius: radius.md,
+            paddingHorizontal: space.md,
+            paddingVertical: 12,
+          }}
+        >
+          <Ionicons name="search" size={16} color={colors.textDim} />
+          <Text style={{ color: colors.textDim, fontSize: fontSize.small }}>
+            Describe the issue… "AC not cooling"
+          </Text>
+        </Pressable>
 
         {/* Recent tickets */}
         <SectionHeader title="Recent tickets" subtitle="Your recently raised tickets" />
@@ -144,10 +164,10 @@ export default function ServicesScreen() {
             >
               <View
                 style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: colors.accentSoft,
+                  width: 42,
+                  height: 42,
+                  borderRadius: radius.md,
+                  backgroundColor: colors.surfaceMuted,
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
