@@ -88,30 +88,66 @@ export default function MoreScreen() {
 
   return (
     <Screen scroll>
-      <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View
+          style={{
+            paddingTop: 8,
+            paddingBottom: space.sm,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Text style={{ color: colors.text, fontSize: fontSize.h2, fontWeight: fontWeight.extrabold }}>
+            More
+          </Text>
+          <Pressable
+            onPress={() => router.push('/settings')}
+            accessibilityLabel="Settings"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 11,
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="settings-outline" size={18} color={colors.accent} />
+          </Pressable>
+        </View>
+
         {/* Profile snapshot at top */}
         {profile ? (
           <Pressable onPress={() => router.push('/profile')}>
-            <Card variant="hero" style={{ marginTop: space.md }}>
+            <Card style={{ marginTop: space.xs }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-                <Avatar name={profile.name} size={56} />
+                <Avatar name={profile.name} size={44} />
                 <View style={{ flex: 1 }}>
                   <Text
                     style={{
                       color: colors.text,
-                      fontSize: fontSize.h3,
+                      fontSize: fontSize.body,
                       fontWeight: fontWeight.bold,
                     }}
                   >
                     {profile.name}
                   </Text>
                   <Text
-                    style={{ color: colors.textMuted, fontSize: fontSize.small, marginTop: 2 }}
+                    style={{ color: colors.textMuted, fontSize: fontSize.caption, marginTop: 2 }}
+                    numberOfLines={1}
                   >
                     {profile.property.name} · Room {profile.room.roomNumber}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textDim} />
+                <Pill
+                  label={profile.kycComplete ? 'KYC' : 'Finish KYC'}
+                  tone={profile.kycComplete ? 'success' : 'warning'}
+                  size="sm"
+                />
               </View>
             </Card>
           </Pressable>
@@ -140,15 +176,15 @@ export default function MoreScreen() {
                     >
                       <View
                         style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 18,
-                          backgroundColor: colors.accentSoft,
+                          width: 34,
+                          height: 34,
+                          borderRadius: radius.md,
+                          backgroundColor: colors.surfaceMuted,
                           alignItems: 'center',
                           justifyContent: 'center',
                         }}
                       >
-                        <Ionicons name={item.icon} size={18} color={colors.accent} />
+                        <Ionicons name={item.icon} size={17} color={colors.accent} />
                       </View>
                       <Text
                         style={{
