@@ -151,132 +151,81 @@ export default function ReferralScreen() {
       />
 
       <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
-        {/* Hero card */}
-        <Card
-          variant="hero"
+        {/* Hero card — dark forest, centered (mockup screen 8) */}
+        <View
           style={{
             marginTop: space.md,
-            backgroundColor: colors.celebrationBg,
-            borderColor: colors.celebrationFg,
-            borderWidth: 1,
+            backgroundColor: colors.accent,
+            borderRadius: radius.lg,
+            padding: space.xl,
+            alignItems: 'center',
           }}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-            <View
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: colors.celebrationFg,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ionicons name="gift" size={28} color="#FFFFFF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  color: colors.celebrationFg,
-                  fontSize: fontSize.small,
-                  fontWeight: fontWeight.bold,
-                  textTransform: 'uppercase',
-                  letterSpacing: 1,
-                }}
-              >
-                Refer & earn
-              </Text>
-              <Text
-                style={{
-                  color: colors.text,
-                  fontSize: fontSize.h1,
-                  lineHeight: lineHeight.h1,
-                  fontWeight: fontWeight.extrabold,
-                }}
-              >
-                Up to{' '}
-              </Text>
-              <Money
-                paise={summary.bonusPerSignupPaise + summary.bonusPerMoveInPaise}
-                size="display"
-                color={colors.celebrationFg}
-              />
-            </View>
-          </View>
+          <Ionicons name="gift" size={30} color={colors.onAccent} />
           <Text
             style={{
-              color: colors.text,
-              fontSize: fontSize.body,
-              lineHeight: lineHeight.body,
-              marginTop: space.lg,
+              color: colors.onAccent,
+              fontSize: fontSize.bodyLg,
+              fontWeight: fontWeight.extrabold,
+              marginTop: space.sm,
             }}
           >
-            Help a friend become a resident, and we'll add ₹500 when they sign up plus ₹2,000 when they move in — straight to your wallet.
+            Bring a friend home
           </Text>
-
-          {/* Code chip */}
+          <Text
+            style={{
+              color: colors.onAccent,
+              opacity: 0.78,
+              fontSize: fontSize.caption,
+              marginTop: 3,
+              textAlign: 'center',
+            }}
+          >
+            They get ₹{Math.round(summary.bonusPerSignupPaise / 100)} off first rent · you get ₹
+            {Math.round(summary.bonusPerMoveInPaise / 100)} credit
+          </Text>
           <View
             style={{
-              backgroundColor: colors.surface,
-              borderRadius: radius.lg,
-              padding: space.lg,
+              backgroundColor: 'rgba(255,255,255,0.12)',
+              borderRadius: radius.md,
+              paddingVertical: 10,
+              paddingHorizontal: space.xl,
               marginTop: space.lg,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: space.md,
             }}
           >
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  color: colors.textMuted,
-                  fontSize: fontSize.caption,
-                  textTransform: 'uppercase',
-                  letterSpacing: 1,
-                  fontWeight: fontWeight.semibold,
-                }}
-              >
-                Your code
-              </Text>
-              <Text
-                style={{
-                  color: colors.text,
-                  fontSize: fontSize.h2,
-                  fontWeight: fontWeight.extrabold,
-                  letterSpacing: 2,
-                  marginTop: 2,
-                }}
-              >
-                {summary.code}
-              </Text>
-            </View>
-            <Pressable
-              onPress={share}
-              accessibilityRole="button"
-              accessibilityLabel="Share code"
+            <Text
               style={{
-                backgroundColor: colors.celebrationFg,
-                paddingHorizontal: space.lg,
-                paddingVertical: 10,
-                borderRadius: radius.pill,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: space.sm,
+                color: colors.onAccent,
+                fontSize: fontSize.h3,
+                fontWeight: fontWeight.extrabold,
+                letterSpacing: 3,
               }}
             >
-              <Ionicons name="share-social" size={16} color="#FFFFFF" />
-              <Text
-                style={{
-                  color: '#FFFFFF',
-                  fontSize: fontSize.small,
-                  fontWeight: fontWeight.bold,
-                }}
-              >
-                Share
-              </Text>
-            </Pressable>
+              {summary.code}
+            </Text>
           </View>
-        </Card>
+          <Pressable
+            onPress={share}
+            accessibilityRole="button"
+            accessibilityLabel="Share on WhatsApp"
+            style={{
+              backgroundColor: colors.surface,
+              borderRadius: 14,
+              paddingVertical: 13,
+              marginTop: space.md,
+              alignSelf: 'stretch',
+              alignItems: 'center',
+              flexDirection: 'row',
+              justifyContent: 'center',
+              gap: space.sm,
+            }}
+          >
+            <Ionicons name="share-social" size={16} color={colors.accent} />
+            <Text style={{ color: colors.accent, fontSize: fontSize.body, fontWeight: fontWeight.bold }}>
+              Share on WhatsApp
+            </Text>
+          </Pressable>
+        </View>
 
         {/* Earnings tiles */}
         <SectionHeader title="Your earnings" />
