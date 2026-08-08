@@ -33,7 +33,7 @@
         "backgroundColor": "#F6F8F4"
       },
       "package": "in.pgmanage.resident",
-      "versionCode": 9,
+      "versionCode": 10,
       "permissions": [
         "android.permission.INTERNET"
       ]
