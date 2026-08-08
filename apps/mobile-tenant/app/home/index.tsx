@@ -91,6 +91,7 @@ export default function HomeScreen() {
   }, [tickets, resolvedTicketDismissed]);
 
   const todayMeals = useMemo(() => filterTodayMeals(meals), [meals]);
+  const featuredMeal = todayMeals.lunch ?? todayMeals.dinner ?? todayMeals.breakfast;
   const pinnedNotice = notices.find((n) => n.pinned) ?? notices[0];
 
   async function onRefresh() {
@@ -126,10 +127,13 @@ export default function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
-        {/* Header row: avatar + greeting + referral pill */}
+        {/* Header row: avatar + property/room over greeting + bell */}
         <View style={styles.headerRow}>
           <Avatar name={profile.name} size={44} />
           <View style={{ flex: 1, marginLeft: space.md }}>
+            <Text style={{ color: colors.textDim, fontSize: fontSize.caption }} numberOfLines={1}>
+              {profile.property.name} · Room {profile.room.roomNumber}
+            </Text>
             <Text
               style={{
                 color: colors.text,
@@ -139,39 +143,24 @@ export default function HomeScreen() {
             >
               Hi, {profile.name.split(' ')[0]}
             </Text>
-            <Text style={{ color: colors.textMuted, fontSize: fontSize.small, marginTop: 2 }}>
-              {profile.property.name}
-            </Text>
           </View>
-          {referralQ.data && referralQ.data.bonusPerMoveInPaise > 0 ? (
-            <Pressable
-              onPress={() => router.push('/referral')}
-              accessibilityLabel="Refer & earn"
-              accessibilityRole="button"
-              style={{
-                backgroundColor: colors.celebrationBg,
-                borderColor: colors.celebrationFg,
-                borderWidth: 1,
-                borderRadius: radius.pill,
-                paddingHorizontal: space.md,
-                paddingVertical: 6,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <Ionicons name="gift" size={14} color={colors.celebrationFg} />
-              <Text
-                style={{
-                  color: colors.celebrationFg,
-                  fontSize: fontSize.caption,
-                  fontWeight: fontWeight.bold,
-                }}
-              >
-                Earn ₹{Math.round(referralQ.data.bonusPerMoveInPaise / 100).toLocaleString('en-IN')}
-              </Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            onPress={() => router.push('/notifications')}
+            accessibilityLabel="Notifications"
+            accessibilityRole="button"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: radius.md,
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="notifications-outline" size={18} color={colors.accent} />
+          </Pressable>
         </View>
 
         {/* KYC nudge */}
@@ -303,83 +292,6 @@ export default function HomeScreen() {
           onPay={() => router.push('/home/pay')}
         />
 
-        {/* Today's meals */}
-        <View style={{ marginTop: space['3xl'] }}>
-          <Text
-            style={{
-              color: colors.text,
-              fontSize: fontSize.h3,
-              fontWeight: fontWeight.bold,
-              marginBottom: space.md,
-            }}
-          >
-            Today's meals
-          </Text>
-          <View style={{ flexDirection: 'row', gap: space.md }}>
-            {(['breakfast', 'lunch', 'dinner'] as const).map((slot) => {
-              const serving = todayMeals[slot];
-              return (
-                <Pressable
-                  key={slot}
-                  onPress={() => router.push('/home/food')}
-                  accessibilityLabel={`${slot} menu`}
-                  accessibilityRole="button"
-                  style={{ flex: 1 }}
-                >
-                  <View
-                    style={{
-                      backgroundColor: colors.surface,
-                      borderRadius: radius.lg,
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                      padding: space.md,
-                      minHeight: 96,
-                    }}
-                  >
-                    <Ionicons
-                      name={
-                        slot === 'breakfast'
-                          ? 'cafe'
-                          : slot === 'lunch'
-                            ? 'fast-food'
-                            : 'restaurant'
-                      }
-                      size={18}
-                      color={colors.accent}
-                    />
-                    <Text
-                      style={{
-                        color: colors.text,
-                        fontSize: fontSize.small,
-                        fontWeight: fontWeight.bold,
-                        marginTop: space.xs,
-                        textTransform: 'capitalize',
-                      }}
-                    >
-                      {slot}
-                    </Text>
-                    <Text
-                      numberOfLines={2}
-                      style={{
-                        color: colors.textMuted,
-                        fontSize: fontSize.caption,
-                        marginTop: 2,
-                      }}
-                    >
-                      {serving
-                        ? serving.items
-                            .map((i) => i.name)
-                            .slice(0, 2)
-                            .join(', ')
-                        : '—'}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
         {/* Quick actions */}
         <View style={{ marginTop: space['3xl'] }}>
           <Text
@@ -394,118 +306,81 @@ export default function HomeScreen() {
           </Text>
           <View style={{ flexDirection: 'row', gap: space.sm }}>
             <QuickAction
-              label="Help"
-              iconName="construct"
+              label="Get help"
+              iconName="help-buoy-outline"
               onPress={() => router.push('/home/services')}
             />
             <QuickAction
-              label="Guest"
-              iconName="people"
-              onPress={() => router.push('/visitors')}
-            />
-            <QuickAction
               label="Menu"
-              iconName="restaurant"
+              iconName="restaurant-outline"
               onPress={() => router.push('/home/food')}
             />
             <QuickAction
-              label="Notice"
-              iconName="exit"
-              onPress={() => router.push('/notice')}
+              label="Guest"
+              iconName="ticket-outline"
+              onPress={() => router.push('/visitors')}
+            />
+            <QuickAction
+              label="Refer"
+              iconName="gift-outline"
+              onPress={() => router.push('/referral')}
             />
           </View>
         </View>
 
-        {/* Open tickets */}
-        {openTickets.length > 0 ? (
-          <View style={{ marginTop: space['3xl'] }}>
-            <View
+        {/* TODAY digest — one card: next meal · open ticket(s) · pinned notice */}
+        {featuredMeal || openTickets.length > 0 || pinnedNotice ? (
+          <>
+            <Text
               style={{
-                flexDirection: 'row',
-                alignItems: 'flex-end',
-                justifyContent: 'space-between',
-                marginBottom: space.md,
+                color: colors.textMuted,
+                fontSize: 10,
+                fontWeight: '800',
+                letterSpacing: 1,
+                marginTop: space['3xl'],
+                marginBottom: space.sm,
               }}
             >
-              <Text
-                style={{ color: colors.text, fontSize: fontSize.h3, fontWeight: fontWeight.bold }}
-              >
-                Open tickets
-              </Text>
-              <Pressable onPress={() => router.push('/home/services')} hitSlop={8}>
-                <Text
-                  style={{
-                    color: colors.accent,
-                    fontSize: fontSize.small,
-                    fontWeight: fontWeight.semibold,
-                  }}
-                >
-                  See all
-                </Text>
-              </Pressable>
-            </View>
-            <Card style={{ padding: 0 }}>
-              {openTickets.slice(0, 2).map((t, i) => (
-                <View key={t.id}>
-                  <OpenTicketRow
-                    ticket={t}
-                    onPress={() => router.push(`/tickets/${t.id}`)}
-                  />
-                  {i < Math.min(openTickets.length, 2) - 1 ? (
-                    <View
-                      style={{
-                        height: 1,
-                        backgroundColor: colors.border,
-                        marginHorizontal: space.lg,
-                      }}
-                    />
-                  ) : null}
-                </View>
+              TODAY
+            </Text>
+            <Card style={{ padding: 0, paddingHorizontal: space.lg }}>
+              {featuredMeal ? (
+                <DigestRow
+                  icon="restaurant-outline"
+                  title={`${cap(featuredMeal.slot)} · ${featuredMeal.items
+                    .map((i) => i.name)
+                    .slice(0, 2)
+                    .join(', ')}`}
+                  sub="Today's menu"
+                  onPress={() => router.push('/home/food')}
+                  chevron
+                  divider={openTickets.length > 0 || !!pinnedNotice}
+                />
+              ) : null}
+              {openTickets.slice(0, 1).map((t) => (
+                <DigestRow
+                  key={t.id}
+                  icon="construct-outline"
+                  warm
+                  title={t.title}
+                  sub={`${t.status.replace(/_/g, ' ')} · raised ${format(parseISO(t.createdAt), 'd MMM')}`}
+                  onPress={() => router.push(`/tickets/${t.id}`)}
+                  chevron
+                  divider={!!pinnedNotice}
+                />
               ))}
+              {pinnedNotice ? (
+                <DigestRow
+                  icon="megaphone-outline"
+                  title={pinnedNotice.title}
+                  sub={pinnedNotice.body}
+                  onPress={() => router.push('/notices')}
+                  chevron
+                  divider={false}
+                />
+              ) : null}
             </Card>
-          </View>
-        ) : null}
-
-        {/* Notice banner */}
-        {pinnedNotice ? (
-          <View style={{ marginTop: space['3xl'] }}>
-            <Card
-              style={{
-                backgroundColor: colors.warningBg,
-                borderColor: colors.warningBorder,
-              }}
-              onPress={() => router.push('/notices')}
-              accessibilityLabel={`Notice: ${pinnedNotice.title}`}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md }}>
-                <Ionicons name="megaphone" size={20} color={colors.warningFg} />
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-                    {pinnedNotice.pinned ? (
-                      <Pill label="Pinned" tone="warning" size="sm" />
-                    ) : null}
-                    <Text
-                      style={{
-                        color: colors.text,
-                        fontSize: fontSize.body,
-                        fontWeight: fontWeight.bold,
-                        flex: 1,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {pinnedNotice.title}
-                    </Text>
-                  </View>
-                  <Text
-                    style={{ color: colors.textMuted, fontSize: fontSize.small, marginTop: 2 }}
-                    numberOfLines={2}
-                  >
-                    {pinnedNotice.body}
-                  </Text>
-                </View>
-              </View>
-            </Card>
-          </View>
+          </>
         ) : null}
       </ScrollView>
     </Screen>
@@ -513,6 +388,73 @@ export default function HomeScreen() {
 }
 
 /* ── Subcomponents ────────────────────────────────────────────────────────── */
+
+function cap(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** One row inside the Home "TODAY" digest card — sage icon tile, title, sub,
+ *  optional apricot tint for attention items, chevron, and a hairline divider. */
+function DigestRow({
+  icon,
+  title,
+  sub,
+  onPress,
+  chevron,
+  warm,
+  divider,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  sub?: string;
+  onPress?: () => void;
+  chevron?: boolean;
+  warm?: boolean;
+  divider?: boolean;
+}) {
+  const { colors, fontSize, fontWeight, radius, space } = useTheme();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={title}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.md,
+          paddingVertical: 12,
+          borderBottomWidth: divider ? 1 : 0,
+          borderBottomColor: colors.border,
+        }}
+      >
+        <View
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: radius.md,
+            backgroundColor: warm ? colors.warningBg : colors.surfaceMuted,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name={icon} size={17} color={warm ? colors.warningFg : colors.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            numberOfLines={1}
+            style={{ color: colors.text, fontSize: fontSize.small, fontWeight: fontWeight.bold }}
+          >
+            {title}
+          </Text>
+          {sub ? (
+            <Text numberOfLines={1} style={{ color: colors.textMuted, fontSize: fontSize.caption, marginTop: 1 }}>
+              {sub}
+            </Text>
+          ) : null}
+        </View>
+        {chevron ? <Ionicons name="chevron-forward" size={16} color={colors.textDim} /> : null}
+      </View>
+    </Pressable>
+  );
+}
 
 function KycNudgeContent({ onSkip }: { onSkip: () => void }) {
   const { colors, fontSize, fontWeight, lineHeight, radius, space } = useTheme();
