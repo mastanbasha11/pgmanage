@@ -75,220 +75,176 @@ export default function PayScreen() {
     );
   }
 
+  const paid = dues.status === 'paid';
+  const payLabel = paid ? 'Pay next month' : `Pay ₹${Math.round(dues.totalPaise / 100).toLocaleString('en-IN')}`;
+
   return (
     <Screen scroll={false}>
+      {/* Header */}
+      <View
+        style={{
+          paddingTop: 8,
+          paddingBottom: 4,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <View>
+          <Text style={{ color: colors.text, fontSize: fontSize.h2, fontWeight: fontWeight.extrabold }}>
+            Payments
+          </Text>
+          <Text style={{ color: colors.textMuted, fontSize: fontSize.small, marginTop: 2 }}>
+            {dues.monthLabel}
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => router.push('/payment-history')}
+          accessibilityLabel="Payment history"
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 11,
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.border,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name="receipt-outline" size={18} color={colors.accent} />
+        </Pressable>
+      </View>
+
       <ScrollView
         contentContainerStyle={{ paddingBottom: space['3xl'] }}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
-        {/* Hero rent card */}
-        <Card variant="hero" style={{ marginTop: space.md }}>
+        {/* This month — breakdown + total + pay */}
+        <Card style={{ marginTop: space.md }}>
           <View
             style={{
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'space-between',
-              marginBottom: space.sm,
+              paddingBottom: space.sm,
             }}
           >
-            <Text
-              style={{
-                color: colors.textMuted,
-                fontSize: fontSize.small,
-                fontWeight: fontWeight.semibold,
-                textTransform: 'uppercase',
-                letterSpacing: 1,
-              }}
-            >
-              {dues.monthLabel}
+            <Text style={{ color: colors.text, fontSize: fontSize.body, fontWeight: fontWeight.bold }}>
+              This month
             </Text>
-            <Pill
-              label={dues.status === 'paid' ? 'Paid' : dues.daysUntilDue < 0 ? 'Overdue' : 'Due'}
-              tone={dues.status === 'paid' ? 'success' : dues.daysUntilDue < 0 ? 'danger' : 'warning'}
-              size="sm"
-            />
+            <Pill label={paid ? 'paid' : 'unpaid'} tone={paid ? 'success' : 'warning'} size="sm" />
           </View>
-          <Money paise={dues.totalPaise} size="hero" />
-          <Text style={{ color: colors.textMuted, fontSize: fontSize.small, marginTop: space.xs }}>
-            Due {format(parseISO(dues.dueDate), 'd MMM yyyy')}
-            {' · '}
-            {dues.daysUntilDue >= 0
-              ? `${dues.daysUntilDue} day${dues.daysUntilDue === 1 ? '' : 's'} left`
-              : `${Math.abs(dues.daysUntilDue)} days overdue`}
-          </Text>
 
-          {/* Wallet credit */}
+          {dues.lines.map((line, i) => (
+            <View
+              key={`${line.kind}-${i}`}
+              style={{ borderTopWidth: 1, borderTopColor: colors.border }}
+            >
+              <LineRow
+                line={line}
+                isExpanded={expandedLine === line.kind}
+                onToggle={() => setExpandedLine((cur) => (cur === line.kind ? null : line.kind))}
+              />
+            </View>
+          ))}
+
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'flex-end',
+              justifyContent: 'space-between',
+              paddingTop: space.md,
+              marginTop: 2,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+            }}
+          >
+            <Text style={{ color: colors.text, fontSize: fontSize.body, fontWeight: fontWeight.bold }}>
+              Total
+            </Text>
+            <Money paise={dues.totalPaise} size="h2" />
+          </View>
+
           {profile.walletBalancePaise > 0 ? (
             <View
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: space.sm,
-                marginTop: space.lg,
+                marginTop: space.md,
                 padding: space.md,
-                backgroundColor: colors.celebrationBg,
+                backgroundColor: colors.accentSoft,
                 borderRadius: 12,
               }}
             >
-              <Ionicons name="wallet" size={20} color={colors.celebrationFg} />
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    color: colors.celebrationFg,
-                    fontSize: fontSize.small,
-                    fontWeight: fontWeight.bold,
-                  }}
-                >
-                  Wallet credit available
-                </Text>
-                <Money paise={profile.walletBalancePaise} size="body" color={colors.celebrationFg} />
-              </View>
+              <Ionicons name="wallet-outline" size={18} color={colors.accent} />
+              <Text style={{ flex: 1, color: colors.accent, fontSize: fontSize.small, fontWeight: fontWeight.bold }}>
+                Wallet credit ₹{Math.round(profile.walletBalancePaise / 100).toLocaleString('en-IN')} available
+              </Text>
             </View>
           ) : null}
 
-          <View style={{ flexDirection: 'row', gap: space.md, marginTop: space.lg }}>
-            <Pressable
-              onPress={quickPay}
-              style={{
-                flex: 1,
-                backgroundColor: colors.accent,
-                borderRadius: 12,
-                paddingVertical: 14,
-                alignItems: 'center',
-                flexDirection: 'row',
-                justifyContent: 'center',
-                gap: space.sm,
-              }}
-            >
-              <Ionicons name="card" size={18} color={colors.onAccent} />
-              <Text
-                style={{
-                  color: colors.onAccent,
-                  fontSize: fontSize.body,
-                  fontWeight: fontWeight.bold,
-                }}
-              >
-                Pay {dues.status === 'paid' ? 'next month' : 'now'}
-              </Text>
-            </Pressable>
-          </View>
-        </Card>
-
-        {/* Itemized breakdown */}
-        <SectionHeader title="Breakdown" subtitle="Tap a line to see how it's computed" />
-        <Card style={{ padding: 0 }}>
-          {dues.lines.map((line, i) => (
-            <View key={`${line.kind}-${i}`}>
-              <LineRow
-                line={line}
-                isExpanded={expandedLine === line.kind}
-                onToggle={() =>
-                  setExpandedLine((cur) => (cur === line.kind ? null : line.kind))
-                }
-              />
-              {i < dues.lines.length - 1 ? (
-                <View
-                  style={{
-                    height: 1,
-                    backgroundColor: colors.border,
-                    marginHorizontal: space.lg,
-                  }}
-                />
-              ) : null}
-            </View>
-          ))}
-          <View
+          <Pressable
+            onPress={quickPay}
             style={{
+              marginTop: space.md,
+              backgroundColor: colors.accent,
+              borderRadius: 14,
+              paddingVertical: 14,
+              alignItems: 'center',
+              justifyContent: 'center',
               flexDirection: 'row',
-              justifyContent: 'space-between',
-              padding: space.lg,
-              borderTopWidth: 2,
-              borderTopColor: colors.borderStrong,
+              gap: space.sm,
             }}
           >
-            <Text
-              style={{ color: colors.text, fontSize: fontSize.body, fontWeight: fontWeight.bold }}
-            >
-              Total
+            <Ionicons name="card-outline" size={18} color={colors.onAccent} />
+            <Text style={{ color: colors.onAccent, fontSize: fontSize.body, fontWeight: fontWeight.bold }}>
+              {payLabel}
             </Text>
-            <Money paise={dues.totalPaise} size="h3" />
-          </View>
+          </Pressable>
+          <Text style={{ color: colors.textDim, fontSize: fontSize.caption, textAlign: 'center', marginTop: space.sm }}>
+            UPI · card · netbanking · instant receipt
+          </Text>
         </Card>
 
-        {/* My Stay */}
-        <SectionHeader title="My stay" />
-        <Card>
-          <StayRow label="Property" value={profile.property.name} />
-          <StayRow
-            label="Room"
-            value={`${profile.room.roomNumber} · Bed ${profile.room.bedLabel}`}
-          />
-          <StayRow
-            label="Sharing"
-            value={
-              profile.room.sharing === 'twin'
-                ? 'Twin'
-                : profile.room.sharing === 'single'
-                  ? 'Single'
-                  : profile.room.sharing === 'triple'
-                    ? 'Triple'
-                    : 'Quad'
-            }
-          />
-          <StayRow
-            label="Move-in"
-            value={format(parseISO(profile.lease.startDate), 'd MMM yyyy')}
-          />
-          <StayRow
-            label="Monthly rent"
-            value={<Money paise={profile.lease.monthlyRentPaise} size="small" />}
-          />
-          <StayRow
-            label="Deposit"
-            value={<Money paise={profile.lease.depositPaise} size="small" />}
-          />
-        </Card>
-
-        {/* Payment history */}
-        <SectionHeader
-          title="Payment history"
-          actionLabel="See all"
-          onAction={() => router.push('/payment-history')}
-        />
-        <Card style={{ padding: 0 }}>
+        {/* History — payments then past months */}
+        <Text
+          style={{
+            color: colors.textMuted,
+            fontSize: 10,
+            fontWeight: '800',
+            letterSpacing: 1,
+            marginTop: space.xl,
+            marginBottom: space.sm,
+          }}
+        >
+          HISTORY
+        </Text>
+        <Card style={{ padding: 0, paddingHorizontal: space.lg }}>
           {payments.slice(0, 5).map((p, i) => (
-            <View key={p.id}>
+            <View
+              key={p.id}
+              style={{
+                borderBottomWidth: i < payments.slice(0, 5).length - 1 || ledger.length > 0 ? 1 : 0,
+                borderBottomColor: colors.border,
+              }}
+            >
               <PaymentRow payment={p} />
-              {i < Math.min(payments.length, 5) - 1 ? (
-                <View
-                  style={{
-                    height: 1,
-                    backgroundColor: colors.border,
-                    marginHorizontal: space.lg,
-                  }}
-                />
-              ) : null}
             </View>
           ))}
-        </Card>
-
-        {/* Ledger (past months) */}
-        <SectionHeader title="Past months" />
-        <Card style={{ padding: 0 }}>
           {ledger.map((entry, i) => (
-            <View key={entry.id}>
+            <View
+              key={entry.id}
+              style={{
+                borderBottomWidth: i < ledger.length - 1 ? 1 : 0,
+                borderBottomColor: colors.border,
+              }}
+            >
               <LedgerRow entry={entry} />
-              {i < ledger.length - 1 ? (
-                <View
-                  style={{
-                    height: 1,
-                    backgroundColor: colors.border,
-                    marginHorizontal: space.lg,
-                  }}
-                />
-              ) : null}
             </View>
           ))}
         </Card>
@@ -310,7 +266,7 @@ function LineRow({
   const expandable = line.expandable && line.items && line.items.length > 0;
   return (
     <Pressable onPress={expandable ? onToggle : undefined} pressScale={expandable ? 0.99 : 1}>
-      <View style={{ padding: space.lg }}>
+      <View style={{ paddingVertical: 12 }}>
         <View
           style={{
             flexDirection: 'row',
@@ -398,21 +354,21 @@ function PaymentRow({ payment }: { payment: Payment }) {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        padding: space.lg,
+        paddingVertical: 12,
         gap: space.md,
       }}
     >
       <View
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          backgroundColor: colors.successBg,
+          width: 34,
+          height: 34,
+          borderRadius: 11,
+          backgroundColor: colors.surfaceMuted,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <Ionicons name="checkmark" size={18} color={colors.successFg} />
+        <Ionicons name="wallet-outline" size={17} color={colors.accent} />
       </View>
       <View style={{ flex: 1 }}>
         <Text
@@ -440,7 +396,7 @@ function LedgerRow({ entry }: { entry: LedgerEntry }) {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        padding: space.lg,
+        paddingVertical: 12,
         gap: space.md,
       }}
     >
