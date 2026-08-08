@@ -26,7 +26,7 @@ export default function OnboardingVehicleScreen() {
   const router = useRouter();
   const { data: profile } = useProfile();
   const updateKyc = useUpdateKyc();
-  const { colors, fontSize, fontWeight, lineHeight, space } = useTheme();
+  const { colors, fontSize, fontWeight, lineHeight, radius, space } = useTheme();
 
   const [type, setType] = useState<VehicleType>('NONE');
   const [registration, setRegistration] = useState('');
@@ -70,7 +70,18 @@ export default function OnboardingVehicleScreen() {
           We share your plate with gate security so they can recognise you on entry.
         </Text>
 
-        <View style={{ gap: space.md }}>
+        <Text
+          style={{
+            color: colors.textMuted,
+            fontSize: 10,
+            fontWeight: '800',
+            letterSpacing: 1,
+            marginBottom: space.sm,
+          }}
+        >
+          VEHICLE TYPE
+        </Text>
+        <View style={{ flexDirection: 'row', gap: space.sm }}>
           {OPTIONS.map((opt) => {
             const selected = type === opt.value;
             return (
@@ -84,45 +95,33 @@ export default function OnboardingVehicleScreen() {
                 accessibilityState={{ selected }}
                 accessibilityLabel={opt.label}
                 style={{
-                  borderRadius: 16,
-                  padding: space.lg,
+                  flex: 1,
+                  alignItems: 'center',
+                  paddingVertical: space.lg,
+                  paddingHorizontal: 4,
+                  borderRadius: radius.md,
                   borderWidth: selected ? 2 : 1,
                   borderColor: selected ? colors.accent : colors.border,
-                  backgroundColor: selected ? colors.accentSoft : colors.surface,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: space.md,
+                  backgroundColor: selected ? colors.surfaceMuted : colors.surface,
                 }}
               >
-                <View
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 22,
-                    backgroundColor: selected ? colors.accent : colors.surfaceMuted,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons
-                    name={opt.icon}
-                    size={22}
-                    color={selected ? colors.onAccent : colors.textMuted}
-                  />
-                </View>
+                <Ionicons
+                  name={opt.icon}
+                  size={24}
+                  color={selected ? colors.accent : colors.textMuted}
+                />
                 <Text
+                  numberOfLines={1}
                   style={{
-                    flex: 1,
-                    color: colors.text,
-                    fontSize: fontSize.bodyLg,
-                    fontWeight: fontWeight.semibold,
+                    marginTop: 6,
+                    color: selected ? colors.accent : colors.textMuted,
+                    fontSize: fontSize.caption,
+                    fontWeight: fontWeight.bold,
+                    textAlign: 'center',
                   }}
                 >
-                  {opt.label}
+                  {opt.value === 'NONE' ? 'None' : opt.label}
                 </Text>
-                {selected ? (
-                  <Ionicons name="checkmark-circle" size={22} color={colors.accent} />
-                ) : null}
               </Pressable>
             );
           })}

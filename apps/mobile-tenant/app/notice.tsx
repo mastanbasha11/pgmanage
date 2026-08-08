@@ -16,8 +16,9 @@ import {
   parseISO,
 } from 'date-fns';
 
-import { Button, Card, Field, Pill, Screen, toast } from '../components/ui';
+import { Button, Card, Field, Screen, toast } from '../components/ui';
 import { api, getApiError } from '../lib/api';
+import { useProfile } from '../lib/data/hooks';
 import { useTheme } from '../lib/theme';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -48,6 +49,11 @@ export default function NoticeScreen() {
 
   const tooSoon = daysNotice < POLICY_DAYS;
   const invalid = daysNotice < 0;
+
+  const { data: profile } = useProfile();
+  const depositPaise = profile?.lease.depositPaise ?? 0;
+  const refundPaise = tooSoon ? 0 : depositPaise;
+  const rupees = (p: number) => `₹${Math.round(p / 100).toLocaleString('en-IN')}`;
 
   async function submit() {
     if (invalid) {
@@ -95,30 +101,43 @@ export default function NoticeScreen() {
         }}
       />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
-        <View style={{ marginTop: space.md, marginBottom: space.lg }}>
-          <Text
-            style={{
-              color: colors.text,
-              fontSize: fontSize.h1,
-              lineHeight: lineHeight.h1,
-              fontWeight: fontWeight.extrabold,
-            }}
-          >
-            Moving out?
+      <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
+        <View style={{ paddingTop: 8, marginBottom: space.md }}>
+          <Text style={{ color: colors.text, fontSize: fontSize.h2, fontWeight: fontWeight.extrabold }}>
+            Move out
           </Text>
-          <Text
-            style={{
-              color: colors.textMuted,
-              fontSize: fontSize.body,
-              lineHeight: lineHeight.body,
-              marginTop: space.sm,
-            }}
-          >
-            Pick your intended move-out date. We'll let your PG manager know.
+          <Text style={{ color: colors.textMuted, fontSize: fontSize.small, marginTop: 2 }}>
+            30-day notice
           </Text>
         </View>
 
+        {/* Tint explainer */}
+        <View
+          style={{
+            backgroundColor: tooSoon && !invalid ? colors.warningBg : colors.surfaceMuted,
+            borderWidth: 1,
+            borderColor: tooSoon && !invalid ? colors.warningBorder : colors.border,
+            borderRadius: radius.lg,
+            padding: space.lg,
+          }}
+        >
+          <Text
+            style={{
+              color: tooSoon && !invalid ? colors.warningFg : colors.textMuted,
+              fontSize: fontSize.small,
+              lineHeight: 20,
+            }}
+          >
+            {invalid
+              ? 'Pick a move-out date that is today or later.'
+              : tooSoon
+                ? `This date is only ${daysNotice} day${daysNotice === 1 ? '' : 's'} away — under the 30-day notice, your refundable advance will not be returned.`
+                : `With 30 days' notice the earliest exit is ${format(addDays(new Date(), POLICY_DAYS), 'd MMM yyyy')}, and your advance stays refundable.`}
+          </Text>
+        </View>
+
+        {/* Move-out date */}
+        <SectionCap>MOVE-OUT DATE</SectionCap>
         <Card>
           <Field
             label="Move-out date"
@@ -127,19 +146,9 @@ export default function NoticeScreen() {
             placeholder="YYYY-MM-DD"
             keyboardType="numbers-and-punctuation"
           />
-          <Text
-            style={{
-              color: colors.textMuted,
-              fontSize: fontSize.small,
-              marginTop: -space.sm,
-              marginBottom: space.md,
-            }}
-          >
-            {invalid
-              ? 'Choose today or a future date.'
-              : `${daysNotice} day${daysNotice === 1 ? '' : 's'} from today`}
+          <Text style={{ color: colors.textMuted, fontSize: fontSize.small, marginTop: -space.sm, marginBottom: space.md }}>
+            {invalid ? 'Choose today or a future date.' : `${daysNotice} day${daysNotice === 1 ? '' : 's'} from today`}
           </Text>
-
           <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
             {[15, 30, 60].map((d) => (
               <Button
@@ -147,69 +156,78 @@ export default function NoticeScreen() {
                 label={`+${d} days`}
                 variant="secondary"
                 size="sm"
-                onPress={() =>
-                  setDateStr(format(addDays(new Date(), d), 'yyyy-MM-dd'))
-                }
+                onPress={() => setDateStr(format(addDays(new Date(), d), 'yyyy-MM-dd'))}
               />
             ))}
           </View>
         </Card>
 
-        {/* Policy explainer */}
-        <Card
-          style={{
-            marginTop: space.lg,
-            backgroundColor: tooSoon && !invalid ? colors.warningBg : colors.successBg,
-            borderColor: tooSoon && !invalid ? colors.warningBorder : colors.successBorder,
-          }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md }}>
-            <Ionicons
-              name={tooSoon && !invalid ? 'warning' : 'shield-checkmark'}
-              size={22}
-              color={tooSoon && !invalid ? colors.warningFg : colors.successFg}
-            />
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  color: tooSoon && !invalid ? colors.warningFg : colors.successFg,
-                  fontSize: fontSize.body,
-                  fontWeight: fontWeight.bold,
-                }}
-              >
-                {tooSoon && !invalid
-                  ? 'Advance won\'t be refunded'
-                  : 'Advance will be refunded'}
-              </Text>
-              <Text
-                style={{
-                  color: colors.text,
-                  fontSize: fontSize.small,
-                  lineHeight: lineHeight.small,
-                  marginTop: space.xs,
-                }}
-              >
-                The PG's policy requires at least 30 days' notice for the
-                refundable advance to be returned. Move-outs with less than
-                30 days' notice forfeit it.
-              </Text>
+        {/* Deposit estimate */}
+        <SectionCap>DEPOSIT ESTIMATE</SectionCap>
+        <Card>
+          {[
+            ['Deposit held', rupees(depositPaise)],
+            ['Pending dues', rupees(0)],
+          ].map(([k, v]) => (
+            <View
+              key={k}
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                paddingVertical: 7,
+                borderBottomWidth: 1,
+                borderBottomColor: colors.border,
+              }}
+            >
+              <Text style={{ color: colors.textMuted, fontSize: fontSize.small }}>{k}</Text>
+              <Text style={{ color: colors.text, fontSize: fontSize.small, fontWeight: fontWeight.bold }}>{v}</Text>
             </View>
+          ))}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingTop: space.md }}>
+            <Text style={{ color: colors.text, fontSize: fontSize.body, fontWeight: fontWeight.bold }}>
+              Estimated refund
+            </Text>
+            <Text style={{ color: colors.successFg, fontSize: fontSize.h3, fontWeight: fontWeight.extrabold }}>
+              {rupees(refundPaise)}
+            </Text>
           </View>
+          <Text style={{ color: colors.textDim, fontSize: fontSize.caption, marginTop: space.sm }}>
+            Final after room inspection · paid within 7 days of exit.
+          </Text>
         </Card>
 
-        <View style={{ height: space.xl }} />
-
+        <View style={{ height: space.lg }} />
         <Button
-          label="Confirm notice"
+          label="Submit notice"
           onPress={submit}
           loading={submitting}
           disabled={invalid}
           size="lg"
-          iconName="exit"
           variant={tooSoon ? 'danger' : 'primary'}
           block
         />
+        <Text style={{ color: colors.textDim, fontSize: fontSize.caption, textAlign: 'center', marginTop: space.sm }}>
+          You can talk to the manager first — nothing is final until you submit.
+        </Text>
       </ScrollView>
     </Screen>
+  );
+}
+
+function SectionCap({ children }: { children: React.ReactNode }) {
+  const { colors, space } = useTheme();
+  return (
+    <Text
+      style={{
+        color: colors.textMuted,
+        fontSize: 10,
+        fontWeight: '800',
+        letterSpacing: 1,
+        marginTop: space.xl,
+        marginBottom: space.sm,
+      }}
+    >
+      {children}
+    </Text>
   );
 }
