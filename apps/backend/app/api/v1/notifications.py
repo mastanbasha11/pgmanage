@@ -110,7 +110,10 @@ async def list_notifications(
         where.append("COALESCE(nl.sent_at, nl.created_at) >= :date_from")
         params["date_from"] = date_from
     if date_to is not None:
-        where.append("COALESCE(nl.sent_at, nl.created_at) < (:date_to::date + 1)")
+        # Param must not touch `::` — SQLAlchemy's text() parser skips a
+        # `:name` glued to a `::` cast, leaving it as literal text → syntax
+        # error. Parens keep it a real bind param.
+        where.append("COALESCE(nl.sent_at, nl.created_at) < ((:date_to)::date + 1)")
         params["date_to"] = date_to
     if search:
         where.append(

@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/select';
 import {
   useRentLedger,
-  useOverdue,
+  useWaiveLedgerEntry,
   useGenerateLedger,
   useRecordPayment,
   useUpdatePayment,
@@ -88,11 +88,13 @@ interface LedgerEntry {
   floor_number?: number;
   room_type?: string;
   collected_by?: string[] | null;
+  /** Per-collector RENT share for this month, e.g. {"Mohan":700000,"Shammi":1500000}. */
+  collected_by_amounts?: Record<string, number> | null;
   /** ISO timestamp of the most-recent payment toward this row, if any. */
   paid_on?: string | null;
 }
 
-type LedgerStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'ALL';
+type LedgerStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'WAIVED' | 'ALL';
 type RentTab = 'tenants' | 'payments' | 'refunds';
 
 /**
@@ -117,6 +119,7 @@ interface Transaction {
   id: string;
   paid_on: string;
   collected_at: string;
+  created_at: string; // row insert time (real time-of-day); "added" moment
   amount_paise: number;
   payment_type: 'RENT' | 'ADVANCE' | 'DEPOSIT' | 'FOOD' | 'OTHER_CHARGE' | 'REFUND' | 'POWER';
   payment_mode: string;
@@ -504,15 +507,96 @@ function StatCard({
   );
 }
 
-interface OverdueItem {
-  id: string;
-  name: string;
-  phone?: string | null;
-  months_overdue: number;
-  total_outstanding_paise: number;
-  oldest_due_date?: string | null;
-  bed_label?: string | null;
-  room_number?: string | null;
+/** Themed confirm dialog for waiving (writing off) or un-waiving a rent month. */
+function WaiveDialog({
+  target,
+  onClose,
+}: {
+  target: { entry: LedgerEntry; mode: 'waive' | 'unwaive' } | null;
+  onClose: () => void;
+}) {
+  const waive = useWaiveLedgerEntry();
+  const { toast } = useToast();
+  const [reason, setReason] = useState('');
+  const isWaive = target?.mode === 'waive';
+  const entry = target?.entry;
+  const period = entry ? `${monthName(entry.month)} ${entry.year}` : '';
+
+  function submit() {
+    if (!entry) return;
+    waive.mutate(
+      {
+        id: entry.id,
+        waived: isWaive,
+        reason: isWaive ? reason.trim() || undefined : undefined,
+      },
+      {
+        onSuccess: () => {
+          toast({
+            title: isWaive ? 'Rent waived' : 'Waiver reverted',
+            description: `${entry.tenant_name} · ${period}`,
+          });
+          onClose();
+        },
+        onError: () =>
+          toast({
+            title: isWaive ? "Couldn't waive rent" : "Couldn't revert",
+            description: 'Please try again.',
+            variant: 'destructive',
+          }),
+      },
+    );
+  }
+
+  return (
+    <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{isWaive ? 'Waive rent' : 'Un-waive rent'}</DialogTitle>
+          <DialogDescription className="leading-relaxed">
+            {isWaive ? (
+              <>
+                Write off <b className="text-foreground">{period}</b> rent for{' '}
+                <b className="text-foreground">{entry?.tenant_name}</b>. It drops off Outstanding
+                &amp; Overdue and stops reminders — <b>not</b> counted as collected, and it stays in
+                Expected. You can revert this anytime.
+              </>
+            ) : (
+              <>
+                Restore <b className="text-foreground">{entry?.tenant_name}</b>&rsquo;s{' '}
+                <b className="text-foreground">{period}</b> rent to its real paid / unpaid status.
+              </>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+
+        {isWaive && (
+          <div className="space-y-1.5">
+            <Label htmlFor="waive-reason">Reason (optional)</Label>
+            <Input
+              id="waive-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. joined mid-month, settled offline…"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit();
+              }}
+            />
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={waive.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={waive.isPending}>
+            {waive.isPending ? 'Saving…' : isWaive ? 'Waive rent' : 'Un-waive'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export default function RentDashboardPage() {
@@ -531,6 +615,12 @@ export default function RentDashboardPage() {
   const [showOpeningBalance, setShowOpeningBalance] = useState(false);
   const deletePayment = useDeletePayment();
   const { toast } = useToast();
+  // Owner override: write off a tenant's rent month (or revert it) via a
+  // themed dialog — see WaiveDialog. Waived rows drop off Outstanding/Overdue
+  // and stop reminders, stay in Expected, and are NOT counted as collected.
+  const [waiveTarget, setWaiveTarget] = useState<
+    { entry: LedgerEntry; mode: 'waive' | 'unwaive' } | null
+  >(null);
 
   // Look up fiscal period for current selection (start, end, default close, override?)
   const { data: period } = useQuery<{
@@ -553,7 +643,6 @@ export default function RentDashboardPage() {
     year,
   });
 
-  const { data: overdue } = useOverdue(selectedPropertyId ?? undefined);
   const { mutateAsync: generateLedger, isPending: generating } = useGenerateLedger();
 
   async function handleGenerate() {
@@ -621,18 +710,10 @@ export default function RentDashboardPage() {
   const transactions: Transaction[] = ledger?.transactions ?? [];
   const paymentRows = transactions.filter((t) => t.payment_type !== 'REFUND');
   const refundRows = transactions.filter((t) => t.payment_type === 'REFUND');
-  // Group payments by tenant for display. A row counts as a real duplicate
-  // only when the SAME tenant has another row with the same payment_type,
-  // for_month, for_year AND amount_paise — different types (RENT vs DEPOSIT)
-  // or different amounts (full + part) are legitimate separate payments and
-  // must NOT be flagged.
-  const paymentsByTenant = new Map<string, Transaction[]>();
-  for (const t of paymentRows) {
-    const key = t.tenant_id ?? '__power__';
-    const arr = paymentsByTenant.get(key) ?? [];
-    arr.push(t);
-    paymentsByTenant.set(key, arr);
-  }
+  // A row counts as a real duplicate only when the SAME tenant has another
+  // row with the same payment_type, for_month, for_year AND amount_paise —
+  // different types (RENT vs DEPOSIT) or different amounts (full + part) are
+  // legitimate separate payments and must NOT be flagged.
   const dupKey = (t: Transaction) =>
     `${t.payment_type}|${t.for_month ?? ''}|${t.for_year ?? ''}|${t.amount_paise}`;
   const dupKeyCounts = new Map<string, number>();
@@ -643,9 +724,25 @@ export default function RentDashboardPage() {
   }
   const isDuplicate = (t: Transaction) =>
     t.tenant_id ? (dupKeyCounts.get(`${t.tenant_id}|${dupKey(t)}`) ?? 0) > 1 : false;
-  const groupedPayments = Array.from(paymentsByTenant.values()).sort(
-    (a, b) => b.length - a.length || a[0].tenant_name.localeCompare(b[0].tenant_name),
+  // Payments tab is a "recent activity" view: most-recently-added first.
+  // Sort by created_at (the row insert time, a real timestamp) descending;
+  // fall back to collected_at for any legacy row missing created_at.
+  const sortedPayments = [...paymentRows].sort(
+    (a, b) =>
+      Date.parse(b.created_at ?? b.collected_at) - Date.parse(a.created_at ?? a.collected_at),
   );
+  // Tag only the FIRST occurrence (in this sorted order) of each duplicated
+  // key so the "duplicate" badge shows once per cluster, not on every row.
+  const firstDupIds = new Set<string>();
+  const seenDupKeys = new Set<string>();
+  for (const t of sortedPayments) {
+    if (!isDuplicate(t)) continue;
+    const k = `${t.tenant_id}|${dupKey(t)}`;
+    if (!seenDupKeys.has(k)) {
+      seenDupKeys.add(k);
+      firstDupIds.add(t.id);
+    }
+  }
   // Backend's `collection_rate` is a percentage (e.g. 107.0); fall back to
   // a client-side calc if older response shape.
   const collectionPct = Math.round(
@@ -684,8 +781,15 @@ export default function RentDashboardPage() {
       ? (paidGaps.reduce((a, b) => a + b, 0) / paidGaps.length).toFixed(1)
       : null;
 
-  const overdueItems: OverdueItem[] = overdue?.items ?? [];
   const billedTenants = entries.length;
+  // Tenants short on THIS month's rent (Unpaid + Partial). This is the count
+  // that reconciles with the Outstanding amount (an August-only figure) and
+  // with the Unpaid/Partial filters below. The old subtitle used a separate,
+  // cross-month arrears endpoint (/rent/overdue) which counts any unpaid month
+  // and so over-counted the August-scoped Outstanding card.
+  const monthOverdueCount = entries.filter(
+    (e) => e.status === 'UNPAID' || e.status === 'PARTIAL',
+  ).length;
 
   return (
     <>
@@ -800,8 +904,8 @@ export default function RentDashboardPage() {
                 value={formatPaise(stats.outstanding_paise)}
                 valueClass={stats.outstanding_paise > 0 ? 'text-destructive' : ''}
                 foot={
-                  overdueItems.length > 0
-                    ? `${overdueItems.length} tenants overdue`
+                  monthOverdueCount > 0
+                    ? `${monthOverdueCount} tenants overdue`
                     : 'all clear'
                 }
               />
@@ -966,6 +1070,14 @@ export default function RentDashboardPage() {
                     ['UNPAID', 'Unpaid', entries.filter((e) => e.status === 'UNPAID').length],
                     ['PARTIAL', 'Partial', entries.filter((e) => e.status === 'PARTIAL').length],
                     ['PAID', 'Paid', entries.filter((e) => e.status === 'PAID').length],
+                    // Only surface the Waived chip once something's actually waived.
+                    ...(entries.some((e) => e.status === 'WAIVED')
+                      ? ([['WAIVED', 'Waived', entries.filter((e) => e.status === 'WAIVED').length]] as [
+                          LedgerStatus,
+                          string,
+                          number,
+                        ][])
+                      : []),
                   ] as [LedgerStatus, string, number][]
                 ).map(([key, label, count]) => (
                   <FilterChip
@@ -1088,7 +1200,27 @@ export default function RentDashboardPage() {
                               {formatPaise(e.amount_due_paise)}
                             </td>
                             <td className="tnum hidden px-3 py-2.5 text-right text-[12.5px] font-bold lg:table-cell">
-                              {e.amount_paid_paise > 0 ? (
+                              {collectorFilter !== 'ALL' ? (
+                                // Filtered by a collector: show THAT collector's
+                                // rent share, not the tenant's full rent, so a
+                                // split-paid tenant isn't counted in full under
+                                // every collector. Caption shows the full paid.
+                                (() => {
+                                  const share = e.collected_by_amounts?.[collectorFilter] ?? 0;
+                                  return share > 0 ? (
+                                    <>
+                                      {formatPaise(share)}
+                                      {share !== e.amount_paid_paise && (
+                                        <span className="block text-[10px] font-normal text-muted-foreground/70">
+                                          of {formatPaise(e.amount_paid_paise)}
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="font-normal text-muted-foreground/40">—</span>
+                                  );
+                                })()
+                              ) : e.amount_paid_paise > 0 ? (
                                 formatPaise(e.amount_paid_paise)
                               ) : (
                                 <span className="font-normal text-muted-foreground/40">—</span>
@@ -1128,6 +1260,7 @@ export default function RentDashboardPage() {
                                   PAID: 'g',
                                   PARTIAL: 'a',
                                   UNPAID: 'r',
+                                  WAIVED: 's',
                                 } as Record<string, PillTone>
                               )[e.status] ?? 's'
                             }
@@ -1138,7 +1271,17 @@ export default function RentDashboardPage() {
                           </Pill>
                         </td>
                         <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                          {e.status !== 'PAID' && (
+                          {e.status === 'WAIVED' ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 rounded-lg text-xs font-bold text-muted-foreground"
+                              onClick={() => setWaiveTarget({ entry: e, mode: 'unwaive' })}
+                              title="Undo the waiver — restore the real paid/unpaid status"
+                            >
+                              Un-waive
+                            </Button>
+                          ) : e.status !== 'PAID' ? (
                             <div className="inline-flex items-center gap-1">
                               {e.phone && (
                                 <a
@@ -1161,8 +1304,17 @@ export default function RentDashboardPage() {
                                 <IndianRupee className="mr-1 h-3 w-3" />
                                 Pay
                               </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 rounded-lg text-xs font-bold text-muted-foreground"
+                                onClick={() => setWaiveTarget({ entry: e, mode: 'waive' })}
+                                title="Write off this month's rent (removes it from Outstanding)"
+                              >
+                                Waive
+                              </Button>
                             </div>
-                          )}
+                          ) : null}
                         </td>
                       </tr>
                     ))}
@@ -1213,10 +1365,7 @@ export default function RentDashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {groupedPayments.map((group) => {
-                        const dupRowsInGroup = group.filter(isDuplicate);
-                        const firstDupId = dupRowsInGroup[0]?.id;
-                        return group.map((t) => {
+                      {sortedPayments.map((t) => {
                           const isDup = isDuplicate(t);
                           return (
                             <tr
@@ -1227,16 +1376,28 @@ export default function RentDashboardPage() {
                                   : 'hover:bg-muted/30'
                               }
                             >
-                              <td className="px-4 py-3 text-xs tabular-nums">
+                              <td className="px-4 py-3 text-xs tabular-nums whitespace-nowrap">
                                 {new Date(t.paid_on).toLocaleDateString('en-IN', {
                                   day: '2-digit',
                                   month: 'short',
                                   year: '2-digit',
                                 })}
+                                {(t.created_at || t.collected_at) && (
+                                  <div className="text-[10.5px] font-normal text-muted-foreground/70">
+                                    added{' '}
+                                    {new Date(t.created_at ?? t.collected_at).toLocaleString('en-IN', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      hour: 'numeric',
+                                      minute: '2-digit',
+                                      hour12: true,
+                                    })}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-4 py-3 font-medium">
                                 {t.tenant_name}
-                                {isDup && t.id === firstDupId && (
+                                {isDup && firstDupIds.has(t.id) && (
                                   <Badge variant="outline" className="ml-2 text-[10px] border-amber-400 text-amber-700">
                                     duplicate
                                   </Badge>
@@ -1303,7 +1464,6 @@ export default function RentDashboardPage() {
                               </td>
                             </tr>
                           );
-                        });
                       })}
                       {paymentRows.length === 0 && (
                         <tr>
@@ -1416,6 +1576,11 @@ export default function RentDashboardPage() {
       </div>
 
       <RecordPaymentDialog entry={payingEntry} onClose={() => setPayingEntry(null)} />
+      <WaiveDialog
+        key={waiveTarget ? waiveTarget.entry.id + waiveTarget.mode : 'none'}
+        target={waiveTarget}
+        onClose={() => setWaiveTarget(null)}
+      />
       <AddPaymentDialog open={showAddPayment} onClose={() => setShowAddPayment(false)} />
       <EditPaymentDialog txn={editingTxn} onClose={() => setEditingTxn(null)} />
       {selectedPropertyId && (

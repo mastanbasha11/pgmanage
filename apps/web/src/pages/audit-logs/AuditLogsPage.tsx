@@ -356,8 +356,11 @@ function FeedItem({
             </>
           )}
           <span aria-hidden>·</span>
-          <span title={istFull(entry.created_at)} className="cursor-default">
-            {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
+          <span
+            title={formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
+            className="cursor-default"
+          >
+            {istFull(entry.created_at)}
           </span>
         </div>
 

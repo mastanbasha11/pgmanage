@@ -9,8 +9,13 @@
  *
  * Ranking + view predicates live in ./leadScore (pure + unit-tested).
  */
-import { useMemo, useState, type ReactNode } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import {
   Phone,
   MessageCircle,
@@ -48,10 +53,8 @@ import {
 import { useToast } from '@/hooks/useToast';
 import { formatDate, formatDatetime, whatsappLink } from '@/lib/utils';
 import {
-  comparePriority,
   daysSinceTouch,
   followupState,
-  matchesView,
   type SavedView,
 } from './leadScore';
 
@@ -193,19 +196,17 @@ function FollowupCell({ lead }: { lead: WorklistLead }) {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export default function LeadWorklist({
-  leads,
   onOpenLead,
   onAddLead,
   canManage,
   boardSlot,
 }: {
-  leads: WorklistLead[];
   onOpenLead: (id: string) => void;
   onAddLead: () => void;
   /** OWNER/PARTNER — gates the Assign bulk action + owner list fetch. */
   canManage: boolean;
-  /** Renders the existing Kanban board for the filtered set (Board/Split). */
-  boardSlot: (filtered: WorklistLead[]) => ReactNode;
+  /** Renders the existing Kanban board for the given lead set (Board/Split). */
+  boardSlot: (leads: WorklistLead[]) => ReactNode;
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -233,84 +234,92 @@ export default function LeadWorklist({
   });
   const staff = staffQ.data?.items ?? [];
 
-  // Distinct values for the Owner / Wants dropdowns, from the data itself.
-  const owners = useMemo(
-    () => Array.from(new Set(leads.map((l) => l.assigned_to_name).filter(Boolean))).sort() as string[],
-    [leads],
-  );
-  const wants = useMemo(
-    () => Array.from(new Set(leads.map((l) => l.interested_room_type).filter(Boolean))).sort() as string[],
-    [leads],
-  );
+  // ── Debounced search — don't refetch the server on every keystroke ─────────
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  // View counts (over ALL leads, so the tabs are a stable map of the pipeline).
-  const viewCounts = useMemo(() => {
-    const c = {} as Record<SavedView, number>;
-    for (const v of VIEWS) c[v.key] = leads.filter((l) => matchesView(v.key, l)).length;
-    return c;
-  }, [leads]);
-
-  const stageCounts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const s of STAGES) c[s.key] = leads.filter((l) => l.status === s.key).length;
-    return c;
-  }, [leads]);
-
-  // Resolve the "Added" filter to an inclusive [from, to) millisecond window
-  // over created_at. null bounds mean unbounded on that side.
-  const dateWindow = useMemo(() => {
-    if (datePreset === 'ALL') return null;
+  // Resolve the "Added" preset to an inclusive [from, to) ISO window on
+  // created_at. Undefined bounds mean unbounded on that side.
+  const dateRange = useMemo<{ from?: string; to?: string }>(() => {
+    if (datePreset === 'ALL') return {};
     const now = new Date();
     if (datePreset === 'TODAY') {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      return { from: start, to: Infinity };
+      return { from: new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString() };
     }
     const days = PRESET_DAYS[datePreset];
-    if (days) return { from: now.getTime() - days * 86_400_000, to: Infinity };
-    // CUSTOM — parse the two date inputs; either side may be blank.
-    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : -Infinity;
-    const to = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Infinity;
-    return { from, to };
+    if (days) return { from: new Date(now.getTime() - days * 86_400_000).toISOString() };
+    return {
+      from: dateFrom ? new Date(`${dateFrom}T00:00:00`).toISOString() : undefined,
+      to: dateTo ? new Date(`${dateTo}T23:59:59.999`).toISOString() : undefined,
+    };
   }, [datePreset, dateFrom, dateTo]);
 
-  // Apply saved view + all filters + search.
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return leads.filter((l) => {
-      if (!matchesView(view, l)) return false;
-      if (stageFilter && l.status !== stageFilter) return false;
-      if (sourceFilter !== 'ALL' && l.source !== sourceFilter) return false;
-      if (ownerFilter !== 'ALL') {
-        if (ownerFilter === '__UNASSIGNED__' ? !!l.assigned_to : l.assigned_to_name !== ownerFilter)
-          return false;
-      }
-      if (wantsFilter !== 'ALL' && l.interested_room_type !== wantsFilter) return false;
-      if (dateWindow) {
-        const t = new Date(l.created_at).getTime();
-        if (Number.isNaN(t) || t < dateWindow.from || t > dateWindow.to) return false;
-      }
-      if (q && !(l.name.toLowerCase().includes(q) || (l.phone ?? '').includes(q))) return false;
-      return true;
-    });
-  }, [leads, view, stageFilter, sourceFilter, ownerFilter, wantsFilter, dateWindow, search]);
+  // Server-side filter params, shared by the list, the board and export. The
+  // list adds limit/offset; the board/export override them.
+  const filterParams = useMemo(() => {
+    const p: Record<string, string | number | boolean> = { sort };
+    if (view !== 'ALL') p.view = view;
+    if (stageFilter) p.status = stageFilter;
+    if (sourceFilter !== 'ALL') p.source = sourceFilter;
+    if (ownerFilter === '__UNASSIGNED__') p.unassigned = true;
+    else if (ownerFilter !== 'ALL') p.assigned_to = ownerFilter;
+    if (wantsFilter !== 'ALL') p.wants = wantsFilter;
+    if (debouncedSearch) p.search = debouncedSearch;
+    if (dateRange.from) p.added_from = dateRange.from;
+    if (dateRange.to) p.added_to = dateRange.to;
+    return p;
+  }, [sort, view, stageFilter, sourceFilter, ownerFilter, wantsFilter, debouncedSearch, dateRange]);
 
-  const sorted = useMemo(() => {
-    const arr = [...filtered];
-    switch (sort) {
-      case 'NEWEST':
-        return arr.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
-      case 'OLDEST':
-        return arr.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
-      case 'NAME':
-        return arr.sort((a, b) => a.name.localeCompare(b.name));
-      default:
-        return arr.sort((a, b) => comparePriority(a, b));
-    }
-  }, [filtered, sort]);
-
-  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  // ── The paginated list (LIST / SPLIT table) ────────────────────────────────
+  const listParams = useMemo(
+    () => ({ ...filterParams, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    [filterParams, page],
+  );
+  const listQ = useQuery<{ items: WorklistLead[]; total: number }>({
+    queryKey: ['leads', listParams],
+    queryFn: () => api.get('/leads', { params: listParams }).then((r) => r.data),
+    placeholderData: keepPreviousData,
+  });
+  const pageRows = listQ.data?.items ?? [];
+  const total = listQ.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
-  const pageRows = sorted.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  // Snap back to a valid page when a filter change shrinks the result set.
+  useEffect(() => {
+    if (page > 0 && page > pageCount - 1) setPage(pageCount - 1);
+  }, [pageCount, page]);
+
+  // ── Board working-set (BOARD / SPLIT) ──────────────────────────────────────
+  // The Kanban needs many leads per column, so it pulls a larger priority-sorted
+  // slice rather than one list page. Column badges use the true pipeline counts.
+  const boardParams = useMemo(
+    () => ({ ...filterParams, sort: 'PRIORITY', limit: 500, offset: 0 }),
+    [filterParams],
+  );
+  const boardQ = useQuery<{ items: WorklistLead[]; total: number }>({
+    queryKey: ['leads', 'board', boardParams],
+    queryFn: () => api.get('/leads', { params: boardParams }).then((r) => r.data),
+    enabled: mode !== 'LIST',
+    placeholderData: keepPreviousData,
+  });
+  const boardLeads = boardQ.data?.items ?? [];
+
+  // ── True counts: pipeline (cards) + facets (view chips, wants dropdown) ─────
+  const statsQ = useQuery<Record<string, number>>({
+    queryKey: ['leads-pipeline-stats'],
+    queryFn: () => api.get('/leads/pipeline-stats').then((r) => r.data),
+  });
+  const stageCounts = statsQ.data ?? {};
+  const facetsQ = useQuery<{ view_counts: Record<string, number>; wants: string[] }>({
+    queryKey: ['leads-facets'],
+    queryFn: () => api.get('/leads/facets').then((r) => r.data),
+  });
+  const viewCounts = facetsQ.data?.view_counts ?? ({} as Record<string, number>);
+  const wants = facetsQ.data?.wants ?? [];
+  const totalLeads = viewCounts.ALL ?? total;
 
   function resetPage() {
     setPage(0);
@@ -348,6 +357,8 @@ export default function LeadWorklist({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['leads-pipeline-stats'] });
+      qc.invalidateQueries({ queryKey: ['leads-facets'] });
       toast({ title: 'Done', description: `${selected.size} lead(s) updated.` });
       setSelected(new Set());
     },
@@ -355,9 +366,12 @@ export default function LeadWorklist({
       toast({ title: 'Bulk update failed', description: 'Please retry.', variant: 'destructive' }),
   });
 
+  // Bulk WhatsApp needs the lead objects; selection persists by id across
+  // pages, but only the current page's objects are in hand, so the WhatsApp
+  // list covers the selected leads on the current page.
   const selectedLeads = useMemo(
-    () => leads.filter((l) => selected.has(l.id)),
-    [leads, selected],
+    () => pageRows.filter((l) => selected.has(l.id)),
+    [pageRows, selected],
   );
 
   const anyFilter =
@@ -382,14 +396,32 @@ export default function LeadWorklist({
     resetPage();
   }
 
-  // Export exactly what the user is looking at — the filtered + sorted set,
-  // every matching row (not just the current page).
-  function exportCsv() {
+  // Export exactly what the user is looking at — every row matching the active
+  // filters (not just the current page), pulled from the server in chunks.
+  const [exporting, setExporting] = useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    const all: WorklistLead[] = [];
+    const CHUNK = 500;
+    try {
+      for (let off = 0; ; off += CHUNK) {
+        const res = await api
+          .get('/leads', { params: { ...filterParams, limit: CHUNK, offset: off } })
+          .then((r) => r.data as { items: WorklistLead[]; total: number });
+        all.push(...res.items);
+        if (res.items.length < CHUNK || all.length >= res.total) break;
+      }
+    } catch {
+      setExporting(false);
+      toast({ title: 'Export failed', description: 'Please retry.', variant: 'destructive' });
+      return;
+    }
+    setExporting(false);
     const headers = [
       'Name', 'Phone', 'Source', 'Stage', 'Wants', 'Budget max (₹)',
       'Owner', 'Follow-up', 'Last activity', 'Added on',
     ];
-    const rows = sorted.map((l) => [
+    const rows = all.map((l) => [
       l.name,
       l.phone,
       SOURCE_LABEL[l.source] ?? l.source,
@@ -422,7 +454,7 @@ export default function LeadWorklist({
         <div>
           <h1 className="text-[22px] font-extrabold tracking-tight">Leads</h1>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            {leads.length} leads —{' '}
+            {totalLeads} leads —{' '}
             <b className="text-foreground">
               you don't browse them, the ones that need action rise to the top
             </b>
@@ -434,7 +466,7 @@ export default function LeadWorklist({
             size="sm"
             className="gap-1.5"
             onClick={exportCsv}
-            disabled={sorted.length === 0}
+            disabled={total === 0 || exporting}
           >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
@@ -544,7 +576,7 @@ export default function LeadWorklist({
             options={[
               ['ALL', 'All'],
               ['__UNASSIGNED__', 'Unassigned'],
-              ...owners.map((o) => [o, o] as [string, string]),
+              ...staff.map((s) => [s.id, s.name] as [string, string]),
             ]}
           />
         )}
@@ -615,10 +647,10 @@ export default function LeadWorklist({
       </div>
 
       {mode === 'BOARD' ? (
-        boardSlot(filtered)
+        boardSlot(boardLeads)
       ) : (
         <>
-          {mode === 'SPLIT' && <div className="rounded-xl">{boardSlot(filtered)}</div>}
+          {mode === 'SPLIT' && <div className="rounded-xl">{boardSlot(boardLeads)}</div>}
 
           {/* Table */}
           <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-md">
@@ -780,12 +812,12 @@ export default function LeadWorklist({
             {/* Footer / pager */}
             <div className="flex items-center justify-between border-t border-[#eef1f6] bg-[#fbfcfe] px-4 py-2.5 text-[12px] text-muted-foreground">
               <span>
-                {sorted.length === 0 ? (
+                {total === 0 ? (
                   'No leads'
                 ) : (
                   <>
                     Showing <b>{safePage * PAGE_SIZE + 1}–{safePage * PAGE_SIZE + pageRows.length}</b>{' '}
-                    of {sorted.length}
+                    of {total}
                   </>
                 )}
               </span>

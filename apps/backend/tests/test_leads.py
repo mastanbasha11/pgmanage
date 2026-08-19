@@ -582,3 +582,94 @@ async def test_patch_lead_can_edit_core_fields(
     assert body["source"] == "INSTAGRAM"
     assert body["budget_max_paise"] == 1500000
     assert body["interested_bed_count"] == 2
+
+
+# ── Server-side pagination + filtering (worklist scalability) ──────────────────
+
+@pytest.mark.asyncio
+async def test_list_leads_pagination_true_total(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """`total` is the real COUNT over the filter (not the page size), and
+    limit/offset page through the whole set without overlap. Regression for the
+    worklist being capped at 500 and mis-counting the pipeline."""
+    marker = "Pagseed"  # unique name token isolates these from other tests' data
+    for i in range(5):
+        r = await client.post(
+            "/api/v1/leads",
+            headers=auth_headers(test_owner["token"]),
+            json={
+                **_lead_payload(test_property["property_id"], phone=f"+91987000010{i}"),
+                "name": f"{marker} Lead {i}",
+            },
+        )
+        assert r.status_code == 201, r.text
+
+    # Page of 2 → 2 items, but total reflects all 5 matches.
+    p1 = await client.get(
+        f"/api/v1/leads?search={marker}&limit=2&offset=0",
+        headers=auth_headers(test_owner["token"]),
+    )
+    assert p1.status_code == 200, p1.text
+    body = p1.json()
+    assert body["total"] == 5
+    assert len(body["items"]) == 2
+    assert body["limit"] == 2 and body["offset"] == 0
+
+    # Paging covers every match exactly once.
+    ids: set[str] = set()
+    for off in (0, 2, 4):
+        page = await client.get(
+            f"/api/v1/leads?search={marker}&limit=2&offset={off}",
+            headers=auth_headers(test_owner["token"]),
+        )
+        ids.update(x["id"] for x in page.json()["items"])
+    assert len(ids) == 5
+
+
+@pytest.mark.asyncio
+async def test_list_leads_search_matches_name_and_phone(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """search matches on name OR phone, and total reflects the filtered count."""
+    await client.post(
+        "/api/v1/leads",
+        headers=auth_headers(test_owner["token"]),
+        json={
+            **_lead_payload(test_property["property_id"], phone="+919000067890"),
+            "name": "Zaraxton Unique",
+        },
+    )
+    by_name = await client.get(
+        "/api/v1/leads?search=Zaraxton", headers=auth_headers(test_owner["token"])
+    )
+    assert by_name.status_code == 200
+    nb = by_name.json()
+    assert nb["total"] == 1
+    assert nb["items"][0]["name"] == "Zaraxton Unique"
+
+    by_phone = await client.get(
+        "/api/v1/leads?search=0006789", headers=auth_headers(test_owner["token"])
+    )
+    assert any(x["name"] == "Zaraxton Unique" for x in by_phone.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_lead_facets_shape(
+    client: AsyncClient, test_owner: dict, test_property: dict
+):
+    """/leads/facets returns view_counts for every saved view + a wants list."""
+    await client.post(
+        "/api/v1/leads",
+        headers=auth_headers(test_owner["token"]),
+        json=_lead_payload(test_property["property_id"], phone="+919000099001"),
+    )
+    r = await client.get(
+        "/api/v1/leads/facets", headers=auth_headers(test_owner["token"])
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    for key in ("ALL", "TO_ACTION", "OVERDUE", "DUE_TODAY", "NO_FOLLOWUP", "IDLE_30D"):
+        assert key in body["view_counts"]
+    assert body["view_counts"]["ALL"] >= 1
+    assert isinstance(body["wants"], list)

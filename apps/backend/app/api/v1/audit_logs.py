@@ -98,8 +98,11 @@ async def list_audit_logs(
         where.append("al.created_at >= :date_from")
         params["date_from"] = date_from
     if date_to is not None:
-        # inclusive of the whole `date_to` day
-        where.append("al.created_at < (:date_to::date + INTERVAL '1 day')")
+        # inclusive of the whole `date_to` day. NB: the param must not touch
+        # `::` — SQLAlchemy's text() bind-param parser skips `:name` when it's
+        # immediately followed by `::` (Postgres cast), leaving it as literal
+        # text → syntax error. Wrapping in parens keeps it a real bind param.
+        where.append("al.created_at < ((:date_to)::date + INTERVAL '1 day')")
         params["date_to"] = date_to
     if search:
         where.append("al.description ILIKE :search")

@@ -151,6 +151,16 @@ export function useDeletePayment() {
   });
 }
 
+/** Owner override: waive (write-off) a rent month, or revert the waiver. */
+export function useWaiveLedgerEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, waived, reason }: { id: string; waived: boolean; reason?: string }) =>
+      api.post(`/rent/ledger/${id}/waive`, { waived, reason }).then((r) => r.data),
+    onSuccess: () => invalidatePaymentQueries(qc),
+  });
+}
+
 export function useRentLedger(params: {
   property_id?: string;
   month: number;
