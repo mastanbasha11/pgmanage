@@ -47,6 +47,8 @@ class Event:
     PAYMENT_DELETED = "payment_deleted"
     ADVANCE_RECORDED = "advance_recorded"
     REFUND_ISSUED = "refund_issued"
+    RENT_WAIVED = "rent_waived"
+    RENT_WAIVE_REVERTED = "rent_waive_reverted"
 
     # ── Expenses ─────────────────────────────────────────────────────────────
     EXPENSE_CREATED = "expense_created"
@@ -93,6 +95,8 @@ EVENT_CATEGORY: dict[str, str] = {
     Event.PAYMENT_DELETED: Category.PAYMENT,
     Event.ADVANCE_RECORDED: Category.PAYMENT,
     Event.REFUND_ISSUED: Category.PAYMENT,
+    Event.RENT_WAIVED: Category.PAYMENT,
+    Event.RENT_WAIVE_REVERTED: Category.PAYMENT,
     Event.EXPENSE_CREATED: Category.EXPENSE,
     Event.EXPENSE_UPDATED: Category.EXPENSE,
     Event.EXPENSE_DELETED: Category.EXPENSE,

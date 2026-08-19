@@ -225,10 +225,27 @@ async def list_leads(
     status: str | None = Query(None),
     source: str | None = Query(None),
     assigned_to: UUID | None = Query(None),
-    # Kanban board loads every status in one call — a 50-row default page
-    # starved the non-NEW columns the moment 50 due-today leads existed.
-    limit: int = Query(500, le=1000),
+    unassigned: bool = Query(False, description="only leads with no owner"),
+    wants: str | None = Query(None, description="interested_room_type exact match"),
+    search: str | None = Query(None, description="name or phone substring"),
+    view: str | None = Query(
+        None,
+        description="Saved worklist view: TO_ACTION|OVERDUE|DUE_TODAY|NO_FOLLOWUP|IDLE_30D",
+    ),
+    added_from: datetime | None = Query(None, description="created_at >= (inclusive)"),
+    added_to: datetime | None = Query(None, description="created_at < (exclusive)"),
+    sort: str = Query("NEWEST", description="NEWEST|OLDEST|NAME|PRIORITY"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
+    """Server-side paginated + filtered lead list.
+
+    Every filter the worklist UI exposes is applied server-side so the client
+    never holds the whole table to count or page it. `total` is the real
+    COUNT(*) over the SAME filter (not the returned page size), so the header
+    count and pagination stay accurate no matter how many leads the org has.
+    Saved-view predicates mirror `matchesView()` in the web `leadScore.ts`.
+    """
     conditions = ["l.org_id = :org_id", "l.is_deleted = false"]
     params: dict[str, Any] = {"org_id": str(ctx.org_id)}
 
@@ -244,8 +261,60 @@ async def list_leads(
     if assigned_to:
         conditions.append("l.assigned_to = :assigned_to")
         params["assigned_to"] = str(assigned_to)
+    if unassigned:
+        conditions.append("l.assigned_to IS NULL")
+    if wants:
+        conditions.append("l.interested_room_type = :wants")
+        params["wants"] = wants
+    if search:
+        conditions.append("(l.name ILIKE :q OR l.phone ILIKE :q)")
+        params["q"] = f"%{search.strip()}%"
+    if added_from:
+        conditions.append("l.created_at >= :added_from")
+        params["added_from"] = added_from
+    if added_to:
+        conditions.append("l.created_at < :added_to")
+        params["added_to"] = added_to
+
+    # "open" = still in play (not Converted/Lost). Overdue/today is a CALENDAR
+    # day comparison in IST so it matches how the UI reads the date.
+    open_sql = "l.status IN ('NEW','CONTACTED','SITE_VISITED','NEGOTIATING','BOOKED')"
+    fu = "(l.next_followup_at AT TIME ZONE 'Asia/Kolkata')::date"
+    today = "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"
+    if view == "TO_ACTION":
+        conditions.append(f"{open_sql} AND (l.next_followup_at IS NULL OR {fu} <= {today})")
+    elif view == "OVERDUE":
+        conditions.append(f"{open_sql} AND {fu} < {today}")
+    elif view == "DUE_TODAY":
+        conditions.append(f"{fu} = {today}")
+    elif view == "NO_FOLLOWUP":
+        conditions.append(f"{open_sql} AND l.next_followup_at IS NULL")
+    elif view == "IDLE_30D":
+        conditions.append(
+            f"{open_sql} AND COALESCE(l.last_contacted_at, l.created_at) "
+            "< NOW() - INTERVAL '30 days'"
+        )
 
     where = " AND ".join(conditions)
+
+    order_by = {
+        "NEWEST": "l.created_at DESC",
+        "OLDEST": "l.created_at ASC",
+        "NAME": "LOWER(l.name) ASC NULLS LAST",
+        # Action-first: open leads whose follow-up is due (oldest first), then
+        # the rest, newest first. Approximates the client leadScore ranking.
+        "PRIORITY": (
+            f"({open_sql}) DESC, "
+            f"(l.next_followup_at IS NOT NULL AND {fu} <= {today}) DESC, "
+            "l.next_followup_at ASC NULLS LAST, "
+            "l.created_at DESC"
+        ),
+    }.get(sort.upper(), "l.created_at DESC")
+
+    total = (
+        await db.execute(text(f"SELECT COUNT(*) FROM leads l WHERE {where}"), params)
+    ).scalar_one()
+
     result = await db.execute(
         text(f"""
             SELECT l.id, l.name, l.phone, l.email, l.source, l.status, l.notes,
@@ -258,13 +327,18 @@ async def list_leads(
             FROM leads l
             LEFT JOIN users u ON u.id = l.assigned_to
             WHERE {where}
-            ORDER BY l.next_followup_at ASC NULLS LAST, l.created_at DESC
-            LIMIT :limit
+            ORDER BY {order_by}
+            LIMIT :limit OFFSET :offset
         """),
-        {**params, "limit": limit},
+        {**params, "limit": limit, "offset": offset},
     )
     rows = result.mappings().fetchall()
-    return {"items": [dict(r) for r in rows], "total": len(rows)}
+    return {
+        "items": [dict(r) for r in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/leads/pipeline-stats", summary="Lead counts by status")
@@ -289,6 +363,68 @@ async def pipeline_stats(
     for s in ("NEW", "CONTACTED", "SITE_VISITED", "NEGOTIATING", "CONVERTED", "LOST"):
         stats.setdefault(s, 0)
     return stats
+
+
+@router.get("/leads/facets", summary="Worklist view counts + distinct filter values")
+async def lead_facets(
+    ctx: OrgContext = Depends(get_org_context),
+    db: AsyncSession = Depends(get_db),
+    property_id: UUID | None = Query(None),
+):
+    """Everything the worklist chrome needs that can't come from a single page:
+    accurate counts for each saved-view chip, and the distinct `wants` values
+    for the filter dropdown. One round-trip, so pagination stays cheap. The
+    view predicates mirror the ones in `list_leads` / web `matchesView()`."""
+    conditions = ["org_id = :org_id", "is_deleted = false"]
+    params: dict[str, Any] = {"org_id": str(ctx.org_id)}
+    if property_id:
+        conditions.append("property_id = :pid")
+        params["pid"] = str(property_id)
+    base = " AND ".join(conditions)
+
+    open_sql = "status IN ('NEW','CONTACTED','SITE_VISITED','NEGOTIATING','BOOKED')"
+    fu = "(next_followup_at AT TIME ZONE 'Asia/Kolkata')::date"
+    today = "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"
+    row = (
+        await db.execute(
+            text(f"""
+                SELECT
+                  COUNT(*) AS all,
+                  COUNT(*) FILTER (
+                    WHERE {open_sql} AND (next_followup_at IS NULL OR {fu} <= {today})
+                  ) AS to_action,
+                  COUNT(*) FILTER (WHERE {open_sql} AND {fu} < {today}) AS overdue,
+                  COUNT(*) FILTER (WHERE {fu} = {today}) AS due_today,
+                  COUNT(*) FILTER (WHERE {open_sql} AND next_followup_at IS NULL) AS no_followup,
+                  COUNT(*) FILTER (
+                    WHERE {open_sql}
+                      AND COALESCE(last_contacted_at, created_at) < NOW() - INTERVAL '30 days'
+                  ) AS idle_30d
+                FROM leads WHERE {base}
+            """),
+            params,
+        )
+    ).mappings().one()
+    wants = (
+        await db.execute(
+            text(
+                f"SELECT DISTINCT interested_room_type FROM leads "
+                f"WHERE {base} AND interested_room_type IS NOT NULL ORDER BY 1"
+            ),
+            params,
+        )
+    ).scalars().all()
+    return {
+        "view_counts": {
+            "ALL": row["all"],
+            "TO_ACTION": row["to_action"],
+            "OVERDUE": row["overdue"],
+            "DUE_TODAY": row["due_today"],
+            "NO_FOLLOWUP": row["no_followup"],
+            "IDLE_30D": row["idle_30d"],
+        },
+        "wants": list(wants),
+    }
 
 
 @router.get("/leads/due-today", summary="Leads with follow-up due today")

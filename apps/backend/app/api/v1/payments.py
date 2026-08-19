@@ -1,6 +1,7 @@
 """Rent and payment management endpoints."""
 from __future__ import annotations
 
+import calendar
 import json
 from datetime import date, datetime, timezone
 from typing import Any
@@ -185,13 +186,28 @@ async def _recompute_rent_ledger(
 
     ledger = (await db.execute(
         text("""
-            SELECT id, amount_due_paise
+            SELECT id, amount_due_paise, status
             FROM rent_ledger_entries
             WHERE tenant_id = :tid AND month = :month AND year = :year
         """),
         {"tid": str(tenant_id), "month": month, "year": year},
     )).mappings().fetchone()
     if not ledger:
+        return
+
+    # A manually WAIVED row is a deliberate owner override — never let an
+    # auto-recompute (triggered by a payment edit elsewhere) snap it back to
+    # UNPAID/PARTIAL. Un-waive is an explicit action. We still refresh the
+    # paid/discount tallies so the amounts stay accurate under the waiver.
+    if ledger["status"] == "WAIVED":
+        await db.execute(
+            text(
+                "UPDATE rent_ledger_entries "
+                "SET amount_paid_paise = :paid, discount_paise = :discount, "
+                "updated_at = NOW() WHERE id = :id"
+            ),
+            {"paid": paid, "discount": discount, "id": str(ledger["id"])},
+        )
         return
 
     covered = paid + discount
@@ -616,6 +632,7 @@ async def rent_ledger(
                    f.floor_number, f.display_name as floor_name,
                    rt.name as room_type,
                    collectors.collected_by,
+                   collectors.collected_by_amounts,
                    collectors.last_paid_at AS paid_on
             FROM rent_ledger_entries rle
             JOIN tenants t ON t.id = rle.tenant_id
@@ -624,23 +641,32 @@ async def rent_ledger(
             LEFT JOIN floors f ON f.id = r.floor_id
             LEFT JOIN room_types rt ON rt.id = r.room_type_id
             LEFT JOIN LATERAL (
-                -- Only attribute a "collector" when actual cash was collected.
-                -- Discount-only rows (amount = 0) shouldn't surface a name.
-                -- Also surface the most-recent payment date for the "Paid on"
-                -- column on the rent table.
+                -- Per-collector RENT breakdown for this tenant + month. Only
+                -- rows with actual cash (amount > 0) surface a collector, so
+                -- discount-only rows don't. `collected_by_amounts` (a
+                -- {collector: rent_paise} map) lets the UI show each collector's
+                -- SHARE when the "Collected by" filter is on, instead of the
+                -- tenant's full rent under every collector who part-paid it.
+                -- `last_paid_at` also drives the "Paid on" column.
                 SELECT
-                    array_agg(DISTINCT COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name))
-                      FILTER (WHERE COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name) IS NOT NULL)
-                        AS collected_by,
-                    MAX(p.collected_at) AS last_paid_at
-                FROM payments p
-                LEFT JOIN users u ON u.id = p.collected_by
-                WHERE p.tenant_id = rle.tenant_id
-                  AND p.is_deleted = false
-                  AND p.payment_type = 'RENT'
-                  AND p.for_month = rle.month
-                  AND p.for_year = rle.year
-                  AND p.amount_paise > 0
+                    array_agg(c.collector) AS collected_by,
+                    MAX(c.last_at) AS last_paid_at,
+                    jsonb_object_agg(c.collector, c.amt)::text AS collected_by_amounts
+                FROM (
+                    SELECT COALESCE(NULLIF(TRIM(p.paid_to), ''), u.name) AS collector,
+                           SUM(p.amount_paise) AS amt,
+                           MAX(p.collected_at) AS last_at
+                    FROM payments p
+                    LEFT JOIN users u ON u.id = p.collected_by
+                    WHERE p.tenant_id = rle.tenant_id
+                      AND p.is_deleted = false
+                      AND p.payment_type = 'RENT'
+                      AND p.for_month = rle.month
+                      AND p.for_year = rle.year
+                      AND p.amount_paise > 0
+                    GROUP BY 1
+                ) c
+                WHERE c.collector IS NOT NULL
             ) collectors ON true
             WHERE rle.property_id = :pid AND rle.month = :month AND rle.year = :year
               -- Tenant must have been active past the END of the view month.
@@ -663,14 +689,21 @@ async def rent_ledger(
     items = []
     for r in rows:
         d = dict(r)
-        covered = (d.get("amount_paid_paise") or 0) + (d.get("discount_paise") or 0)
-        due = d.get("amount_due_paise") or 0
-        if covered >= due and due > 0:
-            d["status"] = "PAID"
-        elif covered > 0:
-            d["status"] = "PARTIAL"
-        else:
-            d["status"] = "UNPAID"
+        # jsonb_object_agg came back as text ({collector: rent_paise}); parse it
+        # so the client gets a real object. NULL (no cash rows) → empty map.
+        cba = d.get("collected_by_amounts")
+        d["collected_by_amounts"] = json.loads(cba) if cba else {}
+        # A WAIVED row is a manual owner override — keep it as-is; only
+        # non-waived rows get their status recomputed from paid+discount.
+        if d.get("status") != "WAIVED":
+            covered = (d.get("amount_paid_paise") or 0) + (d.get("discount_paise") or 0)
+            due = d.get("amount_due_paise") or 0
+            if covered >= due and due > 0:
+                d["status"] = "PAID"
+            elif covered > 0:
+                d["status"] = "PARTIAL"
+            else:
+                d["status"] = "UNPAID"
         items.append(d)
 
     total_due = sum(r["amount_due_paise"] for r in items)
@@ -682,6 +715,9 @@ async def rent_ledger(
     # tenants (advance applied to the month, double payments, etc.) silently
     # cancel out under-payments by others — the KPI reads ₹0 while real
     # unpaid tenants are listed below. Reported as a bug on 2026-06-10.
+    # WAIVED rows are written off — their shortfall is neither collected nor
+    # owed, so they must NOT count toward Outstanding. They remain in Expected
+    # (total_due) so the owner can still see what was billed then forgiven.
     total_outstanding = sum(
         max(
             (r["amount_due_paise"] or 0)
@@ -690,6 +726,7 @@ async def rent_ledger(
             0,
         )
         for r in items
+        if r["status"] != "WAIVED"
     )
 
     # Per-collector breakdown using the fiscal period (collected_at in [start, end]).
@@ -791,6 +828,7 @@ async def rent_ledger(
                 p.id,
                 (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date AS paid_on,
                 p.collected_at,
+                p.created_at,
                 p.amount_paise,
                 p.payment_type,
                 p.payment_mode,
@@ -812,7 +850,7 @@ async def rent_ledger(
             WHERE p.property_id = :pid
               AND p.is_deleted = false
               AND (p.collected_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
-            ORDER BY p.collected_at DESC
+            ORDER BY p.created_at DESC
         """),
         {"pid": str(property_id), "start": period_start, "end": period_end},
     )
@@ -939,6 +977,90 @@ async def overdue_tenants(
     )
     rows = result.mappings().fetchall()
     return {"items": [dict(r) for r in rows], "total": len(rows)}
+
+
+class WaiveRequest(BaseModel):
+    waived: bool = True
+    reason: str | None = None
+
+
+@router.post("/rent/ledger/{entry_id}/waive", summary="Waive / un-waive a rent month")
+async def waive_ledger_entry(
+    entry_id: UUID,
+    body: WaiveRequest,
+    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner override: mark a tenant's rent month as WAIVED (written off) or
+    revert it. A waived row drops out of Overdue / Unpaid / Outstanding and
+    stops reminders, but stays in Expected so the forgiven amount is visible.
+    It is NOT counted as collected. Un-waive recomputes the real status from
+    what's actually been paid.
+    """
+    row = (await db.execute(
+        text("""
+            SELECT rle.id, rle.tenant_id, rle.month, rle.year, rle.status,
+                   rle.amount_due_paise, rle.amount_paid_paise, rle.discount_paise,
+                   t.name AS tenant_name, t.property_id
+            FROM rent_ledger_entries rle
+            JOIN tenants t ON t.id = rle.tenant_id
+            WHERE rle.id = :id
+        """),
+        {"id": str(entry_id)},
+    )).mappings().fetchone()
+    if not row:
+        raise NotFoundError("Rent ledger entry", entry_id)
+
+    if body.waived:
+        new_status = "WAIVED"
+    else:
+        # Un-waive: recompute the true status from paid + discount already on
+        # the row (waiving never touched those amounts).
+        covered = (row["amount_paid_paise"] or 0) + (row["discount_paise"] or 0)
+        due = row["amount_due_paise"] or 0
+        new_status = "PAID" if (covered >= due and due > 0) else (
+            "PARTIAL" if covered > 0 else "UNPAID"
+        )
+
+    await db.execute(
+        text(
+            "UPDATE rent_ledger_entries "
+            "SET status = CAST(:status AS rent_status_enum), updated_at = NOW() "
+            "WHERE id = :id"
+        ),
+        {"status": new_status, "id": str(entry_id)},
+    )
+    await db.commit()
+
+    month_label = f"{calendar.month_name[row['month']]} {row['year']}"
+    reason = (body.reason or "").strip() or None
+    if body.waived:
+        desc = f"{ctx.name} waived {month_label} rent for {row['tenant_name']}"
+        event = Event.RENT_WAIVED
+    else:
+        desc = f"{ctx.name} reverted the {month_label} rent waiver for {row['tenant_name']}"
+        event = Event.RENT_WAIVE_REVERTED
+    await log_event(
+        db,
+        event,
+        description=desc,
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
+        actor_name=ctx.name,
+        entity_type="rent_ledger_entry",
+        entity_id=entry_id,
+        entity_name=row["tenant_name"],
+        property_id=row["property_id"],
+        tenant_id=row["tenant_id"],
+        metadata={
+            "month": row["month"],
+            "year": row["year"],
+            "amount_due_paise": row["amount_due_paise"],
+            "reason": reason,
+        },
+    )
+    await db.commit()
+    return {"id": str(entry_id), "status": new_status}
 
 
 @router.post("/rent/generate-ledger", summary="Generate ledger entries for a month")

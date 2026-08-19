@@ -88,7 +88,9 @@ export default function MessageLogPage() {
     page,
     page_size: PAGE_SIZE,
     direction: 'outbound',
-    status: status === 'all' ? undefined : status,
+    // 'REPLIED' is a client-side view (derived from matched inbound), not a
+    // backend delivery status — fetch all statuses so we can find the replies.
+    status: status === 'all' || status === 'REPLIED' ? undefined : status,
     channel: channel === 'all' ? undefined : channel,
     search: search.trim() || undefined,
   };
@@ -152,6 +154,14 @@ export default function MessageLogPage() {
     ),
   );
 
+  // The "Replied" chip is a client-side view: keep only the sequences whose
+  // most-recent send drew an inbound reply (same tenant, within the session
+  // window). All other chips (SENT/FAILED/PENDING/all) fall through unchanged.
+  const visibleGroups =
+    status === 'REPLIED'
+      ? groupList.filter((g) => repliesFor(g[0]).length > 0)
+      : groupList;
+
   return (
     <TooltipProvider delayDuration={150}>
     <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
@@ -171,12 +181,18 @@ export default function MessageLogPage() {
             ['FAILED', 'Failed'],
             ['SENT', 'Sent'],
             ['PENDING', 'Pending'],
+            ['REPLIED', 'Replied'],
           ] as [string, string][]
         ).map(([key, label]) => (
           <FilterChip
             key={key}
             active={status === key}
             warn={key === 'FAILED'}
+            className={
+              key === 'REPLIED' && status !== key
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                : undefined
+            }
             onClick={() => {
               setStatus(key);
               setPage(1);
@@ -222,17 +238,21 @@ export default function MessageLogPage() {
         <p className="py-12 text-center text-sm text-muted-foreground">Loading…</p>
       ) : isError ? (
         <p className="py-12 text-center text-sm text-destructive">Couldn't load the message log.</p>
-      ) : groupList.length === 0 ? (
+      ) : visibleGroups.length === 0 ? (
         <div className="rounded-2xl border border-dashed py-16 text-center">
           <Send className="mx-auto h-8 w-8 text-muted-foreground/50" />
-          <p className="mt-3 text-sm font-medium">No messages yet</p>
+          <p className="mt-3 text-sm font-medium">
+            {status === 'REPLIED' ? 'No replies on this page' : 'No messages yet'}
+          </p>
           <p className="text-xs text-muted-foreground">
-            Sends appear here once the app or the rent scheduler dispatches them.
+            {status === 'REPLIED'
+              ? 'Only sends the tenant wrote back to appear here. Try an earlier page or a wider channel.'
+              : 'Sends appear here once the app or the rent scheduler dispatches them.'}
           </p>
         </div>
       ) : (
         <div className="space-y-2">
-          {groupList.map((group) => {
+          {visibleGroups.map((group) => {
             const latest = group[0];
             const who =
               latest.tenant_name ||

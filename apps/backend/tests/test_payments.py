@@ -539,3 +539,78 @@ async def test_overdue_excludes_paid_tenants(
     # We verify: if this tenant is in the overdue list, total includes other months
     # The key assertion is that month 8 payment was applied
     assert response.status_code == 200
+
+
+# ── Rent waive / write-off (owner override) ───────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_waive_removes_from_outstanding_and_is_reversible(
+    client: AsyncClient, test_owner: dict, test_tenant: dict
+):
+    """Waiving a rent month marks it WAIVED, drops it out of Outstanding while
+    leaving Expected intact, and un-waive restores the real status."""
+    prop = str(test_tenant["property_id"])
+    params = {"property_id": prop, "month": 7, "year": 2024}
+    await client.post(
+        "/api/v1/rent/generate-ledger",
+        headers=auth_headers(test_owner["token"]),
+        params=params,
+    )
+
+    async def ledger():
+        r = await client.get(
+            "/api/v1/rent/ledger", headers=auth_headers(test_owner["token"]), params=params
+        )
+        return r.json()
+
+    before = await ledger()
+    entry = next(
+        i for i in before["items"] if i["tenant_id"] == str(test_tenant["tenant_id"])
+    )
+    assert entry["status"] == "UNPAID"
+    due = entry["amount_due_paise"]
+    out_before = before["stats"]["outstanding_paise"]
+    exp_before = before["stats"]["expected_paise"]
+    assert due > 0 and out_before >= due
+
+    # Waive it.
+    w = await client.post(
+        f"/api/v1/rent/ledger/{entry['id']}/waive",
+        headers=auth_headers(test_owner["token"]),
+        json={"waived": True, "reason": "settled offline"},
+    )
+    assert w.status_code == 200, w.text
+    assert w.json()["status"] == "WAIVED"
+
+    after = await ledger()
+    e2 = next(i for i in after["items"] if i["id"] == entry["id"])
+    assert e2["status"] == "WAIVED"
+    assert after["stats"]["outstanding_paise"] == out_before - due  # dropped
+    assert after["stats"]["expected_paise"] == exp_before  # still billed
+
+    # Un-waive → back to UNPAID, Outstanding restored.
+    r = await client.post(
+        f"/api/v1/rent/ledger/{entry['id']}/waive",
+        headers=auth_headers(test_owner["token"]),
+        json={"waived": False},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "UNPAID"
+    final = await ledger()
+    e3 = next(i for i in final["items"] if i["id"] == entry["id"])
+    assert e3["status"] == "UNPAID"
+    assert final["stats"]["outstanding_paise"] == out_before
+
+
+@pytest.mark.asyncio
+async def test_waive_requires_owner(
+    client: AsyncClient, test_supervisor: dict, test_tenant: dict
+):
+    """Waiving is an owner/partner override — a supervisor cannot do it."""
+    import uuid as _uuid
+    r = await client.post(
+        f"/api/v1/rent/ledger/{_uuid.uuid4()}/waive",
+        headers=auth_headers(test_supervisor["token"]),
+        json={"waived": True},
+    )
+    assert r.status_code == 403

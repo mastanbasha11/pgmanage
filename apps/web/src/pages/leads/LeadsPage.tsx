@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Phone, Globe, MessageCircle, Wallet, Calendar } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext,
   type DragEndEvent,
@@ -381,7 +381,11 @@ function CreateLeadDialog({
 
   const mutate = useMutation({
     mutationFn: (data: Record<string, unknown>) => api.post('/leads', data).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['leads'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['leads-pipeline-stats'] });
+      qc.invalidateQueries({ queryKey: ['leads-facets'] });
+    },
   });
 
   async function onSubmit(data: LeadFormData) {
@@ -522,10 +526,6 @@ function CreateLeadDialog({
 }
 
 export default function LeadsPage() {
-  const { data, isLoading } = useQuery<{ items: Lead[] }>({
-    queryKey: ['leads'],
-    queryFn: () => api.get('/leads', { params: { limit: 500 } }).then((r) => r.data),
-  });
   const [showCreate, setShowCreate] = useState(false);
   const { selectedPropertyId, user } = useAuthStore();
   const newWebsiteCount = useNewWebsiteLeadCount();
@@ -535,37 +535,26 @@ export default function LeadsPage() {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState(searchParams.get('tab') === 'website' ? 'website' : 'pipeline');
 
-  const leads = data?.items ?? [];
-
   // ── Drag-to-move (Board view) ───────────────────────────────────────────
-  // Optimistic status update: patch the cache immediately so the card jumps
-  // to the new column with no wait, then fire the PATCH. On error, invalidate
-  // to snap the cache back to the server truth.
+  // The list is server-paginated (queryKey ['leads', params] varies per
+  // filter/page), so there's no single cache entry to patch optimistically.
+  // Fire the PATCH and invalidate every leads-derived query on settle.
   const qc = useQueryClient();
   const { toast } = useToast();
   const updateStatus = useMutation({
     mutationFn: ({ id, status }: { id: string; status: LeadStatus }) =>
       api.patch(`/leads/${id}`, { status }).then((r) => r.data),
-    onMutate: async ({ id, status }) => {
-      await qc.cancelQueries({ queryKey: ['leads'] });
-      const prev = qc.getQueryData<{ items: Lead[] }>(['leads']);
-      if (prev) {
-        qc.setQueryData<{ items: Lead[] }>(['leads'], {
-          ...prev,
-          items: prev.items.map((l) => (l.id === id ? { ...l, status } : l)),
-        });
-      }
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(['leads'], ctx.prev);
+    onError: () =>
       toast({
         title: "Couldn't move lead",
-        description: 'Restoring previous column.',
+        description: 'Please retry.',
         variant: 'destructive',
-      });
+      }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['leads-pipeline-stats'] });
+      qc.invalidateQueries({ queryKey: ['leads-facets'] });
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: ['leads'] }),
   });
 
   const sensors = useSensors(
@@ -573,7 +562,6 @@ export default function LeadsPage() {
     useSensor(KeyboardSensor),
   );
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
-  const activeDraggedLead = activeDragId ? leads.find((l) => l.id === activeDragId) : null;
 
   const onDragStart = (e: DragStartEvent) => setActiveDragId(String(e.active.id));
   const onDragEnd = (e: DragEndEvent) => {
@@ -594,18 +582,12 @@ export default function LeadsPage() {
   // `boardSlot` so the worklist owns the filters/views and the board just
   // renders. The rows ARE Lead objects at runtime — WorklistLead only widens
   // source/status to string — so the cast is safe.
-  const renderBoard = (filteredWorklist: WorklistLead[]) => {
-    const filtered = filteredWorklist as unknown as Lead[];
-    const byStatus = (s: LeadStatus) => filtered.filter((l) => l.status === s);
-    if (isLoading) {
-      return (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-40 animate-pulse rounded-lg bg-muted" />
-          ))}
-        </div>
-      );
-    }
+  const renderBoard = (boardWorklist: WorklistLead[]) => {
+    const boardRows = boardWorklist as unknown as Lead[];
+    const byStatus = (s: LeadStatus) => boardRows.filter((l) => l.status === s);
+    const activeDraggedLead = activeDragId
+      ? boardRows.find((l) => l.id === activeDragId)
+      : null;
     return (
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
@@ -653,7 +635,6 @@ export default function LeadsPage() {
 
         <TabsContent value="pipeline" className="mt-4">
           <LeadWorklist
-            leads={leads}
             onOpenLead={setOpenLeadId}
             onAddLead={() => setShowCreate(true)}
             canManage={canManage}
