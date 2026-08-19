@@ -404,6 +404,68 @@ async def tenant_me(ctx: TenantContext = Depends(get_current_tenant), db: AsyncS
     return out
 
 
+@router.delete("/me", summary="Tenant: delete own account (App Store 5.1.1(v))")
+async def tenant_delete_account(
+    ctx: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Permanently delete the resident's account: revoke the login identity and
+    strip all personal data (PII) from the org tenant record. The tenant row
+    itself is soft-deleted (is_deleted = true) and retained only in anonymised
+    form so the PG's historical rent/occupancy ledger stays consistent — no
+    personal data survives. Required by App Store Guideline 5.1.1(v): an app
+    that supports sign-in must let users delete their account in-app.
+    """
+    row = (
+        await db.execute(
+            text("SELECT phone FROM tenants WHERE id = :id"),
+            {"id": str(ctx.tenant_id)},
+        )
+    ).mappings().fetchone()
+    if not row:
+        raise NotFoundError("Tenant")
+    phone = row["phone"]
+
+    # 1. Anonymise the org tenant record (NOT NULL columns get placeholders;
+    #    phone stays unique via a per-row marker so the constraint holds).
+    await db.execute(
+        text(
+            """
+            UPDATE tenants SET
+                name = 'Deleted resident',
+                phone = LEFT('DEL-' || REPLACE(id::text, '-', ''), 20),
+                email = NULL,
+                id_number = 'DELETED',
+                occupation = NULL,
+                employer_name = NULL,
+                hometown = NULL,
+                permanent_address = NULL,
+                emergency_contact_name = 'DELETED',
+                emergency_contact_phone = 'DELETED',
+                emergency_contact_relation = 'DELETED',
+                vehicle_type = 'NONE',
+                vehicle_registration = NULL,
+                is_deleted = true,
+                updated_at = NOW()
+            WHERE id = :id
+            """
+        ),
+        {"id": str(ctx.tenant_id)},
+    )
+
+    # 2. Delete the login identity (cascades to tenant_identity_links),
+    #    permanently revoking the ability to sign in. This IS the account.
+    if phone:
+        await db.execute(
+            text("DELETE FROM public.tenant_identity WHERE phone = :p"),
+            {"p": phone},
+        )
+
+    await db.commit()
+    return {"status": "deleted"}
+
+
 class TenantKycUpdate(BaseModel):
     name: str | None = None
     emergency_contact_name: str | None = None

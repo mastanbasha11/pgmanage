@@ -2,7 +2,7 @@
  * Settings — language + theme.
  */
 import { ScrollView, Text, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Card, Pressable, Screen, SectionHeader, toast } from '../components/ui';
@@ -22,6 +22,7 @@ const THEMES: { code: ThemePreference; label: string; icon: 'phone-portrait' | '
 ];
 
 export default function SettingsScreen() {
+  const router = useRouter();
   const { colors, fontSize, fontWeight, lineHeight, radius, space } = useTheme();
   const preference = useThemeStore((s) => s.preference);
   const setPreference = useThemeStore((s) => s.setPreference);
@@ -140,6 +141,44 @@ export default function SettingsScreen() {
               ) : null}
             </View>
           ))}
+        </Card>
+
+        <SectionHeader title="Account" />
+        <Card style={{ padding: 0 }}>
+          <Pressable onPress={() => router.push('/delete-account')} accessibilityRole="button">
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                padding: space.lg,
+                gap: space.md,
+              }}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: colors.dangerBg,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="trash-outline" size={18} color={colors.dangerFg} />
+              </View>
+              <Text
+                style={{
+                  flex: 1,
+                  color: colors.dangerFg,
+                  fontSize: fontSize.body,
+                  fontWeight: fontWeight.semibold,
+                }}
+              >
+                Delete account
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+            </View>
+          </Pressable>
         </Card>
       </ScrollView>
     </Screen>
