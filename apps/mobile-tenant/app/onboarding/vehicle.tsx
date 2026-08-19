@@ -100,7 +100,7 @@ export default function OnboardingVehicleScreen() {
                   paddingVertical: space.lg,
                   paddingHorizontal: 4,
                   borderRadius: radius.md,
-                  borderWidth: selected ? 2 : 1,
+                  borderWidth: 1.5,
                   borderColor: selected ? colors.accent : colors.border,
                   backgroundColor: selected ? colors.surfaceMuted : colors.surface,
                 }}

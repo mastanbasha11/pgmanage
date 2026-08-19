@@ -286,15 +286,15 @@ function ContactRow({
     >
       <View
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          backgroundColor: colors.accentSoft,
+          width: 34,
+          height: 34,
+          borderRadius: radius.md,
+          backgroundColor: colors.surfaceMuted,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <Ionicons name={icon} size={18} color={colors.accent} />
+        <Ionicons name={icon} size={17} color={colors.accent} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ color: colors.text, fontSize: fontSize.body, fontWeight: fontWeight.semibold }}>

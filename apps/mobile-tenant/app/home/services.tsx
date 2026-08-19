@@ -31,7 +31,7 @@ const CATEGORIES: { value: TicketCategory; label: string; icon: keyof typeof Ion
   { value: 'wifi', label: 'Wi-Fi', icon: 'wifi' },
   { value: 'electrical', label: 'Electrical', icon: 'flash' },
   { value: 'plumbing', label: 'Plumbing', icon: 'water-outline' },
-  { value: 'other', label: 'Repair & Maintenance', icon: 'construct' },
+  { value: 'other', label: 'Repairs', icon: 'construct' },
   { value: 'other', label: 'Security', icon: 'shield-checkmark' },
   { value: 'other', label: 'Other', icon: 'ellipsis-horizontal' },
 ];
@@ -147,16 +147,16 @@ export default function ServicesScreen() {
                 })
               }
               style={{
-                flexBasis: '30%',
-                flexGrow: 1,
+                width: '31%',
                 backgroundColor: colors.surface,
                 borderColor: colors.border,
                 borderWidth: 1,
                 borderRadius: radius.lg,
-                padding: space.lg,
+                paddingVertical: space.lg,
+                paddingHorizontal: space.sm,
                 alignItems: 'center',
                 gap: space.sm,
-                minHeight: 100,
+                height: 104,
                 justifyContent: 'center',
               }}
               accessibilityRole="button"

@@ -688,12 +688,13 @@ function QuickAction({
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      {/* Square icon tile — width comes from flex:1 in the 4-across row,
-          aspectRatio keeps it square on any screen width. */}
+      {/* Icon tile — alignSelf:stretch fills the flex:1 column width; a fixed
+          height guarantees all four tiles are identical (aspectRatio+% width
+          was collapsing/rendering unevenly on device). */}
       <View
         style={{
-          width: '100%',
-          aspectRatio: 1,
+          alignSelf: 'stretch',
+          height: 60,
           borderRadius: radius.lg,
           backgroundColor: colors.surface,
           borderWidth: 1,

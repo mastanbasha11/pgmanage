@@ -42,15 +42,15 @@ export default function NoticesScreen() {
                 >
                   <View
                     style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
+                      width: 34,
+                      height: 34,
+                      borderRadius: 12,
                       backgroundColor: colors.warningBg,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
                   >
-                    <Ionicons name="megaphone" size={18} color={colors.warningFg} />
+                    <Ionicons name="megaphone" size={17} color={colors.warningFg} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>

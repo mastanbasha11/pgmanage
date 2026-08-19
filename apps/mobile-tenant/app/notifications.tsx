@@ -108,15 +108,15 @@ function NotificationCard({
       >
         <View
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
+            width: 34,
+            height: 34,
+            borderRadius: radius.md,
             backgroundColor: colors.surfaceMuted,
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
-          <Ionicons name={iconName} size={18} color={tint} />
+          <Ionicons name={iconName} size={17} color={tint} />
         </View>
         <View style={{ flex: 1 }}>
           <Text

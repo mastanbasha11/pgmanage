@@ -142,7 +142,7 @@ export default function CommunityScreen() {
         ) : (
           <View style={{ flexDirection: 'row', gap: space.md, flexWrap: 'wrap' }}>
             {(residentsQ.data ?? []).map((r) => (
-              <Card key={r.id} variant="flat" style={{ flexBasis: '47%', flexGrow: 1 }}>
+              <Card key={r.id} variant="flat" style={{ width: '47%' }}>
                 <View style={{ alignItems: 'center', gap: space.sm }}>
                   <Avatar name={r.name} size={56} />
                   <Text

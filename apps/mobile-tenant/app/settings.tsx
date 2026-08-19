@@ -58,10 +58,10 @@ export default function SettingsScreen() {
                 >
                   <View
                     style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
-                      backgroundColor: colors.accentSoft,
+                      width: 34,
+                      height: 34,
+                      borderRadius: radius.md,
+                      backgroundColor: colors.surfaceMuted,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
@@ -112,10 +112,10 @@ export default function SettingsScreen() {
                 >
                   <View
                     style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
-                      backgroundColor: colors.accentSoft,
+                      width: 34,
+                      height: 34,
+                      borderRadius: radius.md,
+                      backgroundColor: colors.surfaceMuted,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
@@ -156,15 +156,15 @@ export default function SettingsScreen() {
             >
               <View
                 style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
+                  width: 34,
+                  height: 34,
+                  borderRadius: radius.md,
                   backgroundColor: colors.dangerBg,
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="trash-outline" size={18} color={colors.dangerFg} />
+                <Ionicons name="trash-outline" size={17} color={colors.dangerFg} />
               </View>
               <Text
                 style={{

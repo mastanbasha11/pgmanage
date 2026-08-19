@@ -164,6 +164,7 @@ function ExternalTile({
         borderRadius: radius.lg,
         padding: space.lg,
         gap: space.sm,
+        minHeight: 120,
         alignItems: 'flex-start',
       }}
     >
