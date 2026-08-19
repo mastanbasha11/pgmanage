@@ -81,14 +81,24 @@ def create_tenant_token(
     property_id: UUID,
     org_id: UUID,
 ) -> str:
-    """Issue a short-lived JWT for tenant portal access."""
-    return create_access_token({
-        "sub": str(tenant_id),
-        "tenant_id": str(tenant_id),
-        "property_id": str(property_id),
-        "org_id": str(org_id),
-        "role": "TENANT",
-    })
+    """Issue a long-lived JWT for tenant portal access.
+
+    The resident app has no refresh-token flow — it treats this JWT as
+    long-lived and only re-authenticates when a call 401s (e.g. after a
+    server-side checkout). A 1-hour access token therefore logged residents
+    out overnight and left the app stuck on its loading state. 30 days keeps
+    them signed in the way a consumer app should.
+    """
+    return create_access_token(
+        {
+            "sub": str(tenant_id),
+            "tenant_id": str(tenant_id),
+            "property_id": str(property_id),
+            "org_id": str(org_id),
+            "role": "TENANT",
+        },
+        expires_delta=timedelta(days=30),
+    )
 
 
 def create_platform_admin_token(admin_id: UUID) -> str:

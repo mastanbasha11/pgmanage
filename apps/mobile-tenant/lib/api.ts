@@ -20,6 +20,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
 import { secureStorage } from './storage';
+import { useAppStore } from './store';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://pgmanage.in/api/v1';
 
@@ -36,6 +37,23 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   }
   return config;
 });
+
+// On a 401 for an AUTHENTICATED request the token has expired/been revoked.
+// Drop the session so the root layout bounces to the login screen — otherwise
+// every query keeps failing and the app hangs on its loading state ("white
+// screen") until a manual sign-out + re-login. (Login-flow 401s carry no token
+// and are left to propagate as normal validation errors.)
+api.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const hadAuth = Boolean(error.config?.headers?.Authorization);
+    if (error.response?.status === 401 && hadAuth) {
+      await secureStorage.clear();
+      useAppStore.getState().signOut();
+    }
+    return Promise.reject(error);
+  },
+);
 
 /** Extract a user-readable message out of a backend error envelope. */
 export function getApiError(err: unknown): string {
