@@ -54,6 +54,38 @@ async def test_tenant_portal_me_returns_profile(
     assert data["property_name"] == "Test PG House"
 
 
+# ── Account deletion (App Store 5.1.1(v)) ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_tenant_delete_account_requires_auth(client: AsyncClient):
+    """DELETE /tenant/me needs a token."""
+    response = await client.delete("/api/v1/tenant/me")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_tenant_delete_account_anonymises(
+    client: AsyncClient, test_tenant: dict, tenant_portal_token: str
+):
+    """DELETE /tenant/me strips PII and soft-deletes the tenant record."""
+    resp = await client.delete(
+        "/api/v1/tenant/me", headers=auth_headers(tenant_portal_token)
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "deleted"
+
+    # Profile is now anonymised — no personal data survives.
+    me = await client.get(
+        "/api/v1/tenant/me", headers=auth_headers(tenant_portal_token)
+    )
+    assert me.status_code == 200
+    data = me.json()
+    assert data["name"] == "Deleted resident"
+    assert data["phone"].startswith("DEL-")
+    assert data["email"] is None
+    assert data["vehicle_registration"] is None
+
+
 # ── Tenant ledger via portal ───────────────────────────────────────────────────
 
 @pytest.mark.asyncio
