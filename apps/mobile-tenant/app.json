@@ -22,7 +22,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "in.pgmanage.resident",
-      "buildNumber": "10",
+      "buildNumber": "11",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -33,7 +33,7 @@
         "backgroundColor": "#F6F8F4"
       },
       "package": "in.pgmanage.resident",
-      "versionCode": 13,
+      "versionCode": 16,
       "permissions": [
         "android.permission.INTERNET"
       ]
@@ -53,7 +53,8 @@
         }
       ],
       "expo-splash-screen",
-      "expo-status-bar"
+      "expo-status-bar",
+      "./plugins/withGradleMemory"
     ],
     "experiments": {
       "typedRoutes": false
