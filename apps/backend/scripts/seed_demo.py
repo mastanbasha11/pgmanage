@@ -14,6 +14,9 @@ Login afterwards:
     Staff app  (app.pgmanage.in) — email  demo@pgmanage.in   password DemoView@2026
     Resident   (my.pgmanage.in)  — phone  +919000000001  (OTP shows on screen)
                                     phone  +919000000002  (all paid — the calm state)
+                                    phone  +919000000009  (DISPOSABLE — for the App
+                                        Store reviewer's account-deletion demo, so
+                                        deleting it never affects testers on 001)
 """
 from __future__ import annotations
 
@@ -242,9 +245,22 @@ async def main() -> None:
             bed = beds[i]  # fill first N beds
             bed["status"] = "OCCUPIED"
             tid = u()
-            # First two residents are the portal-demo logins — clean numbers that
-            # match the reset-cleanup pattern (+91900000000%). Rest are generated.
-            phone = f"+91900000000{i + 1}" if i < 2 else f"+9199000{10000 + i:05d}"
+            # Portal-demo logins — clean numbers that match the reset-cleanup
+            # pattern (+91900000000%):
+            #   001 = overdue (rich Pay screen)   002 = all paid (calm state)
+            #   009 = DISPOSABLE deletion-demo account. The App Store reviewer
+            #         signs in with this one to demonstrate in-app account
+            #         deletion (5.1.1(v)); deleting it never touches 001/002 that
+            #         real testers use. Re-run this seed to bring 009 back.
+            # The rest are generated numbers nobody logs in with.
+            if i == 0:
+                phone = "+919000000001"
+            elif i == 1:
+                phone = "+919000000002"
+            elif i == len(NAMES) - 1:
+                phone = "+919000000009"
+            else:
+                phone = f"+9199000{10000 + i:05d}"
             months_stayed = [11, 9, 8, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1][i]
             move_in = TODAY - timedelta(days=months_stayed * 30 + 4)
             on_notice = i in (4, 11)  # two residents on notice
@@ -281,6 +297,11 @@ async def main() -> None:
         # A couple of beds RESERVED (advance bookings arriving) for the vacancy view.
         for bed in beds[len(NAMES):len(NAMES) + 2]:
             await ins("UPDATE beds SET status='RESERVED' WHERE id=:id", {"id": bed["id"]})
+
+        # The disposable delete-me resident (+919000000009) is the LAST tenant in
+        # the NAMES loop above (see the phone-assignment block); its portal login
+        # is wired in section 13.
+        dz_tenant = tenants[len(NAMES) - 1]
 
         # ── 7. rent ledger + payments (3 months) ───────────────────────────────
         # Current month mostly paid (healthy collection); two prior months all paid.
@@ -442,8 +463,9 @@ async def main() -> None:
                  "col": TODAY - timedelta(days=2), "by": mkt_id},
             )
 
-        # ── 13. resident-portal logins for two demo tenants ────────────────────
-        for t in (tenants[0], tenants[1]):
+        # ── 13. resident-portal logins for the demo tenants ────────────────────
+        # …001 overdue, …002 paid-up, …009 the disposable delete-me account.
+        for t in (tenants[0], tenants[1], dz_tenant):
             iid = u()
             await ins(
                 "INSERT INTO public.tenant_identity (id, phone, email) VALUES (:id,:ph,:em)",
@@ -461,6 +483,7 @@ async def main() -> None:
     print("✅ Demo org seeded.")
     print(f"   Staff app  → {OWNER_EMAIL} / {OWNER_PASSWORD}")
     print(f"   Resident   → {tenants[0]['phone']} (overdue)  ·  {tenants[1]['phone']} (paid up)")
+    print(f"   Delete-me  → {dz_tenant['phone']} (throwaway for App Store deletion review)")
     print("   Resident OTP shows on-screen (inline mode).")
 
 

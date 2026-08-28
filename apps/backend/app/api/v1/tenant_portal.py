@@ -968,11 +968,71 @@ async def tenant_notifications(
     return {"items": []}
 
 
-@router.get("/me/meals/week", summary="Tenant: week's meal schedule (stub)")
+@router.get("/me/meals/week", summary="Tenant: week's meal schedule")
 async def tenant_meals_week(
     ctx: TenantContext = Depends(get_current_tenant),  # noqa: ARG001
 ):
-    return {"items": []}
+    """Serve the kitchen's weekly menu for the next 7 days.
+
+    There is no per-org menu table yet; until owners can upload a structured
+    menu, every resident sees this house menu so the Food tab is populated
+    (real dish illustrations are matched client-side from the item names). The
+    week runs Mon..Sun, transcribed from the printed kitchen sheet.
+    """
+    from datetime import date, timedelta
+
+    # weekday() -> 0=Mon .. 6=Sun. Each day: [breakfast, lunch, dinner].
+    menu_by_weekday = {
+        0: ["Idli, chutney, sambar",
+            "Rice, dondakaya curry, dal, buttermilk",
+            "Rice, roti, dal, aloo fry, buttermilk"],
+        1: ["Dosa, chutney",
+            "Rice, bendi curry, rasam, buttermilk",
+            "Rice, sambar, boiled egg, tomato curry"],
+        2: ["Bonda, chutney",
+            "Pudina rice, raitha, gongura pickle",
+            "Rice, chicken curry, mushroom curry, buttermilk"],
+        3: ["Puri, puri curry",
+            "Rice, dal, chips, cucumber chutney, buttermilk",
+            "Rice, roti, chana masala, sambar, buttermilk"],
+        4: ["Uggani or lemon rice",
+            "Rice, brinjal curry, dal, buttermilk",
+            "Egg rice, veg rice, coconut powder"],
+        5: ["Uttapam, chutney",
+            "Vegetable rice, aloo kurma, raitha",
+            "Rice, roti, mix veg curry, sambar, chips, buttermilk"],
+        6: ["Pongal or kichidi, chutney",
+            "Chicken biryani, paneer biryani, raitha, salan",
+            "Tomato rice, curd rice"],
+    }
+    slots = [("breakfast", "07:30", "09:30"), ("lunch", "12:30", "14:30"),
+             ("dinner", "20:00", "22:00")]
+    non_veg = ("egg", "chicken", "mutton", "fish", "prawn", "meat")
+
+    def is_veg(name: str) -> bool:
+        low = name.lower()
+        return not any(w in low for w in non_veg)
+
+    today = date.today()  # noqa: DTZ011 — app resolves "today" in IST client-side
+    items: list[dict] = []
+    for d in range(7):
+        day = today + timedelta(days=d)
+        day_menu = menu_by_weekday[day.weekday()]
+        iso = day.isoformat()
+        for (slot, start, end), meal_text in zip(slots, day_menu, strict=False):
+            items.append({
+                "date": iso,
+                "slot": slot,
+                "startsAt": f"{iso}T{start}:00+05:30",
+                "endsAt": f"{iso}T{end}:00+05:30",
+                "items": [
+                    {"name": part.strip(), "isVeg": is_veg(part)}
+                    for part in meal_text.split(",")
+                ],
+                "optedIn": True,
+                "cutoffAt": f"{iso}T06:00:00+05:30",
+            })
+    return {"items": items}
 
 
 @router.get("/me/events", summary="Tenant: community events (stub)")
