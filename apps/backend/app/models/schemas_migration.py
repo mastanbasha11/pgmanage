@@ -438,6 +438,7 @@ async def provision_org_schema(org_id: UUID, db: AsyncSession) -> str:
             external_message_id VARCHAR(200), error_message TEXT,
             recipient_phone VARCHAR(20), rendered_message TEXT,
             delivery_status VARCHAR(20), delivered_at TIMESTAMPTZ,
+            media_s3_key TEXT, media_mime VARCHAR(100),
             sent_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         f"""CREATE TABLE IF NOT EXISTS "{schema}".audit_log (

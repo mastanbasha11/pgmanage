@@ -195,7 +195,47 @@ def _classify_intent(text_body: str) -> str:
     return "general"
 
 
-async def _handle_inbound_message(db, route, from_phone: str, text_body: str) -> None:
+async def _fetch_and_store_wa_media(db, route, media_id: str, mime: str | None) -> str | None:
+    """Fetch an inbound WhatsApp media object (2-step Graph API: id → url → bytes)
+    and store it in S3. Returns the S3 key, or None on any failure — a media
+    hiccup must never drop the accompanying text record."""
+    try:
+        import httpx
+
+        from app.services.notification_service import _get_property_whatsapp_credentials
+        from app.services.s3_service import get_s3_key, put_object_bytes
+
+        creds = await _get_property_whatsapp_credentials(route["property_id"], db)
+        token = (creds or {}).get("access_token")
+        if not token or token == "DEV_WHATSAPP_TOKEN":
+            return None
+        headers = {"Authorization": f"Bearer {token}"}
+        async with httpx.AsyncClient(timeout=20) as client:
+            meta = await client.get(
+                f"https://graph.facebook.com/v18.0/{media_id}", headers=headers
+            )
+            meta.raise_for_status()
+            media_url = meta.json().get("url")
+            if not media_url:
+                return None
+            blob = await client.get(media_url, headers=headers)
+            blob.raise_for_status()
+            data = blob.content
+        ext = {
+            "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+            "application/pdf": "pdf",
+        }.get((mime or "").lower(), "bin")
+        key = get_s3_key(route["org_id"], route["property_id"], "wa_inbound", f"m.{ext}")
+        await put_object_bytes(key, data, mime or "application/octet-stream")
+        return key
+    except Exception as exc:  # noqa: BLE001
+        print(f"[wa-media] fetch/store failed: {exc}")
+        return None
+
+
+async def _handle_inbound_message(
+    db, route, from_phone: str, text_body: str, media: dict | None = None
+) -> None:
     """Match the sender to a tenant of this property, classify, and act."""
     digits = "".join(c for c in (from_phone or "") if c.isdigit())[-10:]
     tenant = None
@@ -233,17 +273,23 @@ async def _handle_inbound_message(db, route, from_phone: str, text_body: str) ->
 
     # Record the inbound message in notification_log (only when attributable to a tenant).
     if tenant:
+        media_key: str | None = None
+        media_mime: str | None = None
+        if media and media.get("id"):
+            media_mime = media.get("mime")
+            media_key = await _fetch_and_store_wa_media(db, route, media["id"], media_mime)
         await db.execute(
             text(
                 """
                 INSERT INTO notification_log (
                     org_id, property_id, recipient_type, recipient_id,
-                    channel, template_name, message_body, status, sent_at
+                    channel, template_name, message_body, status,
+                    media_s3_key, media_mime, sent_at
                 )
                 VALUES (
                     :org, :pid, 'TENANT'::notif_recipient_type_enum, :tid,
                     'WHATSAPP'::notif_channel_enum, :tpl, :body,
-                    'SENT'::notif_status_enum, NOW()
+                    'SENT'::notif_status_enum, :mkey, :mmime, NOW()
                 )
                 """
             ),
@@ -253,6 +299,8 @@ async def _handle_inbound_message(db, route, from_phone: str, text_body: str) ->
                 "tid": str(tenant["id"]),
                 "tpl": f"inbound:{intent}",
                 "body": (text_body or "")[:2000],
+                "mkey": media_key,
+                "mmime": media_mime if media_key else None,
             },
         )
 
@@ -354,8 +402,15 @@ async def whatsapp_inbound(
                     print(f"[wa-status] skipped: {exc}")
                 processed += 1
             for msg in messages:
-                body = (msg.get("text") or {}).get("body", "")
-                await _handle_inbound_message(db, route, msg.get("from", ""), body)
+                mtype = msg.get("type")
+                media = None
+                if mtype in ("image", "document", "video", "audio", "sticker"):
+                    obj = msg.get(mtype) or {}
+                    body = obj.get("caption") or f"[{mtype}]"
+                    media = {"id": obj.get("id"), "mime": obj.get("mime_type"), "type": mtype}
+                else:
+                    body = (msg.get("text") or {}).get("body", "")
+                await _handle_inbound_message(db, route, msg.get("from", ""), body, media)
                 processed += 1
 
     await db.commit()

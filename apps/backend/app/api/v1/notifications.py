@@ -21,13 +21,17 @@ from app.core.dependencies import OrgContext, require_roles
 
 router = APIRouter()
 
-_ADMIN = require_roles(["OWNER", "PARTNER"])
+# The outbound message log (rent reminders + tenant replies) is read-only and
+# is needed by the staff who actually chase rent — not just owners. Managers and
+# supervisors can view it; only MARKETING is excluded.
+_ADMIN = require_roles(["OWNER", "PARTNER", "PROPERTY_MANAGER", "SUPERVISOR"])
 
 _COLUMNS = """
     nl.id, nl.created_at, nl.sent_at, nl.channel, nl.template_name,
     nl.message_body, nl.rendered_message, nl.status, nl.external_message_id,
     nl.error_message, nl.recipient_type, nl.recipient_id, nl.recipient_phone,
     nl.delivery_status, nl.delivered_at, nl.property_id,
+    nl.media_s3_key, nl.media_mime,
     t.name AS tenant_name, t.phone AS tenant_phone,
     p.name AS property_name, r.room_number AS room_number
 """
@@ -40,8 +44,29 @@ _FROM = (
 )
 
 
+def _media_url(row: Any) -> str | None:
+    """Presign the stored attachment (inbound WhatsApp media) for viewing.
+    Presigning is a local signing op, so it's fine to do per-row and sync."""
+    key = getattr(row, "media_s3_key", None)
+    if not key:
+        return None
+    try:
+        from app.core.config import settings
+        from app.services.s3_service import get_s3_client
+
+        return get_s3_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.S3_BUCKET_NAME, "Key": key},
+            ExpiresIn=settings.S3_PRESIGNED_URL_EXPIRE_VIEW,
+        )
+    except Exception:
+        return None
+
+
 def _serialize(row: Any) -> dict:
     return {
+        "media_url": _media_url(row),
+        "media_mime": getattr(row, "media_mime", None),
         "id": str(row.id),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,

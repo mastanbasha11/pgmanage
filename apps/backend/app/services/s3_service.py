@@ -85,6 +85,18 @@ async def generate_presigned_view_url(
     return url
 
 
+async def put_object_bytes(s3_key: str, data: bytes, content_type: str) -> None:
+    """Server-side upload of raw bytes (e.g. an inbound WhatsApp attachment we
+    fetched from the Graph API). Client uploads use the presigned PUT flow."""
+    client = get_s3_client()
+    client.put_object(
+        Bucket=settings.S3_BUCKET_NAME,
+        Key=s3_key,
+        Body=data,
+        ContentType=content_type or "application/octet-stream",
+    )
+
+
 async def delete_object(s3_key: str) -> bool:
     try:
         client = get_s3_client()
