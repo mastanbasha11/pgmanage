@@ -22,6 +22,9 @@ export interface NotificationEntry {
   tenant_name: string | null;
   tenant_phone: string | null;
   room_number: string | null;
+  /** Presigned URL for an inbound attachment (e.g. a payment screenshot). */
+  media_url: string | null;
+  media_mime: string | null;
 }
 
 export interface NotificationFilters {

@@ -72,7 +72,7 @@ const NAV_ITEMS: (NavItem | { section: string })[] = [
 
   { section: 'Activity' },
   { to: '/inbox', icon: Inbox, label: 'Inbox', hideForRoles: ['MARKETING'] },
-  { to: '/settings/messages', icon: Send, label: 'Message Log', ownerOnly: true },
+  { to: '/settings/messages', icon: Send, label: 'Message Log', hideForRoles: ['MARKETING'] },
   { to: '/settings/jobs', icon: Activity, label: 'Job Monitor', ownerOnly: true },
 
   { section: 'Settings' },

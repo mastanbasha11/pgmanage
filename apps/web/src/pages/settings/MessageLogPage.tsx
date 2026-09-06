@@ -481,6 +481,26 @@ function RepliesForOutbound({ selected }: { selected: NotificationEntry }) {
             <p className="mt-1 whitespace-pre-line text-sm text-foreground">
               {r.rendered_message || r.message_body}
             </p>
+            {r.media_url ? (
+              r.media_mime?.startsWith('image/') ? (
+                <a href={r.media_url} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={r.media_url}
+                    alt="Attachment"
+                    className="mt-2 max-h-64 rounded-md border border-emerald-200 object-contain"
+                  />
+                </a>
+              ) : (
+                <a
+                  href={r.media_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-block text-sm font-medium text-emerald-700 underline"
+                >
+                  View attachment
+                </a>
+              )
+            ) : null}
           </div>
         ))}
       </div>
