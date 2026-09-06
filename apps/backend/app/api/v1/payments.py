@@ -988,7 +988,11 @@ class WaiveRequest(BaseModel):
 async def waive_ledger_entry(
     entry_id: UUID,
     body: WaiveRequest,
-    ctx: OrgContext = Depends(require_roles(["OWNER", "PARTNER"])),
+    # Property managers and supervisors run day-to-day rent collection, so they
+    # can waive a month too (the Waive button is shown to them in web + mobile).
+    ctx: OrgContext = Depends(
+        require_roles(["OWNER", "PARTNER", "PROPERTY_MANAGER", "SUPERVISOR"])
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Owner override: mark a tenant's rent month as WAIVED (written off) or
