@@ -1,0 +1,12 @@
+# Code owners — every PR requires @mastanbasha11's review before it can merge.
+# Enforced by branch protection on `main` ("Require review from Code Owners").
+# See docs/ACCESS.md for the full contributor-access policy.
+
+# Default: the owner reviews everything.
+*                          @mastanbasha11
+
+# Extra emphasis on anything that can touch prod, infra, or CI.
+/.github/                  @mastanbasha11
+/infrastructure/           @mastanbasha11
+/docker-compose.prod.yml   @mastanbasha11
+/apps/backend/alembic/     @mastanbasha11
